@@ -447,4 +447,4 @@ Unsupported values raise `NotImplementedError`.
 - [CHANGELOG.md](CHANGELOG.md) — version history.
 - [LOCAL_TESTING.md](LOCAL_TESTING.md) — running the test suite locally.
 - [CONTRIBUTING.md](CONTRIBUTING.md) — adding hand-written parsers.
-- [num2words2](https://github.com/jqueguiner/num2words2) — the forward direction.
+- [num2words2](https://github.com/gladiaio/num2words2) — the forward direction.
