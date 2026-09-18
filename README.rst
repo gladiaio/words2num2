@@ -21,43 +21,43 @@ words2num2 — words to numbers
    :target: https://aur.archlinux.org/packages/python-words2num2
    :alt: AUR version
 
-.. image:: https://github.com/jqueguiner/words2num2/workflows/CI/badge.svg
-   :target: https://github.com/jqueguiner/words2num2/actions/workflows/ci.yml
+.. image:: https://github.com/gladiaio/words2num2/workflows/CI/badge.svg
+   :target: https://github.com/gladiaio/words2num2/actions/workflows/ci.yml
    :alt: CI
 
-.. image:: https://github.com/jqueguiner/words2num2/workflows/Lint/badge.svg
-   :target: https://github.com/jqueguiner/words2num2/actions/workflows/lint.yml
+.. image:: https://github.com/gladiaio/words2num2/workflows/Lint/badge.svg
+   :target: https://github.com/gladiaio/words2num2/actions/workflows/lint.yml
    :alt: Lint
 
-.. image:: https://github.com/jqueguiner/words2num2/workflows/CodeQL/badge.svg
-   :target: https://github.com/jqueguiner/words2num2/actions/workflows/codeql-analysis.yml
+.. image:: https://github.com/gladiaio/words2num2/workflows/CodeQL/badge.svg
+   :target: https://github.com/gladiaio/words2num2/actions/workflows/codeql-analysis.yml
    :alt: CodeQL
 
-.. image:: https://github.com/jqueguiner/words2num2/workflows/E2E%20Tests/badge.svg
-   :target: https://github.com/jqueguiner/words2num2/actions/workflows/e2e-tests.yml
+.. image:: https://github.com/gladiaio/words2num2/workflows/E2E%20Tests/badge.svg
+   :target: https://github.com/gladiaio/words2num2/actions/workflows/e2e-tests.yml
    :alt: E2E Tests
 
-.. image:: https://coveralls.io/repos/github/jqueguiner/words2num2/badge.svg?branch=main
-   :target: https://coveralls.io/github/jqueguiner/words2num2?branch=main
+.. image:: https://coveralls.io/repos/github/gladiaio/words2num2/badge.svg?branch=main
+   :target: https://coveralls.io/github/gladiaio/words2num2?branch=main
    :alt: Coverage
 
-.. image:: https://img.shields.io/github/v/release/jqueguiner/words2num2.svg
-   :target: https://github.com/jqueguiner/words2num2/releases
+.. image:: https://img.shields.io/github/v/release/gladiaio/words2num2.svg
+   :target: https://github.com/gladiaio/words2num2/releases
    :alt: Latest release
 
-.. image:: https://img.shields.io/github/last-commit/jqueguiner/words2num2.svg
-   :target: https://github.com/jqueguiner/words2num2/commits/main
+.. image:: https://img.shields.io/github/last-commit/gladiaio/words2num2.svg
+   :target: https://github.com/gladiaio/words2num2/commits/main
    :alt: Last commit
 
-.. image:: https://img.shields.io/github/issues/jqueguiner/words2num2.svg
-   :target: https://github.com/jqueguiner/words2num2/issues
+.. image:: https://img.shields.io/github/issues/gladiaio/words2num2.svg
+   :target: https://github.com/gladiaio/words2num2/issues
    :alt: Issues
 
 .. image:: https://img.shields.io/badge/license-LGPL--2.1-blue.svg
-   :target: https://github.com/jqueguiner/words2num2/blob/main/COPYING
+   :target: https://github.com/gladiaio/words2num2/blob/main/COPYING
    :alt: License
 
-The inverse of `num2words2 <https://github.com/jqueguiner/num2words2>`_.
+The inverse of `num2words2 <https://github.com/gladiaio/num2words2>`_.
 
 ``words2num2`` parses spoken-form numbers — ``"forty-two"``,
 ``"trois cent quatre"``, ``"二十三"`` — and returns numeric values.
@@ -78,9 +78,9 @@ frozen corpus of ~11,000 round-trip cases.
 The project is hosted on GitHub_, and the full documentation is available
 in the Wiki_. Contributions are welcome.
 
-.. _GitHub: https://github.com/jqueguiner/words2num2
-.. _Wiki: https://github.com/jqueguiner/words2num2/wiki
-.. _GitHub Releases: https://github.com/jqueguiner/words2num2/releases
+.. _GitHub: https://github.com/gladiaio/words2num2
+.. _Wiki: https://github.com/gladiaio/words2num2/wiki
+.. _GitHub Releases: https://github.com/gladiaio/words2num2/releases
 
 Why this library
 ----------------
@@ -178,7 +178,7 @@ needs a **stable Rust toolchain** (`rustup <https://rustup.rs>`_); nothing else.
 **From source** (needs a stable Rust toolchain and `maturin
 <https://www.maturin.rs>`_)::
 
-    git clone https://github.com/jqueguiner/words2num2
+    git clone https://github.com/gladiaio/words2num2
     cd words2num2
     pip install -e .          # builds the Rust extension via maturin
     # or, to produce a wheel:  maturin build --release
@@ -385,7 +385,7 @@ Development
 
 .. code-block:: bash
 
-    git clone https://github.com/jqueguiner/words2num2
+    git clone https://github.com/gladiaio/words2num2
     cd words2num2
     make install-dev
     make test          # pytest

@@ -1,6 +1,6 @@
 # Contributing to words2num2
 
-`words2num2` is the inverse of [num2words2](https://github.com/jqueguiner/num2words2).
+`words2num2` is the inverse of [num2words2](https://github.com/gladiaio/num2words2).
 Contributions are very welcome — particularly hand-written grammar
 parsers for individual locales, since the default generic backend only
 covers a fixed integer range.

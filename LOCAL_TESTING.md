@@ -11,7 +11,7 @@ suite locally before pushing changes.
 ## Setup
 
 ```bash
-git clone https://github.com/jqueguiner/words2num2
+git clone https://github.com/gladiaio/words2num2
 cd words2num2
 
 python3 -m venv .venv
@@ -169,5 +169,5 @@ Check that:
   https://pypi.org/manage/project/words2num2/settings/publishing/ with
   workflow `release.yml` and environment `pypi`.
 - The GitHub `pypi` environment exists at
-  https://github.com/jqueguiner/words2num2/settings/environments.
+  https://github.com/gladiaio/words2num2/settings/environments.
 - The tag matches `v*` exactly (e.g. `v0.2.1`, not `0.2.1`).
