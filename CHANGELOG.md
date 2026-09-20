@@ -4,6 +4,32 @@ All notable changes to `words2num2` are documented here. This project
 follows [Semantic Versioning](https://semver.org/) and uses
 [Keep a Changelog](https://keepachangelog.com/) style.
 
+## [Unreleased]
+
+### Fixed
+
+- **Every advertised language is now actually accepted.** `supported_langs()`
+  reported 172 codes while the resolver knew 120, because the two were
+  separate hand-maintained lists. **28 languages raised
+  `NotImplementedError`** despite being advertised and despite their reverse
+  tables working (`bm ckb cz dk dv ff hmn jv ki ksw ku ky lg lij lus nb om or
+  rm rm_puter rm_surmiran rm_sursilv rm_sutsilv rm_vallader rw ti xh zu`).
+  The accepted set is derived from the renderer now, so the two cannot drift
+  again. Round-trip coverage goes from 124 to 171 of 172 languages.
+- **Eight codes were silently answered by a different language.**
+  `resolve_lang` falls back to the first two characters of the code, so an
+  unknown key matched something else instead of failing: `ban` (Balinese) was
+  served by `ba` (Bashkir), `ceb` (Cebuano) by `ce` (Chechen), `cnh` (Hakha
+  Chin) by `cn` (Chinese), `fil` (Filipino) by `fi` (Finnish), `kok`
+  (Konkani) by `ko` (Korean), `miz` (Mizo) by `mi` (Māori), `pap`
+  (Papiamento) by `pa` (Punjabi), `pli` (Pali) by `pl` (Polish). It failed
+  loudly only because those table pairs happened to share no words.
+  `sr_Latn` and `uz_Cyrl` were likewise collapsed onto their base language's
+  script.
+- `converter_for` silently fell back to **English** for any resolved language
+  missing from the frozen list — unreachable before only because
+  `resolve_lang` rejected those languages first.
+
 ## [0.2.3] — 2026-05-02
 
 ### Fixed
