@@ -111,3 +111,58 @@ def test_sentence_preserves_punctuation():
         )
         == "In 1999, 2000 people came."
     )
+
+
+# ---------------------------------------------------------------------------
+# A tens word composes with a FOLLOWING unit ("sixty three" = 63), never with
+# a preceding one. "three sixty" is two numbers read in sequence, not 3 + 60.
+# See gladiaio/words2num2#17.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    "sentence,expected",
+    [
+        ("three sixty", "3 60"),
+        ("three sixty five", "3 65"),
+        ("nineteen eighty four", "19 84"),
+        ("twenty twenty", "20 20"),
+        ("five forty", "5 40"),
+    ],
+)
+def test_unit_then_tens_reads_as_separate_numbers(sentence, expected):
+    assert words2num_sentence(sentence) == expected
+
+
+@pytest.mark.parametrize(
+    "text", ["three sixty", "three sixty five", "nineteen eighty four", "twenty twenty"]
+)
+def test_unit_then_tens_is_not_one_cardinal(text):
+    # Asked for a single number, given two.
+    with pytest.raises(Words2NumError):
+        words2num(text)
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        # tens + unit is the valid order and is untouched.
+        ("sixty three", 63),
+        ("ninety nine", 99),
+        # "hundred" and the scale words close the sub-hundred slot, so a tens
+        # word may legitimately follow them.
+        ("one hundred sixty", 160),
+        ("three hundred sixty", 360),
+        ("two thousand sixty", 2060),
+        ("one hundred and five thousand", 105000),
+    ],
+)
+def test_valid_compositions_unchanged(text, expected):
+    assert words2num(text) == expected
+
+
+@pytest.mark.parametrize(
+    "text,expected", [("nineteen eighty four", 1984), ("twenty twenty", 2020)]
+)
+def test_year_path_still_reads_pairs(text, expected):
+    # The pair reading lives in to="year" and is deliberately left there.
+    assert words2num(text, to="year") == expected

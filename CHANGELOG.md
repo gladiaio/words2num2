@@ -4,6 +4,23 @@ All notable changes to `words2num2` are documented here. This project
 follows [Semantic Versioning](https://semver.org/) and uses
 [Keep a Changelog](https://keepachangelog.com/) style.
 
+## [Unreleased]
+
+### Fixed
+
+- **A tens word no longer composes with a preceding unit.** English reads a
+  tens word with a *following* unit ("sixty three" = 63), never the reverse,
+  so `"three sixty"` is two numbers in sequence rather than 3 + 60.
+  `words2num_sentence` now returns `"3 60"` where it returned `"63"`, and
+  likewise `"three sixty five"` -> `"3 65"`, `"nineteen eighty four"` ->
+  `"19 84"`, `"twenty twenty"` -> `"20 20"`. `words2num` raises for these,
+  since a single number was asked for and two were given.
+
+  `"hundred"` and the scale words close the sub-hundred slot, so
+  `"one hundred sixty"` (160), `"three hundred sixty"` (360) and
+  `"two thousand sixty"` (2060) are unaffected — as is the pair reading on
+  `to="year"`, where `"nineteen eighty four"` is still 1984. Resolves #17.
+
 ## [0.2.3] — 2026-05-02
 
 ### Fixed
