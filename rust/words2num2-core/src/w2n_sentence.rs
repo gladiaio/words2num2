@@ -470,26 +470,60 @@ fn tokenize(sentence: &str) -> Vec<String> {
 // `_resolve_lang`
 // ===========================================================================
 
-/// The keys of `CONVERTER_CLASSES` in `words2num2/__init__.py`, in source
-/// order. Membership in *this* set is what `_resolve_lang` tests, which is
-/// **not** the same set as `num2words2_core::supported_lang_keys()` — the
-/// aliases `jp` and `cn` live only here.
+/// Every language key the parser accepts.
 ///
-/// Must stay in sync with `__init__.py`.
-pub const CONVERTER_LANGS: [&str; 120] = [
-    "af", "am", "ar", "as", "az", "ba", "be", "bg", "bn", "bo", "br", "bs", "ca", "ce", "cs", "cy",
-    "da", "de", "el", "en", "en_IN", "en_NG", "eo", "es", "es_CO", "es_CR", "es_GT", "es_NI",
-    "es_VE", "et", "eu", "fa", "fi", "fo", "fr", "fr_BE", "fr_CH", "fr_DZ", "gl", "gu", "ha", "haw",
-    "he", "hi", "hr", "ht", "hu", "hy", "id", "is", "it", "ja", "jw", "ka", "kk", "km", "kn", "ko",
-    "kz", "la", "lb", "ln", "lo", "lt", "lv", "mg", "mi", "mk", "ml", "mn", "mr", "ms", "mt", "my",
-    "ne", "nl", "nn", "no", "oc", "pa", "pl", "ps", "pt", "pt_BR", "ro", "ru", "sa", "sd", "si",
-    "sk", "sl", "sn", "so", "sq", "sr", "su", "sv", "sw", "ta", "te", "tet", "tg", "th", "tk", "tl",
-    "tr", "tt", "uk", "ur", "uz", "vi", "wo", "yi", "yo", "zh", "zh_CN", "zh_HK", "zh_TW", "jp",
-    "cn",
-];
+/// **Derived from the renderer, not maintained by hand.** This used to be a
+/// frozen 120-entry array carrying the note *"Must stay in sync with
+/// `__init__.py`"* — a file that no longer exists, since the pure-Python
+/// implementation it mirrored was replaced by this crate. It drifted badly:
+/// the renderer grew to 172 keys and the list did not, with two distinct
+/// consequences.
+///
+/// **28 languages were unreachable.** `resolve_lang` rejected them outright,
+/// so `words2num(text, lang="ti")` raised `NotImplementedError: language 'ti'
+/// is not supported` — while `supported_langs()` (which reads the renderer's
+/// keys) advertised them, and the reverse tables parsed them perfectly. Three
+/// answers to one question.
+///
+/// **8 more were silently routed to a different language.** `resolve_lang`
+/// falls back to the first two characters of the code, so an unknown key did
+/// not fail, it *matched something else*:
+///
+/// ```text
+/// ban Balinese   -> ba  Bashkir
+/// ceb Cebuano    -> ce  Chechen
+/// cnh Hakha Chin -> cn  Chinese
+/// fil Filipino   -> fi  Finnish
+/// kok Konkani    -> ko  Korean
+/// miz Mizo       -> mi  Maori
+/// pap Papiamento -> pa  Punjabi
+/// pli Pali       -> pl  Polish
+/// ```
+///
+/// That failed loudly only by luck — the tables happened to share no words.
+/// A collision would have returned a confidently wrong number.
+///
+/// Deriving the set makes both impossible: it is exactly what
+/// [`crate::supported_langs`] reports, so the advertised set and the accepted
+/// set cannot disagree again.
+pub fn converter_langs() -> &'static [&'static str] {
+    static KEYS: std::sync::OnceLock<Vec<&'static str>> = std::sync::OnceLock::new();
+    KEYS.get_or_init(num2words2_core::supported_lang_keys)
+        .as_slice()
+}
+
+/// The `&'static str` the renderer knows this key by.
+///
+/// `resolve_lang` hands back an owned `String`; the converter needs a
+/// `'static` key to build [`Converter::Table`]. Looking it up here keeps the
+/// two in step — before, this was a scan of the frozen array whose miss arm
+/// silently fell back to English.
+fn static_lang_key(k: &str) -> Option<&'static str> {
+    converter_langs().iter().copied().find(|s| *s == k)
+}
 
 fn is_known_lang(k: &str) -> bool {
-    CONVERTER_LANGS.contains(&k)
+    converter_langs().contains(&k)
 }
 
 /// Port of `words2num2._resolve_lang`.
@@ -567,15 +601,10 @@ fn converter_for(resolved: &str) -> Converter {
         "en" => Converter::En,
         "zh" | "cn" => Converter::Table("zh_CN"),
         "jp" => Converter::Table("ja"),
-        // `resolved` is guaranteed to be one of CONVERTER_LANGS.
-        other => {
-            let key = CONVERTER_LANGS
-                .iter()
-                .copied()
-                .find(|k| *k == other)
-                .unwrap_or("en");
-            Converter::Table(key)
-        }
+        // `resolved` came from `resolve_lang`, so it is always a member and
+        // the `None` arm is unreachable. It keeps the previous fallback
+        // rather than panicking in a library.
+        other => Converter::Table(static_lang_key(other).unwrap_or("en")),
     }
 }
 
@@ -2344,6 +2373,42 @@ mod tests {
         assert_eq!(resolve_lang("en-US").unwrap(), "en"); // dash + prefix
         assert_eq!(resolve_lang("zh").unwrap(), "zh");
         assert!(resolve_lang("xx").is_err());
+    }
+
+    /// The accepted set is exactly the advertised set.
+    ///
+    /// These were two hand-maintained lists that had drifted by 52 entries.
+    #[test]
+    fn accepted_set_equals_advertised_set() {
+        let advertised = num2words2_core::supported_lang_keys();
+        for key in &advertised {
+            assert!(
+                resolve_lang(key).is_ok(),
+                "{key} is advertised by supported_langs() but resolve_lang rejects it"
+            );
+        }
+        assert_eq!(converter_langs().len(), advertised.len());
+    }
+
+    /// A known code must resolve to itself, never to a prefix match.
+    ///
+    /// `resolve_lang` falls back to the first two characters, so before the
+    /// set was derived these eight were answered by an unrelated language —
+    /// "ban" (Balinese) by "ba" (Bashkir), "pli" (Pali) by "pl" (Polish).
+    #[test]
+    fn known_codes_are_not_prefix_matched_to_another_language() {
+        for code in [
+            "ban", "ceb", "cnh", "fil", "kok", "miz", "pap", "pli", "sr_Latn", "uz_Cyrl",
+        ] {
+            assert_eq!(
+                resolve_lang(code).unwrap(),
+                code,
+                "{code} must resolve to itself"
+            );
+        }
+        // The fallback still works for codes that genuinely are not known.
+        assert_eq!(resolve_lang("en_GB").unwrap(), "en");
+        assert!(resolve_lang("zz").is_err());
     }
 
     #[test]

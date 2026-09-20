@@ -105,7 +105,7 @@ dependencies = [
 
 [[package]]
 name = "num2words2-core"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "bigdecimal",
  "num-bigint",
@@ -268,7 +268,7 @@ checksum = "7264e107f553ccae879d21fbea1d6724ac785e8c3bfc762137959b5802826ef3"
 
 [[package]]
 name = "words2num2-core"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "bigdecimal",
  "num-bigint",
@@ -278,7 +278,7 @@ dependencies = [
 
 [[package]]
 name = "words2num2-py"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "bigdecimal",
  "num-bigint",
