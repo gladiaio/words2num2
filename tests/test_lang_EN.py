@@ -166,3 +166,81 @@ def test_valid_compositions_unchanged(text, expected):
 def test_year_path_still_reads_pairs(text, expected):
     # The pair reading lives in to="year" and is deliberately left there.
     assert words2num(text, to="year") == expected
+
+
+
+
+# ---------------------------------------------------------------------------
+# Dangling decimal separator — ports revdotcom/words2num#5 by @qmac.
+#
+# The separator used to be dropped silently when nothing followed it, so
+# "one point" returned Decimal('1'), "two thousand point" returned
+# Decimal('2000'), and a bare "point" returned Decimal('0').
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        # Added by upstream #5 — these used to return the integer part.
+        "one point",
+        "two thousand point",
+        "point",
+        "one hundred point",
+        "zero point",
+        "dot",
+        "three dot",
+        # Already rejected before #5; pinned here so the whole upstream
+        # negative list lives in one place.
+        "one point thousand",
+        "one point two point three",
+        "one point point two",
+        "eleven thousand point two hundred",
+    ],
+)
+def test_dangling_decimal_separator_raises(text):
+    with pytest.raises(Words2NumError):
+        words2num(text)
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("point five", Decimal("0.5")),
+        ("dot five", Decimal("0.5")),
+        ("zero point five", Decimal("0.5")),
+        ("three point one four", Decimal("3.14")),
+        ("one point zero", Decimal("1.0")),
+        # The sign of zero survives the guard.
+        ("minus zero point zero", Decimal("-0.0")),
+    ],
+)
+def test_decimal_still_parses(text, expected):
+    got = words2num(text)
+    assert got == expected
+    # Decimal("-0.0") == Decimal("0.0"), so compare the repr for the sign.
+    assert str(got) == str(expected)
+
+
+@pytest.mark.parametrize(
+    "sentence,expected",
+    [
+        # A decimal separator is a valid run head. This used to work only
+        # because "point" alone parsed as 0; it is explicit now.
+        ("point five", "0.5"),
+        ("dot five", "0.5"),
+        ("say point five now", "say 0.5 now"),
+        ("the answer is point five.", "the answer is 0.5."),
+        ("a dot five gain", "a 0.5 gain"),
+        # A dangling separator is left as prose rather than swallowed.
+        ("one point", "1 point"),
+    ],
+)
+def test_sentence_decimal_head(sentence, expected):
+    assert words2num_sentence(sentence) == expected
+
+
+def test_run_may_not_start_with_other_includables():
+    # Only the decimal separators were promoted to run heads; "and", "minus"
+    # and the articles stay run-internal.
+    assert words2num_sentence("minus forty two") == "minus 42"
+    assert words2num_sentence("and seven") == "and 7"

@@ -929,16 +929,48 @@ fn sentence_to_en_value(v: W2nValue) -> crate::w2n_lang_en::W2nValue {
 // `words2num_sentence` / `convert_sentence` / `sentence_to_words`
 // ===========================================================================
 
-/// `SentenceConverter._starts_run` — a run must open with a real number word,
-/// never with `"and"` / `"point"` / `"minus"`.
-fn starts_run(converter: &Converter, token: &str) -> bool {
+/// `SentenceConverter._starts_run` — a run must open with a real number word
+/// or with a decimal separator, never with `"and"` / `"minus"` / `"a"`.
+///
+/// **Why the decimal separator is listed explicitly.** `is_number_word` is
+/// `to_cardinal(token).is_ok()`, so before
+/// revdotcom/words2num#5 was ported, `"point"` qualified as a run head only
+/// because `to_cardinal("point")` silently returned `Decimal('0')` — the very
+/// bug that port fixes. Once a dangling separator raises, the accident that
+/// made `"point five"` parse in a sentence disappears with it.
+///
+/// `"point five"` is a real spoken number and `words2num("point five")`
+/// returns `0.5`, so the walker has to reach it too. Naming the separators
+/// here makes that a property of the walker rather than a side effect of a
+/// bug, and the guarantee is pinned by the `"point is a valid head"` case in
+/// [`tests::walker_matches_python`].
+///
+/// Only separators are promoted. The rest of [`INCLUDABLE_EN`] stays
+/// run-internal: a run still may not open with `"and"`, `"minus"`,
+/// `"negative"`, `"a"` or `"an"`.
+fn starts_run(converter: &Converter, token: &str, decimal_heads: &[&str]) -> bool {
     if token.is_empty() {
         return false;
+    }
+    if decimal_heads.contains(&token) {
+        return true;
     }
     let dehyphened = token.replace('-', " ");
     py_split_whitespace(&dehyphened)
         .iter()
         .any(|sub| converter.is_number_word(sub))
+}
+
+/// The decimal separator words that may open a run, by resolved language.
+///
+/// English only: the non-English locales go through the reverse-table
+/// converter, whose separator handling this change does not touch.
+fn decimal_heads_for(resolved: &str) -> &'static [&'static str] {
+    if resolved == "en" {
+        &["point", "dot"]
+    } else {
+        &[]
+    }
 }
 
 /// `SentenceConverter._is_candidate` — cheap pre-filter for run growth.
@@ -1003,6 +1035,7 @@ pub fn words2num_sentence(
     } else {
         includable_for(&resolved)
     };
+    let decimal_heads = decimal_heads_for(&resolved);
 
     let parts = tokenize(sentence);
     let n = parts.len();
@@ -1016,9 +1049,9 @@ pub fn words2num_sentence(
             i += 1;
             continue;
         }
-        // A run must START with a real number word.
+        // A run must START with a real number word or a decimal separator.
         let head = rstrip_punct(piece).to_lowercase();
-        if !starts_run(&converter, &head) {
+        if !starts_run(&converter, &head, decimal_heads) {
             out.push_str(piece);
             i += 1;
             continue;
