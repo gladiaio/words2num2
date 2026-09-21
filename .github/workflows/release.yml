@@ -1,7 +1,8 @@
 name: Release
 
 # Builds per-platform wheels with maturin and publishes them:
-#   * wheels + sdist -> PyPI (trusted publishing / OIDC)
+#   * wheels + sdist -> PyPI (PYPI_API_TOKEN; the trusted publisher on PyPI is
+#     still bound to jqueguiner/words2num2, so OIDC fails under the gladiaio org)
 #   * wheels + sdist -> GitHub Release
 # words2num2 is a single-variant package: the compiled core embeds
 # num2words2-core natively (no lingua-rs models), so each wheel is ~2-4 MB.
@@ -113,7 +114,7 @@ jobs:
       name: pypi
       url: https://pypi.org/project/words2num2/
     permissions:
-      id-token: write   # trusted publishing (OIDC)
+      contents: read
     steps:
       - uses: actions/download-artifact@v4
         with:
