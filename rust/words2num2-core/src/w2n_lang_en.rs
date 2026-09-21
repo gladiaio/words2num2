@@ -886,19 +886,40 @@ impl W2nLangEn {
         let mut total = BigInt::from(0);
         let mut current = BigInt::from(0);
         let mut seen_any = false;
+        // Whether the sub-hundred slot of `current` already holds a value.
+        //
+        // English composes a tens word with a *following* unit ("sixty
+        // three" = 63), never with a preceding one. "three sixty" is two
+        // numbers read in sequence, not 3 + 60, and "twenty twenty" is two
+        // twenties, not 40. Rejecting a tens word once the slot is taken is
+        // what makes them come out as separate runs in a sentence.
+        //
+        // "hundred" and the scale words close the slot, so "one hundred
+        // sixty" (160) and "two thousand sixty" (2060) are unaffected.
+        let mut sub_hundred_filled = false;
         for tok in toks {
             if let Some(&v) = self.units.get(*tok) {
                 current += v;
                 seen_any = true;
+                sub_hundred_filled = true;
             } else if let Some(&v) = self.tens.get(*tok) {
+                if sub_hundred_filled {
+                    return Err(W2nError::new(format!(
+                        "{} cannot follow a smaller number in {}",
+                        py_repr(tok),
+                        py_repr(&toks.join(" "))
+                    )));
+                }
                 current += v;
                 seen_any = true;
+                sub_hundred_filled = true;
             } else if *tok == "hundred" {
                 if current.sign() == Sign::NoSign {
                     current = BigInt::from(1);
                 }
                 current *= 100;
                 seen_any = true;
+                sub_hundred_filled = false;
             } else if let Some(scale) = self.scales.get(*tok) {
                 if current.sign() == Sign::NoSign {
                     current = BigInt::from(1);
@@ -906,6 +927,7 @@ impl W2nLangEn {
                 total += &current * scale;
                 current = BigInt::from(0);
                 seen_any = true;
+                sub_hundred_filled = false;
             } else if is_digits(tok) {
                 // Allow embedded digit groups, e.g. "two thousand 24".
                 match BigInt::from_str(&nd_to_ascii(tok)) {
