@@ -50,7 +50,7 @@ fn w2n_error_to_pyerr(py: Python<'_>, e: w2n_sentence::W2nError) -> PyErr {
 }
 
 /// `decimal.Decimal(s)` — rebuilds an exact `Decimal` from its `str()` form.
-fn make_decimal(py: Python<'_>, s: String) -> PyResult<PyObject> {
+fn make_decimal(py: Python<'_>, s: String) -> PyResult<Py<PyAny>> {
     let decimal = py.import("decimal")?.getattr("Decimal")?;
     Ok(decimal.call1((s,))?.unbind())
 }
@@ -58,7 +58,7 @@ fn make_decimal(py: Python<'_>, s: String) -> PyResult<PyObject> {
 /// Convert a `w2n_lang_en::W2nValue` (`int` / `float` / `Decimal`) to Python.
 /// `PyDec`'s `Display` is Python's `str(Decimal)`, so `Decimal(pydec.to_string())`
 /// reproduces the value (including a signed zero) exactly.
-fn en_value_to_py(py: Python<'_>, v: w2n_lang_en::W2nValue) -> PyResult<PyObject> {
+fn en_value_to_py(py: Python<'_>, v: w2n_lang_en::W2nValue) -> PyResult<Py<PyAny>> {
     use w2n_lang_en::W2nValue;
     match v {
         W2nValue::Int(i) => i.into_py_any(py),
@@ -69,7 +69,7 @@ fn en_value_to_py(py: Python<'_>, v: w2n_lang_en::W2nValue) -> PyResult<PyObject
 
 /// Convert a `w2n_formats::W2nValue` to Python. `parse_number_string` only ever
 /// yields `int` / `float`; the `Decimal` arm is here for completeness.
-fn formats_value_to_py(py: Python<'_>, v: w2n_formats::W2nValue) -> PyResult<PyObject> {
+fn formats_value_to_py(py: Python<'_>, v: w2n_formats::W2nValue) -> PyResult<Py<PyAny>> {
     use w2n_formats::W2nValue;
     match v {
         W2nValue::Int(i) => i.into_py_any(py),
@@ -79,7 +79,7 @@ fn formats_value_to_py(py: Python<'_>, v: w2n_formats::W2nValue) -> PyResult<PyO
 }
 
 /// Convert a `w2n_sentence::W2nValue` (`int` / `float` / `Decimal`) to Python.
-fn sentence_value_to_py(py: Python<'_>, v: &w2n_sentence::W2nValue) -> PyResult<PyObject> {
+fn sentence_value_to_py(py: Python<'_>, v: &w2n_sentence::W2nValue) -> PyResult<Py<PyAny>> {
     use w2n_sentence::W2nValue;
     match v {
         W2nValue::Int(i) => i.clone().into_py_any(py),
@@ -109,7 +109,7 @@ fn w2nvalue_from_py(obj: &Bound<'_, PyAny>) -> PyResult<w2n_sentence::W2nValue> 
 /// Build a `words2num2.converters.auto.Quantity` from the core struct. The
 /// dataclass stays defined in Python (it is a public API type users import);
 /// only the parsing logic lives in the core.
-fn quantity_to_py(py: Python<'_>, q: w2n_sentence::Quantity) -> PyResult<PyObject> {
+fn quantity_to_py(py: Python<'_>, q: w2n_sentence::Quantity) -> PyResult<Py<PyAny>> {
     let value = sentence_value_to_py(py, &q.value)?;
     let cls = py
         .import("words2num2.converters.auto")?
@@ -164,7 +164,7 @@ fn parse_int(s: &str) -> PyResult<i64> {
 
 /// `_rust.en_to_cardinal(text)`.
 #[pyfunction]
-fn en_to_cardinal(py: Python<'_>, text: &str) -> PyResult<PyObject> {
+fn en_to_cardinal(py: Python<'_>, text: &str) -> PyResult<Py<PyAny>> {
     match words2num2_core::en_to_cardinal(text) {
         Ok(v) => en_value_to_py(py, v),
         Err(e) => Err(words2num_error(py, e.msg)),
@@ -173,7 +173,7 @@ fn en_to_cardinal(py: Python<'_>, text: &str) -> PyResult<PyObject> {
 
 /// `_rust.en_to_ordinal(text)`.
 #[pyfunction]
-fn en_to_ordinal(py: Python<'_>, text: &str) -> PyResult<PyObject> {
+fn en_to_ordinal(py: Python<'_>, text: &str) -> PyResult<Py<PyAny>> {
     match words2num2_core::en_to_ordinal(text) {
         Ok(v) => en_value_to_py(py, v),
         Err(e) => Err(words2num_error(py, e.msg)),
@@ -182,7 +182,7 @@ fn en_to_ordinal(py: Python<'_>, text: &str) -> PyResult<PyObject> {
 
 /// `_rust.en_to_year(text)`.
 #[pyfunction]
-fn en_to_year(py: Python<'_>, text: &str) -> PyResult<PyObject> {
+fn en_to_year(py: Python<'_>, text: &str) -> PyResult<Py<PyAny>> {
     match words2num2_core::en_to_year(text) {
         Ok(v) => en_value_to_py(py, v),
         Err(e) => Err(words2num_error(py, e.msg)),
@@ -198,7 +198,7 @@ fn parse_number_string(
     thousands_sep: Option<&str>,
     decimal_sep: Option<&str>,
     lang: Option<&str>,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     match w2n_formats::parse_number_string(s, thousands_sep, decimal_sep, lang) {
         Ok(v) => formats_value_to_py(py, v),
         Err(e) => Err(words2num_error(py, e.0)),
@@ -220,7 +220,7 @@ fn words2num(
     lang: &str,
     to: &str,
     kwargs: Option<Bound<'_, PyDict>>,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     if kwargs.as_ref().is_some_and(|d| !d.is_empty()) {
         return Err(PyTypeError::new_err(
             "words2num() got an unexpected keyword argument",
@@ -267,7 +267,7 @@ fn auto_parse(
     prefer: Option<HashMap<String, String>>,
     thousands_sep: Option<&str>,
     decimal_sep: Option<&str>,
-) -> PyResult<PyObject> {
+) -> PyResult<Py<PyAny>> {
     let prefer = prefer.unwrap_or_default();
     match w2n_sentence::auto_parse(text, lang, &prefer, thousands_sep, decimal_sep) {
         Ok(q) => quantity_to_py(py, q),
