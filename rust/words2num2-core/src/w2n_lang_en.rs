@@ -854,6 +854,22 @@ impl W2nLangEn {
         if let Some(idx) = decimal_idx {
             let int_toks = &toks[..idx];
             let frac_toks = &toks[idx + 1..];
+            // A decimal separator with nothing after it is not a number.
+            // Ported from revdotcom/words2num#5 by @qmac, which added the
+            // same guard to `tokenize`:
+            //
+            //     if decimal and not decimal_tokens:
+            //         raise ValueError("Invalid sequence: no tokens following 'point'")
+            //
+            // Without it the separator is silently dropped and the integer
+            // part is returned on its own — "one point" gave Decimal('1'),
+            // "two thousand point" gave Decimal('2000'), and a bare "point"
+            // gave Decimal('0'). The message is upstream's, verbatim.
+            if frac_toks.is_empty() {
+                return Err(W2nError::new(
+                    "Invalid sequence: no tokens following 'point'",
+                ));
+            }
             let int_part = if int_toks.is_empty() {
                 BigInt::from(0)
             } else {
@@ -956,6 +972,9 @@ impl W2nLangEn {
     /// The `_UNITS[tok] < 10` guard is what rejects "point ten"; "zero",
     /// "oh", "nought" and "naught" all contribute a `0`.
     fn fractional_value(&self, toks: &[&str]) -> W2nResult<PyDec> {
+        // Unreachable from the decimal split, which rejects an empty
+        // fraction ahead of this call (revdotcom/words2num#5). Kept so the
+        // function stays total for any future caller.
         if toks.is_empty() {
             return Ok(PyDec::zero());
         }

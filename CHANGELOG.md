@@ -6,6 +6,18 @@ follows [Semantic Versioning](https://semver.org/) and uses
 
 ## [Unreleased]
 
+### Ported from upstream
+
+- **Reject a decimal separator with nothing after it.** Ports
+  [revdotcom/words2num#5][w2n5] by [@qmac][qmac]. The separator used to be
+  dropped silently, so `words2num("one point")` returned `Decimal('1')`,
+  `words2num("two thousand point")` returned `Decimal('2000')` and a bare
+  `words2num("point")` returned `Decimal('0')`. All of these now raise
+  `Words2NumError` with upstream's message, *"Invalid sequence: no tokens
+  following 'point'"*. Legitimate decimals are unaffected — `"point five"` is
+  still `Decimal('0.5')`, and `"minus zero point zero"` still keeps its
+  signed zero.
+
 ### Fixed
 
 - **A tens word no longer composes with a preceding unit.** English reads a
@@ -20,6 +32,19 @@ follows [Semantic Versioning](https://semver.org/) and uses
   `"one hundred sixty"` (160), `"three hundred sixty"` (360) and
   `"two thousand sixty"` (2060) are unaffected — as is the pair reading on
   `to="year"`, where `"nineteen eighty four"` is still 1984. Resolves #17.
+
+- **A decimal separator is now an explicit sentence-run head.** The sentence
+  walker decides where a number run may start with
+  `is_number_word(token)`, which is `to_cardinal(token).is_ok()` — so
+  `"point"` qualified only because `to_cardinal("point")` returned `0`, i.e.
+  because of the bug above. `words2num_sentence("point five")` would have
+  regressed to `"point 5"`. The separators are named explicitly now, so the
+  behaviour is a property of the walker rather than a side effect. The rest
+  of the run-internal words are unchanged: a run still may not open with
+  `and`, `minus`, `negative`, `a` or `an`.
+
+[w2n5]: https://github.com/revdotcom/words2num/pull/5
+[qmac]: https://github.com/qmac
 
 ## [0.2.3] — 2026-05-02
 
