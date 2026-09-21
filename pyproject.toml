@@ -64,6 +64,16 @@ module-name = "words2num2._rust"
 features = ["pyo3/extension-module"]
 strip = true
 
+[tool.pytest.ini_options]
+markers = [
+    # The exhaustive per-language sweep in tests/test_multilang.py builds a
+    # reverse lookup table for each of the ~170 languages, which costs about
+    # 0.24s apiece and dominates the suite (~40s of it). The values checked
+    # per language are free by comparison. Deselect with `-m "not slow"` if
+    # that is too much for a given job.
+    "slow: exercises every supported language; dominated by table construction",
+]
+
 [tool.isort]
 profile = "black"
 line_length = 88
