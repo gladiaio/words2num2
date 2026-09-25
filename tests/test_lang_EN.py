@@ -124,8 +124,10 @@ def test_sentence_preserves_punctuation():
     [
         ("three sixty", "3 60"),
         ("three sixty five", "3 65"),
-        ("nineteen eighty four", "19 84"),
-        ("twenty twenty", "20 20"),
+        # Not one cardinal either, but the sentence walker reads the pair as
+        # a spoken year since 0.3.3 (was "19 84" / "20 20").
+        ("nineteen eighty four", "1984"),
+        ("twenty twenty", "2020"),
         ("five forty", "5 40"),
     ],
 )

@@ -2615,8 +2615,9 @@ mod digits_tests {
             s("sixty-one hundred Main Street", "en", "digits", false).unwrap(),
             "sixty-one hundred Main Street"
         );
-        // The old cardinal behaviour that motivated this: "two seven five" -> 14.
-        assert_eq!(s("Two seven five", "en", "cardinal", false).unwrap(), "14");
+        // The old cardinal behaviour that motivated this was "two seven five"
+        // -> 14; the cardinal walk now reads the digit string itself.
+        assert_eq!(s("Two seven five", "en", "cardinal", false).unwrap(), "275");
     }
 
     #[test]
