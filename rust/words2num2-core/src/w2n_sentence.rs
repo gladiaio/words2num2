@@ -1458,6 +1458,157 @@ fn ordinal_rendering(
     ordinal_figures(resolved, converter.n2w_key(), n, feminine)
 }
 
+/// The words that are both the number 1 and an article or pronoun: en "one"
+/// ("no one", "one of them"), fr "un"/"une" ("un instant"), es "un"/"una"/
+/// "uno", pt "um"/"uma", it "un"/"uno"/"una", nl "een", de "ein" and its
+/// declensions, ca "un"/"una". On their own they stay words; see
+/// [`article_is_count`] for when they are the number.
+fn article_words(resolved: &str) -> &'static str {
+    let base = resolved.split(&['_', '-'][..]).next().unwrap_or(resolved);
+    match base {
+        "en" => "one",
+        "fr" => "un une",
+        "es" | "gl" | "ca" => "un una uno",
+        "it" => "un uno una",
+        "pt" => "um uma",
+        "nl" => "een",
+        "de" => "ein eine einen einem einer eines",
+        _ => "",
+    }
+}
+
+fn is_article_word(resolved: &str, word: &str) -> bool {
+    article_words(resolved)
+        .split_whitespace()
+        .any(|w| w == word)
+}
+
+/// Units, currencies and time words a lone article-number counts: "one
+/// dollar", "un euro", "one percent", "one o'clock", "une heure". Compared
+/// after `normalize` (no diacritics). "second" is left out on purpose ("one
+/// second" is a pause, "une seconde" too).
+fn unit_words(resolved: &str) -> &'static str {
+    let base = resolved.split(&['_', '-'][..]).next().unwrap_or(resolved);
+    match base {
+        "en" => {
+            "dollar dollars cent cents euro euros pound pounds buck bucks grand percent hour \
+             hours minute minutes day days week weeks month months year years oclock am pm \
+             kilo kilos kilogram kilograms kilometer kilometers kilometre kilometres km \
+             meter meters metre metres mile miles gram grams liter liters litre litres gallon \
+             gallons ounce ounces inch inches foot feet degree degrees"
+        }
+        "fr" => {
+            "euro euros dollar dollars centime centimes heure heures minute minutes jour jours \
+             semaine semaines mois an ans annee annees kilo kilos kilometre kilometres km metre \
+             metres gramme grammes litre litres degre degres"
+        }
+        "es" | "gl" => {
+            "dolar dolares euro euros centavo centavos centimo centimos peso pesos hora horas \
+             minuto minutos dia dias semana semanas mes meses ano anos kilo kilos kilometro \
+             kilometros metro metros gramo gramos litro litros grado grados"
+        }
+        "pt" => {
+            "dolar dolares euro euros centavo centavos real reais hora horas minuto minutos \
+             dia dias semana semanas mes meses ano anos quilo quilos quilometro quilometros \
+             metro metros grama gramas litro litros grau graus"
+        }
+        "it" => {
+            "euro dollaro dollari centesimo centesimi ora ore minuto minuti giorno giorni \
+             settimana settimane mese mesi anno anni chilo chili chilometro chilometri metro \
+             metri grammo grammi litro litri grado gradi"
+        }
+        "nl" => {
+            "euro dollar cent procent uur minuut minuten dag dagen week weken maand maanden \
+             jaar jaren kilo kilometer meter gram liter graad graden"
+        }
+        "de" => {
+            "euro dollar cent prozent stunde stunden minute minuten tag tage woche wochen \
+             monat monate jahr jahre kilo kilometer meter gramm liter grad"
+        }
+        "ca" => "euro euros dolar dolars centim centims hora hores minut minuts dia dies setmana setmanes mes mesos any anys",
+        _ => "",
+    }
+}
+
+/// Words that label the number after them: "press one", "option one",
+/// "number one", "chapter one", fr "tapez un", es "marque uno".
+fn label_words(resolved: &str) -> &'static str {
+    let base = resolved.split(&['_', '-'][..]).next().unwrap_or(resolved);
+    match base {
+        "en" => {
+            "number option press dial select choose enter step page room floor line level \
+             chapter part section extension ext channel gate terminal platform zone phase \
+             round item question unit exhibit table figure seat car bus route grade day week \
+             plan tier code pin"
+        }
+        "fr" => {
+            "numero option tapez appuyez composez faites etape page chambre ligne niveau \
+             chapitre partie section poste quai zone phase question article siege salle voie \
+             porte jour semaine bus code"
+        }
+        "es" | "gl" => {
+            "numero opcion marque pulse presione oprima digite paso pagina habitacion linea \
+             nivel capitulo parte seccion extension anden zona fase pregunta articulo asiento \
+             sala puerta dia semana codigo"
+        }
+        "pt" => {
+            "numero opcao digite tecle pressione passo pagina quarto linha nivel capitulo \
+             parte secao ramal zona fase pergunta artigo assento sala porta dia semana codigo"
+        }
+        "it" => {
+            "numero opzione premi prema digiti passo pagina camera linea livello capitolo \
+             parte sezione interno zona fase domanda articolo posto sala porta giorno \
+             settimana codice"
+        }
+        "nl" => {
+            "nummer optie toets druk stap pagina kamer lijn niveau hoofdstuk deel sectie zone \
+             fase vraag artikel stoel zaal deur dag week code"
+        }
+        "de" => {
+            "nummer option drucken wahlen schritt seite zimmer linie ebene kapitel teil \
+             abschnitt zone phase frage artikel platz saal tur tag woche code"
+        }
+        _ => "",
+    }
+}
+
+/// Is the lone article-number at `i` a count? Yes in front of a unit or
+/// currency, in front of the percent phrase, after a label word or after a
+/// month ("december one"). "one of them", "no one", "un instant", "one
+/// second" stay words.
+fn article_is_count(resolved: &str, parts: &[String], i: usize, next_is_number: bool) -> bool {
+    // "o'clock" and "a.m." normalise to "o clock" / "a m": compared unspaced.
+    let key = |w: String| crate::normalize(&w).replace(' ', "");
+    let next = next_word(parts, i).map(key);
+    let next2 = next_word2(parts, i).map(key);
+    let prev = prev_word(parts, i).map(key);
+    let labelled = prev.as_deref().is_some_and(|p| {
+        label_words(resolved).split_whitespace().any(|l| l == p) || is_month(resolved, Some(p))
+    });
+    let punct = trailing_punct(&parts[i]);
+    if !punct.is_empty() && punct != "," {
+        return labelled;
+    }
+    // "one, two, three", "le un janvier".
+    if next_is_number || is_month(resolved, next.as_deref()) {
+        return true;
+    }
+    if let Some(n) = next.as_deref() {
+        if unit_words(resolved).split_whitespace().any(|u| u == n) {
+            return true;
+        }
+        if percent_phrase(resolved)
+            .is_some_and(|(prep, word)| n == prep && next2.as_deref() == Some(word))
+        {
+            return true;
+        }
+        if n == "percent" || n == "pourcent" {
+            return true;
+        }
+    }
+    labelled
+}
+
 /// Port of `words2num2.words2num_sentence` → `SentenceConverter.convert`.
 ///
 /// Walks the sentence and, at each position that opens with a real number
@@ -1508,8 +1659,12 @@ pub fn words2num_sentence(
         }
         let head = rstrip_punct(piece).to_lowercase();
         let next = next_word(&parts, i);
-        let next_starts_run = !ends_with_terminal_punct(piece)
-            && next.as_deref().is_some_and(|t| starts_run(&converter, t));
+        // "one second", "one third": the English grammar reads an ordinal as a
+        // number word, but it does not count the article in front of it.
+        let next_is_number = next
+            .as_deref()
+            .is_some_and(|t| starts_run(&converter, t) && !converter.is_ordinal_word(t));
+        let next_starts_run = !ends_with_terminal_punct(piece) && next_is_number;
         // A run must START with a real number word, or with an apocope
         // ("un" in es "un mil") followed by one, or — in English — with
         // "a"/"an" in front of a scale word ("a hundred dollars").
@@ -1531,11 +1686,22 @@ pub fn words2num_sentence(
             && !next_starts_run;
         after_decimal = false;
         let ordinal_head = plain && converter.is_ordinal_word(&head);
+        let article_number = plain && is_article_word(&resolved, &head);
         if (!starts_run(&converter, &head) && !apocope_head && !article_head && !ordinal_head)
             || percent_tail
             || decimal_scale
         {
-            out.push_str(piece);
+            // es "un dólar": "un" is not a number word on its own, but here
+            // it counts.
+            if article_number
+                && !apocope_head
+                && article_is_count(&resolved, &parts, i, next_is_number)
+            {
+                out.push('1');
+                out.push_str(trailing_punct(piece));
+            } else {
+                out.push_str(piece);
+            }
             i += 1;
             continue;
         }
@@ -1621,6 +1787,12 @@ pub fn words2num_sentence(
                 ordinal_rendering(&converter, &resolved, &parts, i, best_end, &v)
             } else if en_cardinal && en_plural_ordinal(next_word(&parts, best_end).as_deref()) {
                 // "two thirds": a fraction, kept in words.
+                None
+            } else if article_number
+                && best_end == i
+                && !article_is_count(&resolved, &parts, i, next_is_number)
+            {
+                // A lone "one" / "un" / "um" is an article or a pronoun.
                 None
             } else {
                 Some(v.py_str())

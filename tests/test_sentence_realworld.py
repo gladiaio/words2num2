@@ -65,7 +65,7 @@ def test_es_compounds(text, expected):
         ("a hundred and one dogs", "101 dogs"),
         ("an hour", "an hour"),
         # A run never ends on a connector — the connector is a word again.
-        ("one and a half hours", "1 and a half hours"),
+        ("one and a half hours", "one and a half hours"),
         ("five point", "5 point"),
         ("one hundred and", "100 and"),
         ("point five", "0.5"),
@@ -144,7 +144,7 @@ def test_en_ordinals(text, expected):
         ("fr", "la première fois", "la première fois"),
         ("fr", "premier ministre", "premier ministre"),
         ("fr", "une seconde", "une seconde"),
-        ("fr", "un dixième", "1 dixième"),  # "un" itself: see the article tests
+        ("fr", "un dixième", "un dixième"),
         ("es", "el primero de mayo", "el 1º de mayo"),
         ("es", "el primero de cada mes", "el 1º de cada mes"),
         ("es", "el tercer piso", "el 3º piso"),
@@ -170,4 +170,94 @@ def test_en_ordinals(text, expected):
     ],
 )
 def test_ordinals_other_languages(lang, text, expected):
+    assert words2num_sentence(text, lang=lang) == expected
+
+
+# ---------------------------------------------------------------------------
+# "one" / "un" / "une" / "um" / "een" / "ein": the number 1 is also an article
+# or a pronoun. On its own it stays a word; in front of a unit, a currency or
+# the percent phrase, after a label word ("press", "option", "number") or a
+# month, or in a counted list, it is the number.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("no one answered", "no one answered"),
+        ("one of the agents", "one of the agents"),
+        ("one more thing", "one more thing"),
+        ("i have one", "i have one"),
+        ("which one", "which one"),
+        ("this one is better", "this one is better"),
+        ("one on one", "one on one"),
+        ("give me one second", "give me one second"),
+        ("one and a half hours", "one and a half hours"),
+        ("one third of it", "one third of it"),
+        ("One moment please", "One moment please"),
+        # A count.
+        ("press one", "press 1"),
+        ("press one.", "press 1."),
+        ("option one", "option 1"),
+        ("number one", "number 1"),
+        ("chapter one", "chapter 1"),
+        ("one dollar", "1 dollar"),
+        ("one percent", "1 percent"),
+        ("one per cent", "1 per cent"),
+        ("one o'clock", "1 o'clock"),
+        ("at one a.m.", "at 1 a.m."),
+        ("one pm", "1 pm"),
+        ("december one twenty twenty five", "december 1 2025"),
+        ("one, two, three", "1, 2, 3"),
+        # Never lone: a compound, a decimal, a digit string.
+        ("one hundred and one", "101"),
+        ("one point five", "1.5"),
+        ("one two three", "123"),
+    ],
+)
+def test_en_one(text, expected):
+    assert words2num_sentence(text, lang="en") == expected
+
+
+@pytest.mark.parametrize(
+    "lang,text,expected",
+    [
+        ("fr", "un solde de quarante-trois euros", "un solde de 43 euros"),
+        ("fr", "un instant", "un instant"),
+        ("fr", "un tiers", "un tiers"),
+        ("fr", "une seconde", "une seconde"),
+        ("fr", "l'un d'entre eux", "l'un d'entre eux"),
+        ("fr", "un à un", "un à un"),
+        ("fr", "il y a un euro", "il y a 1 euro"),
+        ("fr", "une heure", "1 heure"),
+        ("fr", "un pour cent", "1 pour cent"),
+        ("fr", "tapez un", "tapez 1"),
+        ("fr", "numéro un", "numéro 1"),
+        ("fr", "le un janvier", "le 1 janvier"),
+        ("fr", "un million", "1000000"),
+        ("fr", "cinquante et une personnes", "51 personnes"),
+        ("es", "un momento", "un momento"),
+        ("es", "una llamada", "una llamada"),
+        ("es", "uno de ellos", "uno de ellos"),
+        ("es", "marque uno", "marque 1"),
+        ("es", "un dólar", "1 dólar"),
+        ("es", "una hora", "1 hora"),
+        ("es", "uno por ciento", "1 por ciento"),
+        ("es", "cincuenta y un centavos", "51 centavos"),
+        ("pt", "um momento", "um momento"),
+        ("pt", "um euro", "1 euro"),
+        ("pt", "um por cento", "1 por cento"),
+        ("it", "un attimo", "un attimo"),
+        ("it", "uno di loro", "uno di loro"),
+        ("it", "un euro", "1 euro"),
+        ("nl", "een moment", "een moment"),
+        ("nl", "een euro", "1 euro"),
+        ("nl", "een procent", "1 procent"),
+        ("de", "ein moment", "ein moment"),
+        ("de", "ein euro", "1 euro"),
+        ("de", "eine stunde", "1 stunde"),
+        ("de", "eins", "1"),
+    ],
+)
+def test_article_one_other_languages(lang, text, expected):
     assert words2num_sentence(text, lang=lang) == expected
