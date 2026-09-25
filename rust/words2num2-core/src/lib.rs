@@ -160,13 +160,70 @@ pub fn lookup(
     {
         let t = tables().read().unwrap();
         if let Some(tab) = t.get(&key) {
-            return Ok(tab.get(&normalized).map(|v| sign * v));
+            return Ok(table_get(tab, lang, &normalized).map(|v| sign * v));
         }
     }
     let built = build_table(lang, ordinal)?;
-    let got = built.get(&normalized).map(|v| sign * v);
+    let got = table_get(&built, lang, &normalized).map(|v| sign * v);
     tables().write().unwrap().insert(key, built);
     Ok(got)
+}
+
+/// A table hit for `normalized`, or for one of its spoken plural variants.
+fn table_get(tab: &HashMap<String, i64>, lang: &str, normalized: &str) -> Option<i64> {
+    if let Some(v) = tab.get(normalized) {
+        return Some(*v);
+    }
+    for variant in fr_plural_variants(lang, normalized) {
+        if let Some(v) = tab.get(&variant) {
+            return Some(*v);
+        }
+    }
+    None
+}
+
+/// fr: num2words writes "deux cents" and "quatre-vingts" but speech (and ASR)
+/// drops or adds the plural -s freely ("mille deux cent", "quatre vingt euros",
+/// "deux million"). Every combination of toggling those tokens, so the table
+/// still matches. Empty for other languages or when no such token is present.
+fn fr_plural_variants(lang: &str, normalized: &str) -> Vec<String> {
+    if !lang.starts_with("fr") {
+        return Vec::new();
+    }
+    let toggle = |t: &str| -> Option<&'static str> {
+        match t {
+            "cent" => Some("cents"),
+            "cents" => Some("cent"),
+            "vingt" => Some("vingts"),
+            "vingts" => Some("vingt"),
+            "million" => Some("millions"),
+            "millions" => Some("million"),
+            "milliard" => Some("milliards"),
+            "milliards" => Some("milliard"),
+            _ => None,
+        }
+    };
+    let toks: Vec<&str> = normalized.split_whitespace().collect();
+    let slots: Vec<usize> = toks
+        .iter()
+        .enumerate()
+        .filter(|(_, t)| toggle(t).is_some())
+        .map(|(i, _)| i)
+        .collect();
+    if slots.is_empty() || slots.len() > 4 {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    for mask in 1u32..(1 << slots.len()) {
+        let mut v: Vec<&str> = toks.clone();
+        for (k, &pos) in slots.iter().enumerate() {
+            if mask & (1 << k) != 0 {
+                v[pos] = toggle(toks[pos]).unwrap_or(toks[pos]);
+            }
+        }
+        out.push(v.join(" "));
+    }
+    out
 }
 
 /// Languages the Rust core can serve (Python's `_RUST.supported_langs()`).
@@ -336,6 +393,16 @@ fn parse_scaled_inner(lang: &str, text: &str, scales: &[(String, i64)], conns: &
         let right = trim_connectors(&toks[i..].join(" "), conns);
         if let (Some(l), Some(r)) = (lookup_plain(lang, &left), lookup_plain(lang, &right)) {
             if l >= 100 && l % 100 == 0 && (1..100).contains(&r) {
+                return Some(l + r);
+            }
+            // Tens joined with the connector where num2words glues them: es
+            // "veinte y uno" (num2words: "veintiuno") = 21. The connector must
+            // be spoken — "veinte uno" stays two numbers.
+            if (20..100).contains(&l)
+                && l % 10 == 0
+                && (1..10).contains(&r)
+                && conns.contains(&toks[i])
+            {
                 return Some(l + r);
             }
         }

@@ -646,6 +646,14 @@ pub(crate) fn tens_value(word: &str) -> Option<i64> {
     TENS.iter().find(|(w, _)| *w == word).map(|&(_, v)| v)
 }
 
+/// Is `word` a scale word (`_SCALES`: "hundred", "thousand", "million", ...)?
+/// The sentence walker lets "a"/"an" open a run in front of one ("a hundred
+/// dollars" is 100 dollars) and keeps one that follows a decimal as a word
+/// ("two point five million" reads better than 2500000).
+pub(crate) fn is_scale_word(word: &str) -> bool {
+    SCALES.iter().any(|(w, _)| *w == word)
+}
+
 /// `_SCALES`, as (word, power-of-ten). "hundred" is 100 = 10^2.
 ///
 /// Note "hundred" is a member here *and* is special-cased ahead of the
