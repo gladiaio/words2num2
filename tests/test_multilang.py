@@ -3,6 +3,7 @@
 
 These tests require ``num2words2`` to be installed.
 """
+
 import pytest
 
 num2words2 = pytest.importorskip("num2words2")
@@ -68,3 +69,22 @@ def test_es_ciento_composes_in_sentence(text, expected):
 
 def test_es_bare_ciento_is_one_hundred():
     assert words2num("ciento", lang="es") == 100
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        # Apocope inside a number ("un" for "uno" before a noun or a scale word):
+        # num2words never renders it, so the walker stopped the run before it.
+        ("cincuenta y un centavos", "51 centavos"),
+        ("un mil treinta y cuatro dólares", "1034 dólares"),
+        ("veintiún dólares", "21 dólares"),
+        ("treinta y una llamadas", "31 llamadas"),
+        # On its own it is an article.
+        ("un momento por favor", "un momento por favor"),
+        ("una llamada", "una llamada"),
+        ("el 2 y cinco", "el 2 y 5"),
+    ],
+)
+def test_es_apocope_inside_a_number(text, expected):
+    assert words2num_sentence(text, lang="es") == expected

@@ -200,7 +200,7 @@ fn scale_cache() -> &'static RwLock<HashMap<String, Vec<(String, i64)>>> {
 /// 10^3 and 10^6 are probed — a language's 10^9 is often a *compound* of these
 /// ("mil millones", "mil milhões") and the recursion composes it from the parts,
 /// so probing 10^9 directly would mis-map its last token ("millones") to 10^9.
-fn scale_words(lang: &str) -> Vec<(String, i64)> {
+pub fn scale_words(lang: &str) -> Vec<(String, i64)> {
     if let Some(v) = scale_cache().read().unwrap().get(lang) {
         return v.clone();
     }

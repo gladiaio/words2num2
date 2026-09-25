@@ -589,6 +589,16 @@ impl Converter {
         self.to_cardinal(token).is_ok()
     }
 
+    /// The apocopated form a language uses inside a number ("cincuenta y
+    /// **un** centavos", "**un** mil") mapped to the word the reverse table
+    /// holds. `None` for a word that is not one, or for English.
+    fn apocope(&self, token: &str) -> Option<&'static str> {
+        match self {
+            Converter::En => None,
+            Converter::Table(lang) => apocope_word(lang, token),
+        }
+    }
+
     fn to_cardinal(&self, text: &str) -> Result<W2nValue, W2nError> {
         match self {
             Converter::En => en_convert(crate::en_to_cardinal(text)),
@@ -707,7 +717,45 @@ fn en_convert(
 
 /// Port of `Words2Num_Base._convert`: reverse-table lookup, then the
 /// sign/digit/error tail (`_parse_literal`).
+/// Apocopated number words per language, canonical spelling on the right:
+/// es/gl "un" / "una" / "veintiún" (num2words renders 1 as "uno", 21 as
+/// "veintiuno"; speech drops the vowel before a noun or a scale word).
+fn apocope_word(lang: &str, token: &str) -> Option<&'static str> {
+    let base = lang.split(&['_', '-'][..]).next().unwrap_or(lang);
+    match (base, token) {
+        ("es" | "gl", "un" | "una") => Some("uno"),
+        ("es", "veintiun" | "veintiún" | "veintiuna") => Some("veintiuno"),
+        _ => None,
+    }
+}
+
+/// Canonicalize apocopes inside a number: "cincuenta y un" -> "cincuenta y
+/// uno", "un mil" -> "mil" (num2words spells 1000 without a unit). A lone
+/// "un" / "una" is left alone: on its own it is an article, not a count.
+fn canonical_apocopes(lang: &str, text: &str) -> Option<String> {
+    let norm = crate::normalize(text);
+    let toks: Vec<&str> = norm.split_whitespace().collect();
+    if !toks.iter().any(|t| apocope_word(lang, t).is_some()) {
+        return None;
+    }
+    if toks.len() == 1 && matches!(toks[0], "un" | "una") {
+        return None;
+    }
+    let mut out: Vec<&str> = toks.iter().map(|t| apocope_word(lang, t).unwrap_or(t)).collect();
+    if out.len() >= 2 && out[0] == "uno" && crate::scale_words(lang).iter().any(|(w, _)| w == out[1]) {
+        out.remove(0);
+    }
+    Some(out.join(" "))
+}
+
 fn base_convert(lang: &str, text: &str, ordinal: bool) -> Result<W2nValue, W2nError> {
+    if !ordinal && crate::supported_langs().contains(&lang) {
+        if let Some(canon) = canonical_apocopes(lang, text) {
+            if let Ok(v) = base_convert(lang, &canon, false) {
+                return Ok(v);
+            }
+        }
+    }
     // `_rust_lookup`: guarded on `LANG in _RUST_LANGS`, and any error from the
     // core is swallowed to `None` (`except Exception: return None`).
     if crate::supported_langs().contains(&lang) {
@@ -941,8 +989,15 @@ fn sentence_to_en_value(v: W2nValue) -> crate::w2n_lang_en::W2nValue {
 
 /// `SentenceConverter._starts_run` — a run must open with a real number word,
 /// never with `"and"` / `"point"` / `"minus"`.
+/// A token that already holds a digit ("850", "850-820-9095", "$426", "94504")
+/// is a literal: it never starts or extends a run. Without this, adjacent
+/// numerals were summed ("calling from 850 820 9095" came out as "10765").
+fn holds_digit(token: &str) -> bool {
+    token.chars().any(|c| c.is_ascii_digit())
+}
+
 fn starts_run(converter: &Converter, token: &str) -> bool {
-    if token.is_empty() {
+    if token.is_empty() || holds_digit(token) {
         return false;
     }
     let dehyphened = token.replace('-', " ");
@@ -953,10 +1008,10 @@ fn starts_run(converter: &Converter, token: &str) -> bool {
 
 /// `SentenceConverter._is_candidate` — cheap pre-filter for run growth.
 fn is_candidate(converter: &Converter, token: &str, includable: &[&str]) -> bool {
-    if token.is_empty() {
+    if token.is_empty() || holds_digit(token) {
         return false;
     }
-    if includable.contains(&token) {
+    if includable.contains(&token) || converter.apocope(token).is_some() {
         return true;
     }
     let dehyphened = token.replace('-', " ");
@@ -1154,9 +1209,16 @@ pub fn words2num_sentence(
             i += 1;
             continue;
         }
-        // A run must START with a real number word.
+        // A run must START with a real number word, or with an apocope
+        // ("un" in es "un mil") followed by one.
         let head = rstrip_punct(piece).to_lowercase();
-        if !starts_run(&converter, &head) {
+        let apocope_head = converter.apocope(&head).is_some()
+            && !ends_with_terminal_punct(piece)
+            && parts[i + 1..]
+                .iter()
+                .find(|t| !py_str_isspace(t))
+                .is_some_and(|t| starts_run(&converter, &rstrip_punct(t).to_lowercase()));
+        if !starts_run(&converter, &head) && !apocope_head {
             out.push_str(piece);
             i += 1;
             continue;
@@ -2648,6 +2710,33 @@ mod digits_tests {
             s("ciento cincuenta y cuatro dólares", "es", "cardinal", false).unwrap(),
             "154 dólares"
         );
+        // Tokens that already hold digits are literals: never summed or merged.
+        assert_eq!(
+            s("calling from 850 820 9095.", "en", "cardinal", false).unwrap(),
+            "calling from 850 820 9095."
+        );
+        assert_eq!(s("850-820-9095", "en", "cardinal", false).unwrap(), "850-820-9095");
+        assert_eq!(
+            s("zip 94504 amount 426 and 93 cents", "en", "cardinal", false).unwrap(),
+            "zip 94504 amount 426 and 93 cents"
+        );
+        assert_eq!(s("press 1 or two", "en", "cardinal", false).unwrap(), "press 1 or 2");
+        assert_eq!(s("el 2 y cinco", "es", "cardinal", false).unwrap(), "el 2 y 5");
+        // es: apocope "un" inside a number, never on its own.
+        assert_eq!(
+            s("cincuenta y un centavos", "es", "cardinal", false).unwrap(),
+            "51 centavos"
+        );
+        assert_eq!(
+            s("un mil treinta y cuatro dólares", "es", "cardinal", false).unwrap(),
+            "1034 dólares"
+        );
+        assert_eq!(s("veintiún dólares", "es", "cardinal", false).unwrap(), "21 dólares");
+        assert_eq!(
+            s("un momento por favor", "es", "cardinal", false).unwrap(),
+            "un momento por favor"
+        );
+        assert_eq!(s("una llamada", "es", "cardinal", false).unwrap(), "una llamada");
         assert_eq!(s("ciento uno", "es", "cardinal", false).unwrap(), "101");
     }
 }
