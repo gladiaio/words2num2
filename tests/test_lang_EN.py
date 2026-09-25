@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """English words-to-number tests."""
+
 from decimal import Decimal
 
 import pytest
@@ -91,10 +92,7 @@ def test_empty_input_raises():
 
 
 def test_sentence_simple():
-    assert (
-        words2num_sentence("I bought twenty-three apples.")
-        == "I bought 23 apples."
-    )
+    assert words2num_sentence("I bought twenty-three apples.") == "I bought 23 apples."
 
 
 def test_sentence_multiple_runs():
@@ -118,6 +116,7 @@ def test_sentence_preserves_punctuation():
 # a preceding one. "three sixty" is two numbers read in sequence, not 3 + 60.
 # See gladiaio/words2num2#17.
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.parametrize(
     "sentence,expected",
@@ -175,6 +174,7 @@ def test_year_path_still_reads_pairs(text, expected):
 # single digits is a digit string. Neither is summed.
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.parametrize(
     "sentence,expected",
     [
@@ -214,6 +214,23 @@ def test_sentence_reads_spoken_years(sentence, expected):
     ],
 )
 def test_sentence_digit_runs_concatenate(sentence, expected):
+    assert words2num_sentence(sentence) == expected
+
+
+@pytest.mark.parametrize(
+    "sentence,expected",
+    [
+        # A token that already holds digits is a literal: adjacent numerals were
+        # summed ("850 820 9095" came out as 10765, a phone number lost).
+        ("calling from 850 820 9095.", "calling from 850 820 9095."),
+        ("850-820-9095", "850-820-9095"),
+        ("zip 94504 amount 426 and 93 cents", "zip 94504 amount 426 and 93 cents"),
+        ("press 1 or two", "press 1 or 2"),
+        ("$426 and ninety three cents", "$426 and 93 cents"),
+        ("2025 and twenty five", "2025 and 25"),
+    ],
+)
+def test_sentence_digit_tokens_are_literals(sentence, expected):
     assert words2num_sentence(sentence) == expected
 
 

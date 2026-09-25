@@ -6,7 +6,7 @@ build-backend = "maturin"
 name = "words2num2"
 # Static base version. The release CI overrides it from the pushed git tag
 # (see .github/workflows/release.yml); bump here for local source builds.
-version = "0.3.3"
+version = "0.3.4"
 license = "LGPL-2.1-only"
 license-files = ["COPYING"]
 description = "Rust-powered inverse of num2words2: parse spoken-form numbers back to numeric values across 100+ languages, optimized for ASR/LLM/speech."

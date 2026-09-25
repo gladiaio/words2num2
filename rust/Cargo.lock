@@ -81,7 +81,7 @@ dependencies = [
 
 [[package]]
 name = "num2words2-core"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "bigdecimal",
  "num-bigint",
@@ -227,7 +227,7 @@ dependencies = [
 
 [[package]]
 name = "words2num2-core"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "bigdecimal",
  "num-bigint",
@@ -237,7 +237,7 @@ dependencies = [
 
 [[package]]
 name = "words2num2-py"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "bigdecimal",
  "num-bigint",
