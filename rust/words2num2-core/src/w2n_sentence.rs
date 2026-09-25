@@ -1088,9 +1088,11 @@ fn en_number_words(parts: &[String], i: usize) -> Vec<EnWord> {
         let clean = rstrip_punct(tok).to_lowercase().replace('-', " ");
         let subs = py_split_whitespace(&clean);
         if subs.is_empty()
-            || !subs
-                .iter()
-                .all(|w| *w == "o" || unit_value(w).is_some() || tens_value(w).is_some())
+            || !subs.iter().all(|w| {
+                matches!(*w, "o" | "double" | "triple")
+                    || unit_value(w).is_some()
+                    || tens_value(w).is_some()
+            })
         {
             break;
         }
@@ -1114,30 +1116,95 @@ fn en_number_words(parts: &[String], i: usize) -> Vec<EnWord> {
 /// phone number: "four five six seven" -> "4567", "zero six one two" ->
 /// "0612". Two or more consecutive single-digit words (zero, one..nine), no
 /// tens or scale word among them; "oh"/"o" count as 0 only *inside* such a
-/// run, never as its first word. A lone digit word ("press one") is left to
-/// the cardinal grammar, as is "twenty five". The digits are concatenated,
-/// never summed, and a leading zero is kept — which is why this returns the
-/// string rather than a value. Also returns the last part index covered.
+/// run, never as its first word; "double"/"triple" repeat the digit after
+/// them ("double zero seven" -> "007"). A lone digit word ("press one") is
+/// left to the cardinal grammar, as is "twenty five". The digits are
+/// concatenated, never summed, and a leading zero is kept — which is why
+/// this returns the string rather than a value. Also returns the last part
+/// index covered.
 fn en_digit_run(parts: &[String], i: usize) -> Option<(String, usize)> {
     use crate::w2n_lang_en::unit_value;
     let mut digits = String::new();
     let mut end: Option<(usize, usize)> = None;
+    let mut repeat = 1usize;
     for (k, w) in en_number_words(parts, i).iter().enumerate() {
         let d = match w.word.as_str() {
             "oh" | "o" if k > 0 => 0,
             "oh" | "o" | "nought" | "naught" => break,
+            "double" | "triple" => {
+                if repeat > 1 {
+                    break;
+                }
+                repeat = if w.word == "double" { 2 } else { 3 };
+                continue;
+            }
             other => match unit_value(other) {
                 Some(v) if v <= 9 => v,
                 _ => break,
             },
         };
-        digits.push(char::from(b'0' + d as u8));
+        for _ in 0..repeat {
+            digits.push(char::from(b'0' + d as u8));
+        }
+        repeat = 1;
         if w.last {
             end = Some((digits.len(), w.part));
         }
     }
     let (len, part) = end?;
     if len < 2 {
+        return None;
+    }
+    digits.truncate(len);
+    Some((digits, part))
+}
+
+/// The digit-string reading for a reverse-table language: fr "sept cinq
+/// zéro un zéro" -> "75010", es "seis uno nueve ocho cero" -> "61980", fr
+/// "zéro six" -> "06". Same rules as [`en_digit_run`]: two or more
+/// consecutive single-digit words, each a whole part, the run closing on
+/// terminal punctuation. A run that opens on the article-number ("un",
+/// "uno", "um") needs three digits — "un deux" is two words, "un deux
+/// trois" a dictation.
+fn table_digit_run(
+    converter: &Converter,
+    resolved: &str,
+    parts: &[String],
+    i: usize,
+) -> Option<(String, usize)> {
+    let mut digits = String::new();
+    let mut end: Option<(usize, usize)> = None;
+    let mut j = i;
+    let mut article_head = false;
+    while j < parts.len() {
+        let tok = &parts[j];
+        if py_str_isspace(tok) {
+            j += 1;
+            continue;
+        }
+        let clean = rstrip_punct(tok).to_lowercase();
+        if clean.contains('-') {
+            break;
+        }
+        let article = is_article_word(resolved, &clean);
+        let d = match converter.to_cardinal(&clean) {
+            Ok(W2nValue::Int(v)) if v >= BigInt::from(0) && v <= BigInt::from(9) => v.to_string(),
+            // es "un", fr "une": not in the table on their own, but 1 here.
+            _ if article => "1".to_string(),
+            _ => break,
+        };
+        if digits.is_empty() {
+            article_head = article;
+        }
+        digits.push_str(&d);
+        end = Some((digits.len(), j));
+        if ends_with_terminal_punct(tok) {
+            break;
+        }
+        j += 1;
+    }
+    let (len, part) = end?;
+    if len < 2 || (article_head && len < 3) {
         return None;
     }
     digits.truncate(len);
@@ -1198,16 +1265,85 @@ const INCLUDABLE_EN: [&str; 7] = ["and", "point", "dot", "minus", "negative", "a
 fn includable_for(resolved: &str) -> &'static [&'static str] {
     let base = resolved.split(&['_', '-'][..]).next().unwrap_or(resolved);
     match base {
-        "es" | "gl" => &["y", "e"],
-        "pt" | "it" => &["e"],
-        "fr" => &["et"],
-        "ca" => &["i"],
-        "de" => &["und"],
-        "nl" | "af" => &["en"],
-        "ro" => &["si", "și"],
-        "pl" => &["i"],
+        "es" | "gl" => &["y", "e", "coma", "punto"],
+        "pt" => &["e", "vírgula", "virgula", "ponto"],
+        "it" => &["e", "virgola", "punto"],
+        "fr" => &["et", "virgule"],
+        "ca" => &["i", "coma"],
+        "de" => &["und", "komma"],
+        "nl" | "af" => &["en", "komma"],
+        "ro" => &["si", "și", "virgulă", "virgula"],
+        "pl" => &["i", "przecinek"],
         _ => &[],
     }
+}
+
+/// The spoken decimal separator of a language and the character it stands
+/// for: fr "virgule" → ",", es "punto" → ".", "coma" → ",". English "point"
+/// belongs to its own grammar.
+fn decimal_word(resolved: &str, word: &str) -> Option<char> {
+    let base = resolved.split(&['_', '-'][..]).next().unwrap_or(resolved);
+    match (base, word) {
+        ("fr", "virgule")
+        | ("es" | "gl" | "ca", "coma")
+        | ("pt", "virgula")
+        | ("it", "virgola")
+        | ("de" | "nl" | "af", "komma")
+        | ("ro", "virgula")
+        | ("pl", "przecinek") => Some(','),
+        ("es" | "gl" | "pt" | "it", "punto" | "ponto") => Some('.'),
+        _ => None,
+    }
+}
+
+/// A decimal spoken in a reverse-table language: "trois virgule cinq" →
+/// ("3", ',', "5"), "dos coma cero cinco" → ("2", ',', "05"), "deux virgule
+/// cinquante" → ("2", ',', "50"). The fraction is single-digit words read
+/// one by one, or one number below 100. `None` when it is not one.
+fn table_decimal(
+    converter: &Converter,
+    resolved: &str,
+    text: &str,
+) -> Option<(String, char, String)> {
+    let norm = crate::normalize(text);
+    let toks: Vec<&str> = norm.split_whitespace().collect();
+    let pos = toks
+        .iter()
+        .position(|t| decimal_word(resolved, t).is_some())?;
+    let sep = decimal_word(resolved, toks[pos])?;
+    let int_part = if pos == 0 {
+        "0".to_string()
+    } else {
+        match converter.to_cardinal(&toks[..pos].join(" ")).ok()? {
+            W2nValue::Int(i) => i.to_string(),
+            _ => return None,
+        }
+    };
+    let frac = &toks[pos + 1..];
+    if frac.is_empty() {
+        return None;
+    }
+    let mut digits = String::new();
+    for t in frac {
+        match converter.to_cardinal(t).ok()? {
+            W2nValue::Int(d) if d >= BigInt::from(0) && d <= BigInt::from(9) => {
+                digits.push_str(&d.to_string())
+            }
+            _ => {
+                digits.clear();
+                break;
+            }
+        }
+    }
+    if digits.is_empty() {
+        match converter.to_cardinal(&frac.join(" ")).ok()? {
+            W2nValue::Int(n) if n >= BigInt::from(0) && n < BigInt::from(100) => {
+                digits = n.to_string()
+            }
+            _ => return None,
+        }
+    }
+    Some((int_part, sep, digits))
 }
 
 /// "pour cent" / "por ciento" / "per cent": the second word is the number 100
@@ -1374,15 +1510,38 @@ fn ordinal_figures(resolved: &str, n2w_key: &str, n: &BigInt, feminine: bool) ->
     Some(format!("{}{}", n, suffix))
 }
 
-/// en "two thirds", "three quarters": a plural ordinal after a cardinal is a
-/// fraction, and the cardinal stays in words with it.
-fn en_plural_ordinal(word: Option<&str>) -> bool {
-    word.is_some_and(|w| {
-        w.strip_suffix('s')
-            .is_some_and(|stem| crate::w2n_lang_en::ordinal_cardinal(stem).is_some())
-            || w == "halves"
-            || w == "quarters"
-    })
+/// "two thirds", "three quarters", fr "deux tiers", es "tres cuartos": a
+/// fraction word (a plural ordinal, or the irregular half / third /
+/// quarter) after a cardinal makes it a fraction, and the cardinal stays in
+/// words with it.
+fn fraction_follows(converter: &Converter, resolved: &str, word: Option<&str>) -> bool {
+    let Some(w) = word else { return false };
+    let base = resolved.split(&['_', '-'][..]).next().unwrap_or(resolved);
+    let norm = crate::normalize(w);
+    let irregular = match base {
+        "en" => "half halves quarter quarters",
+        "fr" => "demi demis demie demies tiers quart quarts",
+        "es" | "gl" => "medio medios media medias tercio tercios cuarto cuartos",
+        "pt" => "meio meios meia meias terco tercos quarto quartos",
+        "it" => "mezzo mezzi mezza mezze terzo terzi quarto quarti",
+        "ca" => "mig mitjos mitja mitges terc tercos quart quarts",
+        "de" => "halb halbe drittel viertel",
+        "nl" => "half halve derde kwart",
+        _ => "",
+    };
+    if irregular.split_whitespace().any(|f| f == norm) {
+        return true;
+    }
+    match converter {
+        Converter::En => norm
+            .strip_suffix('s')
+            .is_some_and(|stem| crate::w2n_lang_en::ordinal_cardinal(stem).is_some()),
+        // A plural ordinal ("cinquièmes", "quintos"): the ordinal table holds
+        // the singular.
+        Converter::Table(lang) => norm.strip_suffix('s').is_some_and(|stem| {
+            matches!(base_convert(lang, stem, true), Ok(W2nValue::Int(n)) if n >= BigInt::from(3))
+        }),
+    }
 }
 
 /// The word two parts before / after `i`, skipping blanks.
@@ -1421,6 +1580,11 @@ fn ordinal_rendering(
     if single && is_indefinite(resolved, prev.as_deref()) {
         return None;
     }
+    // es/pt "cuartos", "tercios": the plural of an ordinal is a fraction.
+    let base = resolved.split(&['_', '-'][..]).next().unwrap_or(resolved);
+    if single && matches!(base, "es" | "pt" | "gl") && crate::normalize(words[0]).ends_with('s') {
+        return None;
+    }
     if single && is_ambiguous_ordinal(resolved, words[0]) {
         let next = next_word(parts, end);
         let prev2 = prev_word2(parts, i);
@@ -1450,7 +1614,7 @@ fn ordinal_rendering(
         }
     }
     let last = crate::normalize(words[words.len() - 1]);
-    let feminine = match resolved.split(&['_', '-'][..]).next().unwrap_or(resolved) {
+    let feminine = match base {
         "fr" => last == "premiere",
         "es" | "pt" | "it" | "gl" => last.ends_with('a') || last.ends_with("as"),
         _ => false,
@@ -1687,7 +1851,15 @@ pub fn words2num_sentence(
         after_decimal = false;
         let ordinal_head = plain && converter.is_ordinal_word(&head);
         let article_number = plain && is_article_word(&resolved, &head);
-        if (!starts_run(&converter, &head) && !apocope_head && !article_head && !ordinal_head)
+        // en "double zero seven".
+        let repeat_head = en_cardinal
+            && matches!(head.as_str(), "double" | "triple")
+            && en_digit_run(&parts, i).is_some();
+        if (!starts_run(&converter, &head)
+            && !apocope_head
+            && !article_head
+            && !ordinal_head
+            && !repeat_head)
             || percent_tail
             || decimal_scale
         {
@@ -1708,20 +1880,27 @@ pub fn words2num_sentence(
 
         // A digit string read one digit at a time is concatenated, not
         // summed: "four five six seven" is 4567, never 22.
-        if en_cardinal {
-            if let Some((digits, end)) = en_digit_run(&parts, i) {
-                let run = parts[i..=end].concat();
-                out.push_str(&digits);
-                out.push_str(trailing_punct(&run));
-                i = end + 1;
-                continue;
-            }
+        let digit_run = if en_cardinal {
+            en_digit_run(&parts, i)
+        } else if plain {
+            table_digit_run(&converter, &resolved, &parts, i)
+        } else {
+            None
+        };
+        if let Some((digits, end)) = digit_run {
+            let run = parts[i..=end].concat();
+            out.push_str(&digits);
+            out.push_str(trailing_punct(&run));
+            i = end + 1;
+            continue;
         }
 
         // Grow a number run starting at i.
         let mut best_value: Option<W2nValue> = None;
         let mut best_end = i;
         let mut best_ordinal = false;
+        // The spoken decimal separator of a table-language decimal run.
+        let mut best_sep: Option<char> = None;
         let mut j = i;
         while j < n {
             let tok = &parts[j];
@@ -1745,6 +1924,23 @@ pub fn words2num_sentence(
             // a trailing ordinal as its cardinal, so the last word tells.
             let hit = match converter.convert(to, &stripped, has_kwargs) {
                 Ok(v) => Some((v, plain && converter.is_ordinal_word(&clean))),
+                Err(_) if plain && !en_cardinal => {
+                    // "trois virgule cinq": a decimal spoken in a table language.
+                    let dec = table_decimal(&converter, &resolved, &stripped).and_then(
+                        |(int, sep, frac)| {
+                            BigDecimal::from_str(&format!("{}.{}", int, frac))
+                                .ok()
+                                .map(|d| (W2nValue::Dec(d), sep))
+                        },
+                    );
+                    match dec {
+                        Some((v, sep)) => {
+                            best_sep = Some(sep);
+                            Some((v, false))
+                        }
+                        None => converter.to_ordinal(&stripped).ok().map(|v| (v, true)),
+                    }
+                }
                 Err(_) if plain => converter.to_ordinal(&stripped).ok().map(|v| (v, true)),
                 Err(_) => None,
             };
@@ -1785,8 +1981,15 @@ pub fn words2num_sentence(
             let trailing = trailing_punct(&run);
             let rendered = if best_ordinal {
                 ordinal_rendering(&converter, &resolved, &parts, i, best_end, &v)
-            } else if en_cardinal && en_plural_ordinal(next_word(&parts, best_end).as_deref()) {
-                // "two thirds": a fraction, kept in words.
+            } else if plain
+                && !best_ordinal
+                && fraction_follows(
+                    &converter,
+                    &resolved,
+                    next_word(&parts, best_end).as_deref(),
+                )
+            {
+                // "two thirds", "deux tiers": a fraction, kept in words.
                 None
             } else if article_number
                 && best_end == i
@@ -1794,6 +1997,8 @@ pub fn words2num_sentence(
             {
                 // A lone "one" / "un" / "um" is an article or a pronoun.
                 None
+            } else if let (W2nValue::Dec(_), Some(sep)) = (&v, best_sep) {
+                Some(v.py_str().replacen('.', &sep.to_string(), 1))
             } else {
                 Some(v.py_str())
             };
