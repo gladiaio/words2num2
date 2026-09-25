@@ -654,6 +654,15 @@ pub(crate) fn is_scale_word(word: &str) -> bool {
     SCALES.iter().any(|(w, _)| *w == word)
 }
 
+/// The cardinal an ordinal word stands for (`_ORDINAL_TO_CARDINAL`):
+/// "fifteenth" -> "fifteen". `None` for any other word.
+pub(crate) fn ordinal_cardinal(word: &str) -> Option<&'static str> {
+    ORDINAL_TO_CARDINAL
+        .iter()
+        .find(|(o, _)| *o == word)
+        .map(|&(_, c)| c)
+}
+
 /// `_SCALES`, as (word, power-of-ten). "hundred" is 100 = 10^2.
 ///
 /// Note "hundred" is a member here *and* is special-cased ahead of the

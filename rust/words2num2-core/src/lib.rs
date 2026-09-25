@@ -160,26 +160,98 @@ pub fn lookup(
     {
         let t = tables().read().unwrap();
         if let Some(tab) = t.get(&key) {
-            return Ok(table_get(tab, lang, &normalized).map(|v| sign * v));
+            return Ok(table_get(tab, lang, &normalized, ordinal).map(|v| sign * v));
         }
     }
     let built = build_table(lang, ordinal)?;
-    let got = table_get(&built, lang, &normalized).map(|v| sign * v);
+    let got = table_get(&built, lang, &normalized, ordinal).map(|v| sign * v);
     tables().write().unwrap().insert(key, built);
     Ok(got)
 }
 
-/// A table hit for `normalized`, or for one of its spoken plural variants.
-fn table_get(tab: &HashMap<String, i64>, lang: &str, normalized: &str) -> Option<i64> {
+/// A table hit for `normalized`, or for one of its spoken variants: the fr
+/// plural -s on a cardinal, the gender / declension / apocope of an ordinal.
+fn table_get(
+    tab: &HashMap<String, i64>,
+    lang: &str,
+    normalized: &str,
+    ordinal: bool,
+) -> Option<i64> {
     if let Some(v) = tab.get(normalized) {
         return Some(*v);
     }
-    for variant in fr_plural_variants(lang, normalized) {
+    let variants = if ordinal {
+        ordinal_variants(lang, normalized)
+    } else {
+        fr_plural_variants(lang, normalized)
+    };
+    for variant in variants {
         if let Some(v) = tab.get(&variant) {
             return Some(*v);
         }
     }
     None
+}
+
+/// num2words renders one ordinal form per number (fr "premier", es "primero",
+/// de "zweite", it "primo"); speech agrees it with the noun. The canonical
+/// spelling of an inflected token, or `None` when it is not one.
+fn ordinal_canonical(base: &str, tok: &str) -> Option<String> {
+    let s = match (base, tok) {
+        ("fr", "premiere") => "premier".to_string(),
+        ("fr", "second" | "seconde") => "deuxieme".to_string(),
+        ("es", "primer" | "primera") => "primero".to_string(),
+        ("es", "tercer" | "tercera") => "tercero".to_string(),
+        ("es" | "pt" | "it", t) if t.ends_with('a') && t.len() > 3 => {
+            format!("{}o", &t[..t.len() - 1])
+        }
+        ("es" | "pt", t) if t.ends_with("os") || t.ends_with("as") => {
+            format!("{}o", &t[..t.len() - 2])
+        }
+        ("it", t) if (t.ends_with('i') || t.ends_with('e')) && t.len() > 3 => {
+            format!("{}o", &t[..t.len() - 1])
+        }
+        // de declines "zweite" -> zweiten / zweiter / zweites / zweitem.
+        ("de", t)
+            if t.len() > 4
+                && (t.ends_with("ten")
+                    || t.ends_with("ter")
+                    || t.ends_with("tes")
+                    || t.ends_with("tem")) =>
+        {
+            t[..t.len() - 1].to_string()
+        }
+        _ => return None,
+    };
+    Some(s)
+}
+
+/// Every combination of canonicalising the inflected ordinal tokens of
+/// `normalized` (at most three such tokens).
+fn ordinal_variants(lang: &str, normalized: &str) -> Vec<String> {
+    let base = lang.split(&['_', '-'][..]).next().unwrap_or(lang);
+    let toks: Vec<&str> = normalized.split_whitespace().collect();
+    let canon: Vec<Option<String>> = toks.iter().map(|t| ordinal_canonical(base, t)).collect();
+    let slots: Vec<usize> = canon
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| c.is_some())
+        .map(|(i, _)| i)
+        .collect();
+    if slots.is_empty() || slots.len() > 3 {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    for mask in 1u32..(1 << slots.len()) {
+        let mut v: Vec<&str> = toks.clone();
+        for (k, &pos) in slots.iter().enumerate() {
+            if mask & (1 << k) != 0 {
+                v[pos] = canon[pos].as_deref().unwrap_or(toks[pos]);
+            }
+        }
+        out.push(v.join(" "));
+    }
+    out
 }
 
 /// fr: num2words writes "deux cents" and "quatre-vingts" but speech (and ASR)

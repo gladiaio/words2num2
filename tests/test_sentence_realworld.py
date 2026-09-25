@@ -79,3 +79,95 @@ def test_es_compounds(text, expected):
 )
 def test_en_compounds(text, expected):
     assert words2num_sentence(text, lang="en") == expected
+
+
+# ---------------------------------------------------------------------------
+# Ordinals. Plain cardinal mode reads them too and writes a rank in figures
+# ("15th", "1er", "2e", "3º", "2."). "first"/"second" and their translations
+# are only a rank next to a month (or "of the month"): "first of all", "wait
+# a second", "la première fois" stay in words. A fraction ("a fifth of", "two
+# thirds") stays in words too.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("due on the fifteenth", "due on the 15th"),
+        ("the twenty first of march", "the 21st of march"),
+        ("march twenty first", "march 21st"),
+        ("on june fifteenth two thousand twenty four", "on june 15th 2024"),
+        ("the twenty second of april", "the 22nd of april"),
+        ("on the thirty first", "on the 31st"),
+        ("my birthday is october third", "my birthday is october 3rd"),
+        ("the fourth of july", "the 4th of july"),
+        ("third quarter results", "3rd quarter results"),
+        ("one hundred and fifth", "105th"),
+        ("he came third", "he came 3rd"),
+        ("the eleventh", "the 11th"),
+        ("the twelfth of never", "the 12th of never"),
+        ("the hundredth customer", "the 100th customer"),
+        ("twenty-first century", "21st century"),
+        ("Fifteenth of June.", "15th of June."),
+        # first / second: a date, or just words.
+        ("the second of may", "the 2nd of may"),
+        ("september the first", "september the 1st"),
+        ("the first of the month", "the 1st of the month"),
+        ("first of all", "first of all"),
+        ("at first i thought", "at first i thought"),
+        ("your first name", "your first name"),
+        ("the first time", "the first time"),
+        ("wait a second", "wait a second"),
+        ("the second floor", "the second floor"),
+        # Fractions.
+        ("two thirds of the amount", "two thirds of the amount"),
+        ("three quarters", "three quarters"),
+        ("a fifth of it", "a fifth of it"),
+        # Digits are literals, never an ordinal.
+        ("the 2nd", "the 2nd"),
+    ],
+)
+def test_en_ordinals(text, expected):
+    assert words2num_sentence(text, lang="en") == expected
+
+
+@pytest.mark.parametrize(
+    "lang,text,expected",
+    [
+        ("fr", "le premier avril", "le 1er avril"),
+        ("fr", "la première de mars", "la 1re de mars"),
+        ("fr", "le premier du mois", "le 1er du mois"),
+        ("fr", "le vingt-troisième jour", "le 23e jour"),
+        ("fr", "au deuxième étage", "au 2e étage"),
+        ("fr", "au troisième trimestre", "au 3e trimestre"),
+        ("fr", "le quinzième", "le 15e"),
+        ("fr", "la première fois", "la première fois"),
+        ("fr", "premier ministre", "premier ministre"),
+        ("fr", "une seconde", "une seconde"),
+        ("fr", "un dixième", "1 dixième"),  # "un" itself: see the article tests
+        ("es", "el primero de mayo", "el 1º de mayo"),
+        ("es", "el primero de cada mes", "el 1º de cada mes"),
+        ("es", "el tercer piso", "el 3º piso"),
+        ("es", "la vigésima", "la 20ª"),
+        ("es", "el quinto", "el 5º"),
+        ("es", "la primera vez", "la primera vez"),
+        ("es", "las primeras", "las primeras"),
+        ("es", "un segundo", "un segundo"),
+        ("es", "el 2 y cinco", "el 2 y 5"),
+        ("de", "am zweiten april", "am 2. april"),
+        ("de", "am ersten mai", "am 1. mai"),
+        ("de", "der dritte", "der 3."),
+        ("de", "zum ersten mal", "zum ersten mal"),
+        ("it", "il primo maggio", "il 1º maggio"),
+        ("it", "il terzo piano", "il 3º piano"),
+        ("it", "la prima volta", "la prima volta"),
+        ("pt", "primeiro de maio", "1º de maio"),
+        ("pt", "o terceiro andar", "o 3º andar"),
+        ("pt", "a primeira vez", "a primeira vez"),
+        ("nl", "de tweede verdieping", "de 2e verdieping"),
+        ("nl", "vijftiende", "15e"),
+        ("nl", "de eerste keer", "de eerste keer"),
+    ],
+)
+def test_ordinals_other_languages(lang, text, expected):
+    assert words2num_sentence(text, lang=lang) == expected

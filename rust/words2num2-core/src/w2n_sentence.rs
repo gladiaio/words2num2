@@ -613,6 +613,29 @@ impl Converter {
         }
     }
 
+    /// Is `token` (one part, hyphens allowed) an ordinal: "fifteenth",
+    /// "twenty-first", fr "vingt-troisième", de "zweiten"?
+    fn is_ordinal_word(&self, token: &str) -> bool {
+        if holds_digit(token) {
+            return false; // "2" is a literal, not the ordinal table's business
+        }
+        match self {
+            Converter::En => token
+                .split('-')
+                .last()
+                .is_some_and(|w| crate::w2n_lang_en::ordinal_cardinal(w).is_some()),
+            Converter::Table(lang) => matches!(base_convert(lang, token, true), Ok(W2nValue::Int(_))),
+        }
+    }
+
+    /// The num2words2 key this converter renders with.
+    fn n2w_key(&self) -> &'static str {
+        match self {
+            Converter::En => "en",
+            Converter::Table(lang) => lang,
+        }
+    }
+
     fn to_year(&self, text: &str) -> Result<W2nValue, W2nError> {
         match self {
             Converter::En => en_convert(crate::en_to_year(text)),
@@ -1223,6 +1246,218 @@ fn next_word(parts: &[String], i: usize) -> Option<String> {
         .map(|t| rstrip_punct(t).to_lowercase())
 }
 
+/// Month names, for the date reading of "first"/"second" ("the first of
+/// march", "le premier avril"). Diacritics stripped, as `normalize` does.
+fn months(resolved: &str) -> &'static str {
+    let base = resolved.split(&['_', '-'][..]).next().unwrap_or(resolved);
+    match base {
+        "en" => {
+            "january february march april may june july august september october november \
+             december jan feb mar apr jun jul aug sep sept oct nov dec"
+        }
+        "fr" => {
+            "janvier fevrier mars avril mai juin juillet aout septembre octobre novembre decembre"
+        }
+        "es" => {
+            "enero febrero marzo abril mayo junio julio agosto septiembre setiembre octubre \
+             noviembre diciembre"
+        }
+        "de" => {
+            "januar janner februar marz april mai juni juli august september oktober november \
+             dezember"
+        }
+        "it" => {
+            "gennaio febbraio marzo aprile maggio giugno luglio agosto settembre ottobre \
+             novembre dicembre"
+        }
+        "pt" => {
+            "janeiro fevereiro marco abril maio junho julho agosto setembro outubro novembro \
+             dezembro"
+        }
+        "nl" => {
+            "januari februari maart april mei juni juli augustus september oktober november \
+             december"
+        }
+        "ca" => "gener febrer marc abril maig juny juliol agost setembre octubre novembre desembre",
+        _ => "",
+    }
+}
+
+fn is_month(resolved: &str, word: Option<&str>) -> bool {
+    word.is_some_and(|w| {
+        let norm = crate::normalize(w);
+        months(resolved).split_whitespace().any(|m| m == norm)
+    })
+}
+
+/// The indefinite article / "one" in front of a single ordinal makes it a
+/// fraction ("a fifth of", "un dixième"), which stays in words.
+fn is_indefinite(resolved: &str, word: Option<&str>) -> bool {
+    let base = resolved.split(&['_', '-'][..]).next().unwrap_or(resolved);
+    let Some(w) = word else { return false };
+    let list: &[&str] = match base {
+        "en" => &["a", "an", "one"],
+        "fr" => &["un", "une"],
+        "es" | "gl" | "ca" => &["un", "una", "uno"],
+        "it" => &["un", "uno", "una"],
+        "pt" => &["um", "uma"],
+        "de" => &["ein", "eine", "einen", "einem", "einer", "eines"],
+        "nl" => &["een"],
+        _ => &[],
+    };
+    list.contains(&w)
+}
+
+/// "first" and "second" (and their translations) are not only ranks: "first
+/// of all", "wait a second", "la première fois", "un momento, segundo". On
+/// their own they stay in words unless a month sits next to them.
+fn is_ambiguous_ordinal(resolved: &str, word: &str) -> bool {
+    let base = resolved.split(&['_', '-'][..]).next().unwrap_or(resolved);
+    let mut w = crate::normalize(word);
+    if matches!(base, "es" | "pt" | "gl") && w.ends_with('s') {
+        w.pop(); // "las primeras"
+    }
+    let list: &[&str] = match base {
+        "en" => &["first", "second"],
+        "fr" => &["premier", "premiere", "second", "seconde"],
+        "es" | "gl" => &["primero", "primer", "primera", "segundo", "segunda"],
+        "it" => &["primo", "prima", "secondo", "seconda"],
+        "pt" => &["primeiro", "primeira", "segundo", "segunda"],
+        "de" => &["erste", "ersten", "erster", "erstes", "erstem"],
+        "nl" => &["eerste"],
+        "ca" => &["primer", "primera", "segon", "segona"],
+        _ => &[],
+    };
+    list.contains(&w.as_str())
+}
+
+/// How a language writes the ordinal of `n` in figures: en 21st, fr 1er /
+/// 1re / 2e, es 3º / 3ª, de 2., nl 15e. `feminine` is the agreement the
+/// spoken form carried ("la vigésima", "la première"). Falls back to
+/// num2words2's `ordinal_num`, and to `None` (keep the words) where that has
+/// no rendering either.
+fn ordinal_figures(resolved: &str, n2w_key: &str, n: &BigInt, feminine: bool) -> Option<String> {
+    let base = resolved.split(&['_', '-'][..]).next().unwrap_or(resolved);
+    let suffix = match base {
+        "en" => {
+            let v = (n % BigInt::from(100))
+                .to_string()
+                .parse::<u32>()
+                .unwrap_or(0);
+            match (v % 10, v) {
+                (_, 11..=13) => "th",
+                (1, _) => "st",
+                (2, _) => "nd",
+                (3, _) => "rd",
+                _ => "th",
+            }
+        }
+        "fr" => match (*n == BigInt::from(1), feminine) {
+            (true, false) => "er",
+            (true, true) => "re",
+            _ => "e",
+        },
+        "es" | "pt" | "it" | "gl" => {
+            if feminine {
+                "ª"
+            } else {
+                "º"
+            }
+        }
+        "de" => ".",
+        "nl" => "e",
+        _ => {
+            return num2words2_core::get_lang_by_key(n2w_key)
+                .and_then(|l| l.to_ordinal_num(n).ok());
+        }
+    };
+    Some(format!("{}{}", n, suffix))
+}
+
+/// en "two thirds", "three quarters": a plural ordinal after a cardinal is a
+/// fraction, and the cardinal stays in words with it.
+fn en_plural_ordinal(word: Option<&str>) -> bool {
+    word.is_some_and(|w| {
+        w.strip_suffix('s')
+            .is_some_and(|stem| crate::w2n_lang_en::ordinal_cardinal(stem).is_some())
+            || w == "halves"
+            || w == "quarters"
+    })
+}
+
+/// The word two parts before / after `i`, skipping blanks.
+fn prev_word2(parts: &[String], i: usize) -> Option<String> {
+    let mut it = parts[..i].iter().rev().filter(|t| !py_str_isspace(t));
+    it.next()?;
+    it.next().map(|t| rstrip_punct(t).to_lowercase())
+}
+
+fn next_word2(parts: &[String], i: usize) -> Option<String> {
+    let mut it = parts[i + 1..].iter().filter(|t| !py_str_isspace(t));
+    it.next()?;
+    it.next().map(|t| rstrip_punct(t).to_lowercase())
+}
+
+/// The figures for an ordinal run (`parts[i..=end]`, value `v`), or `None`
+/// when it stays in words: a lone "first"/"second" away from a month, or a
+/// fraction ("a fifth", "un dixième"). A compound ("twenty first", "one
+/// hundred and fifth", "vingt-troisième") is always a rank.
+fn ordinal_rendering(
+    converter: &Converter,
+    resolved: &str,
+    parts: &[String],
+    i: usize,
+    end: usize,
+    v: &W2nValue,
+) -> Option<String> {
+    let W2nValue::Int(n) = v else { return None };
+    let run = rstrip_punct(py_strip(&parts[i..=end].concat())).to_lowercase();
+    let words: Vec<&str> = run
+        .split(&[' ', '-'][..])
+        .filter(|w| !w.is_empty())
+        .collect();
+    let single = words.len() == 1;
+    let prev = prev_word(parts, i);
+    if single && is_indefinite(resolved, prev.as_deref()) {
+        return None;
+    }
+    if single && is_ambiguous_ordinal(resolved, words[0]) {
+        let next = next_word(parts, end);
+        let prev2 = prev_word2(parts, i);
+        let next2 = next_word2(parts, end);
+        let of = matches!(
+            next.as_deref(),
+            Some("of" | "de" | "du" | "di" | "van" | "des")
+        );
+        let the = matches!(
+            prev.as_deref(),
+            Some("the" | "le" | "la" | "el" | "il" | "am" | "den" | "dia" | "o" | "lo")
+        );
+        // "the first of the month", "le premier du mois", "el primero de cada mes".
+        let of_the = of
+            && next2.as_deref().is_some_and(|w| {
+                "the each every next this last month mois chaque mes cada"
+                    .split_whitespace()
+                    .any(|d| d == w)
+            });
+        let date = is_month(resolved, next.as_deref())
+            || (of && is_month(resolved, next2.as_deref()))
+            || of_the
+            || is_month(resolved, prev.as_deref())
+            || (the && is_month(resolved, prev2.as_deref()));
+        if !date {
+            return None;
+        }
+    }
+    let last = crate::normalize(words[words.len() - 1]);
+    let feminine = match resolved.split(&['_', '-'][..]).next().unwrap_or(resolved) {
+        "fr" => last == "premiere",
+        "es" | "pt" | "it" | "gl" => last.ends_with('a') || last.ends_with("as"),
+        _ => false,
+    };
+    ordinal_figures(resolved, converter.n2w_key(), n, feminine)
+}
+
 /// Port of `words2num2.words2num_sentence` → `SentenceConverter.convert`.
 ///
 /// Walks the sentence and, at each position that opens with a real number
@@ -1250,6 +1485,9 @@ pub fn words2num_sentence(
     // to the cardinal walk: `to="year"` keeps its own pair reading, and any
     // extra keyword argument fails every conversion (see `has_kwargs`).
     let en_cardinal = matches!(converter, Converter::En) && to == "cardinal" && !has_kwargs;
+    // Plain cardinal mode (any language): ordinals are read too, and written
+    // in figures ("15th", "1er", "2e") when they are ranks.
+    let plain = to == "cardinal" && !has_kwargs;
 
     let percent = percent_phrase(&resolved);
 
@@ -1292,7 +1530,8 @@ pub fn words2num_sentence(
             && crate::w2n_lang_en::is_scale_word(&head)
             && !next_starts_run;
         after_decimal = false;
-        if (!starts_run(&converter, &head) && !apocope_head && !article_head)
+        let ordinal_head = plain && converter.is_ordinal_word(&head);
+        if (!starts_run(&converter, &head) && !apocope_head && !article_head && !ordinal_head)
             || percent_tail
             || decimal_scale
         {
@@ -1316,6 +1555,7 @@ pub fn words2num_sentence(
         // Grow a number run starting at i.
         let mut best_value: Option<W2nValue> = None;
         let mut best_end = i;
+        let mut best_ordinal = false;
         let mut j = i;
         while j < n {
             let tok = &parts[j];
@@ -1334,16 +1574,25 @@ pub fn words2num_sentence(
             // parse always both records the value and advances best_end. A
             // raised error is Python's `except Exception` — swallow and keep
             // growing.
-            match converter.convert(to, &stripped, has_kwargs) {
+            // The cardinal reading; failing that, in plain mode, the ordinal
+            // one ("vingt-troisième", "fifteenth"). The English grammar reads
+            // a trailing ordinal as its cardinal, so the last word tells.
+            let hit = match converter.convert(to, &stripped, has_kwargs) {
+                Ok(v) => Some((v, plain && converter.is_ordinal_word(&clean))),
+                Err(_) if plain => converter.to_ordinal(&stripped).ok().map(|v| (v, true)),
+                Err(_) => None,
+            };
+            match hit {
                 // A run never ends on a connector: "one and a half" is "1 and
                 // a half", not "1 half"; "five point" keeps its "point".
-                Ok(v) if candidate_is_number(&converter, &clean, includable) => {
+                Some((v, ordinal)) if candidate_is_number(&converter, &clean, includable) => {
                     best_value = Some(v);
                     best_end = j;
+                    best_ordinal = ordinal;
                 }
-                Ok(_) => {}
-                Err(_) if !candidate => break,
-                Err(_) => {}
+                Some(_) => {}
+                None if !candidate => break,
+                None => {}
             }
             // A token ending in terminal punctuation closes the run.
             if ends_with_terminal_punct(tok) {
@@ -1368,9 +1617,22 @@ pub fn words2num_sentence(
             // Preserve trailing punctuation that was stripped during parse.
             let run = parts[i..=best_end].concat();
             let trailing = trailing_punct(&run);
-            after_decimal = matches!(v, W2nValue::Dec(_)) && trailing.is_empty();
-            out.push_str(&v.py_str());
-            out.push_str(trailing);
+            let rendered = if best_ordinal {
+                ordinal_rendering(&converter, &resolved, &parts, i, best_end, &v)
+            } else if en_cardinal && en_plural_ordinal(next_word(&parts, best_end).as_deref()) {
+                // "two thirds": a fraction, kept in words.
+                None
+            } else {
+                Some(v.py_str())
+            };
+            match rendered {
+                Some(text) => {
+                    after_decimal = matches!(v, W2nValue::Dec(_)) && trailing.is_empty();
+                    out.push_str(&text);
+                    out.push_str(trailing);
+                }
+                None => out.push_str(&run),
+            }
             i = best_end + 1;
         } else {
             out.push_str(piece);
