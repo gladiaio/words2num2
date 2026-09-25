@@ -421,6 +421,57 @@ pub fn parse_scaled(lang: &str, text: &str) -> Option<i64> {
     parse_scaled_inner(lang, &normalize(text), &scale_words(lang), connector_words(lang))
 }
 
+/// The article that is also "one" in front of a scale word, for languages whose table
+/// does not hold it as a number: de "eine Million", nl "een miljoen".
+fn article_one(lang: &str, word: &str) -> bool {
+    let base = lang.split(&['_', '-'][..]).next().unwrap_or(lang);
+    matches!((base, word), ("de", "ein" | "eine") | ("nl" | "af", "een"))
+}
+
+/// A scale word glued into one token, as de / nl / it write it:
+/// "dreiundzwanzigtausend" -> (23, 1000, 0), "tweehonderdduizend" -> (200, 1000, 0),
+/// "ventitremila" -> (23, 1000, 0). `None` when the token holds no scale morpheme.
+fn split_glued_scale(lang: &str, tok: &str, scales: &[(String, i64)]) -> Option<i64> {
+    let base = lang.split(&['_', '-'][..]).next().unwrap_or(lang);
+    let mut words: Vec<(String, i64)> = scales.to_vec();
+    // The thousand morpheme of the agglutinative languages: `scale_words` derives its
+    // entries from whole renderings ("zweitausend"), never from the bare morpheme.
+    let thousand = match base {
+        "de" => Some("tausend"),
+        "nl" => Some("duizend"),
+        "af" => Some("duisend"),
+        "it" => Some("mila"), // "duemila", "ventitremila"
+        "sv" | "no" | "nb" | "nn" => Some("tusen"),
+        "da" => Some("tusind"),
+        _ => None,
+    };
+    if let Some(t) = thousand {
+        words.push((t.to_string(), 1_000));
+    }
+    for (w, mag) in &words {
+        let Some(pos) = tok.find(w.as_str()) else {
+            continue;
+        };
+        if pos == 0 || *mag < 1_000 {
+            continue; // the scale word itself, or a hundred morpheme (parse_year's job)
+        }
+        let pre = &tok[..pos];
+        let suf = &tok[pos + w.len()..];
+        // de "hunderttausend": the bare hundred morpheme is 100 (num2words writes "einhundert").
+        let high = lookup_plain(lang, pre)
+            .or_else(|| hundred_word(lang).filter(|h| h == pre).map(|_| 100))?;
+        let low = if suf.is_empty() {
+            0
+        } else {
+            lookup_plain(lang, suf)?
+        };
+        if (1..1000).contains(&high) && (0..*mag).contains(&low) {
+            return Some(high * mag + low);
+        }
+    }
+    None
+}
+
 fn parse_scaled_inner(lang: &str, text: &str, scales: &[(String, i64)], conns: &[&str]) -> Option<i64> {
     let text = trim_connectors(text.trim(), conns);
     let text = text.as_str();
@@ -431,14 +482,20 @@ fn parse_scaled_inner(lang: &str, text: &str, scales: &[(String, i64)], conns: &
     if let Some(v) = lookup_plain(lang, text) {
         return Some(v);
     }
+    if !text.contains(' ') {
+        if let Some(v) = split_glued_scale(lang, text, scales) {
+            return Some(v);
+        }
+    }
     // Split on the largest scale word present (whole-token match).
     let toks: Vec<&str> = text.split_whitespace().collect();
     for (word, mag) in scales {
         if let Some(pos) = toks.iter().position(|t| t == word) {
             let left = toks[..pos].join(" ");
             let right = toks[pos + 1..].join(" ");
-            // « mille » nu (pas de multiplicateur à gauche) = 1×mille.
-            let l = if trim_connectors(left.trim(), conns).is_empty() {
+            // « mille » nu (pas de multiplicateur à gauche) = 1×mille ; de « eine Million ».
+            let left_trim = trim_connectors(left.trim(), conns);
+            let l = if left_trim.is_empty() || article_one(lang, &left_trim) {
                 1
             } else {
                 parse_scaled_inner(lang, &left, scales, conns)?
@@ -466,6 +523,10 @@ fn parse_scaled_inner(lang: &str, text: &str, scales: &[(String, i64)], conns: &
         if let (Some(l), Some(r)) = (lookup_plain(lang, &left), lookup_plain(lang, &right)) {
             if l >= 100 && l % 100 == 0 && (1..100).contains(&r) {
                 return Some(l + r);
+            }
+            // fr counts hundreds by the dozen: "douze cents" = 1200, "dix-huit cents" = 1800.
+            if lang.starts_with("fr") && (11..100).contains(&l) && r == 100 {
+                return Some(l * 100);
             }
             // Tens joined with the connector where num2words glues them: es
             // "veinte y uno" (num2words: "veintiuno") = 21. The connector must
@@ -664,8 +725,12 @@ pub fn parse_year(lang: &str, text: &str) -> Option<i64> {
             }
         }
     }
-    // (A) two spoken 2-digit groups ("nineteen ninety-nine") -> a*100 + b.
-    if toks.len() == 2 {
+    // (A) two spoken 2-digit groups ("nineteen ninety-nine") -> a*100 + b. A Germanic
+    // habit (nl "negentien negenennegentig", da "nitten nitti"): Romance languages say
+    // the thousand ("mil novecientos"), and es "catorce treinta" is a time of day.
+    let base = lang.split(&['_', '-'][..]).next().unwrap_or(lang);
+    let pairs = matches!(base, "de" | "nl" | "af" | "da" | "sv" | "no" | "nb" | "nn" | "is");
+    if pairs && toks.len() == 2 {
         if let (Some(a), Some(b)) = (lookup_plain(lang, toks[0]), lookup_plain(lang, toks[1])) {
             if (10..=99).contains(&a) && (0..=99).contains(&b) {
                 return Some(a * 100 + b);

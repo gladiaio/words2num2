@@ -751,6 +751,9 @@ fn apocope_word(lang: &str, token: &str) -> Option<&'static str> {
         // fr agrees "un" with a feminine noun: "cinquante et une personnes",
         // "vingt et une heures". num2words only renders the masculine.
         ("fr", "une") => Some("un"),
+        // it "un milione", de "eine Million": the article-one in front of a scale word.
+        ("it", "un" | "una") => Some("uno"),
+        ("de", "ein" | "eine" | "einen" | "einem" | "einer") => Some("eine"),
         _ => None,
     }
 }
@@ -764,14 +767,18 @@ fn canonical_apocopes(lang: &str, text: &str) -> Option<String> {
     if !toks.iter().any(|t| apocope_word(lang, t).is_some()) {
         return None;
     }
-    if toks.len() == 1 && matches!(toks[0], "un" | "una" | "une") {
+    if toks.len() == 1 && matches!(toks[0], "un" | "una" | "une" | "ein" | "eine" | "einen" | "einem" | "einer") {
         return None;
     }
     let mut out: Vec<&str> = toks.iter().map(|t| apocope_word(lang, t).unwrap_or(t)).collect();
     if out.len() >= 2 && out[0] == "uno" && crate::scale_words(lang).iter().any(|(w, _)| w == out[1]) {
         out.remove(0);
     }
-    Some(out.join(" "))
+    let canon = out.join(" ");
+    if canon == norm {
+        return None; // already canonical (de "eine" maps to itself): no second pass
+    }
+    Some(canon)
 }
 
 fn base_convert(lang: &str, text: &str, ordinal: bool) -> Result<W2nValue, W2nError> {
@@ -1533,9 +1540,10 @@ fn fraction_follows(converter: &Converter, resolved: &str, word: Option<&str>) -
         return true;
     }
     match converter {
-        Converter::En => norm
-            .strip_suffix('s')
-            .is_some_and(|stem| crate::w2n_lang_en::ordinal_cardinal(stem).is_some()),
+        // "ten seconds" is time; "two firsts" is not a fraction either.
+        Converter::En => norm.strip_suffix('s').is_some_and(|stem| {
+            !matches!(stem, "second" | "first") && crate::w2n_lang_en::ordinal_cardinal(stem).is_some()
+        }),
         // A plural ordinal ("cinquièmes", "quintos"): the ordinal table holds
         // the singular.
         Converter::Table(lang) => norm.strip_suffix('s').is_some_and(|stem| {
@@ -1659,7 +1667,7 @@ fn unit_words(resolved: &str) -> &'static str {
              hours minute minutes day days week weeks month months year years oclock am pm \
              kilo kilos kilogram kilograms kilometer kilometers kilometre kilometres km \
              meter meters metre metres mile miles gram grams liter liters litre litres gallon \
-             gallons ounce ounces inch inches foot feet degree degrees"
+             gallons ounce ounces inch inches foot feet degree degrees k"
         }
         "fr" => {
             "euro euros dollar dollars centime centimes heure heures minute minutes jour jours \
@@ -1773,6 +1781,49 @@ fn article_is_count(resolved: &str, parts: &[String], i: usize, next_is_number: 
     labelled
 }
 
+/// Is `word` a scale word of `resolved` with magnitude >= `min`: en "thousand",
+/// fr "millions", de "millionen"?
+fn is_scale_word(converter: &Converter, word: &str, min: i64) -> bool {
+    match converter {
+        Converter::En => {
+            let mag = match word {
+                "hundred" => 100,
+                "thousand" => 1_000,
+                _ if crate::w2n_lang_en::is_scale_word(word) => 1_000_000,
+                _ => return false,
+            };
+            mag >= min
+        }
+        Converter::Table(lang) => {
+            let norm = crate::normalize(word);
+            crate::scale_words(lang)
+                .iter()
+                .any(|(w, mag)| *w == norm && *mag >= min)
+        }
+    }
+}
+
+/// A scale word on its own is a quantity, not a number: "a couple of thousand",
+/// "hundreds of", "des millions", "millones de personas", "half a million".
+/// fr "mille" / es "mil" / it "mille" / de "tausend" are the number 1000 on their
+/// own (no article in speech), so only million and up count there.
+fn lone_scale_word(converter: &Converter, word: &str) -> bool {
+    let min = match converter {
+        Converter::En => 100,
+        Converter::Table(_) => 1_000_000,
+    };
+    is_scale_word(converter, word, min)
+}
+
+/// en "the nineteen nineties": a decade word after a number keeps it in words.
+fn en_decade(word: Option<&str>) -> bool {
+    word.is_some_and(|w| {
+        "twenties thirties forties fifties sixties seventies eighties nineties"
+            .split_whitespace()
+            .any(|d| d == w)
+    })
+}
+
 /// Port of `words2num2.words2num_sentence` → `SentenceConverter.convert`.
 ///
 /// Walks the sentence and, at each position that opens with a real number
@@ -1825,10 +1876,13 @@ pub fn words2num_sentence(
         let next = next_word(&parts, i);
         // "one second", "one third": the English grammar reads an ordinal as a
         // number word, but it does not count the article in front of it.
-        let next_is_number = next
-            .as_deref()
-            .is_some_and(|t| starts_run(&converter, t) && !converter.is_ordinal_word(t));
-        let next_starts_run = !ends_with_terminal_punct(piece) && next_is_number;
+        let next_is_number = next.as_deref().is_some_and(|t| {
+            starts_run(&converter, t)
+                && !converter.is_ordinal_word(t)
+                && converter.is_number_word(t)
+        });
+        let next_starts_run = !ends_with_terminal_punct(piece)
+            && next.as_deref().is_some_and(|t| starts_run(&converter, t));
         // A run must START with a real number word, or with an apocope
         // ("un" in es "un mil") followed by one, or — in English — with
         // "a"/"an" in front of a scale word ("a hundred dollars").
@@ -1838,16 +1892,16 @@ pub fn words2num_sentence(
             && !ends_with_terminal_punct(piece)
             && next
                 .as_deref()
-                .is_some_and(crate::w2n_lang_en::is_scale_word);
+                .is_some_and(crate::w2n_lang_en::is_scale_word)
+            // "half a million", "a quarter of a million": a quantity, kept in words.
+            && !matches!(prev_word(&parts, i).as_deref(), Some("half" | "quarter"));
         // "vingt pour cent": "cent" after "pour" is the percent sign, not 100.
         let percent_tail = percent.is_some_and(|(prep, word)| {
             head == word && prev_word(&parts, i).as_deref() == Some(prep)
         });
-        // "two point five million": the scale word stays a word.
-        let decimal_scale = after_decimal
-            && en_cardinal
-            && crate::w2n_lang_en::is_scale_word(&head)
-            && !next_starts_run;
+        // "two point five million", "deux virgule cinq millions": the scale word stays a word.
+        let decimal_scale =
+            after_decimal && is_scale_word(&converter, &head, 1_000) && !next_starts_run;
         after_decimal = false;
         let ordinal_head = plain && converter.is_ordinal_word(&head);
         let article_number = plain && is_article_word(&resolved, &head);
@@ -1909,6 +1963,9 @@ pub fn words2num_sentence(
                 continue;
             }
             let clean = rstrip_punct(tok).to_lowercase();
+            if clean.is_empty() {
+                break; // a lone punctuation part ("quarante-deux ?") never extends a run
+            }
             // A token that is not a number word on its own may still complete
             // the run: fr "cents" / "vingts" only exist inside "deux cents" /
             // "quatre vingts". So the run is tried *with* it before giving up.
@@ -1996,6 +2053,12 @@ pub fn words2num_sentence(
                 && !article_is_count(&resolved, &parts, i, next_is_number)
             {
                 // A lone "one" / "un" / "um" is an article or a pronoun.
+                None
+            } else if plain && best_end == i && lone_scale_word(&converter, &head) {
+                // "a couple of thousand", "des millions": a quantity, not a number.
+                None
+            } else if en_cardinal && en_decade(next_word(&parts, best_end).as_deref()) {
+                // "the nineteen nineties".
                 None
             } else if let (W2nValue::Dec(_), Some(sep)) = (&v, best_sep) {
                 Some(v.py_str().replacen('.', &sep.to_string(), 1))

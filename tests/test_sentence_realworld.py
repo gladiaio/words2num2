@@ -339,3 +339,56 @@ def test_decimal_words(lang, text, expected):
 )
 def test_fractions_stay_words(lang, text, expected):
     assert words2num_sentence(text, lang=lang) == expected
+
+
+# ---------------------------------------------------------------------------
+# Quantities and compounds: a scale word on its own is a quantity ("a couple of
+# thousand", "des millions"), a decade keeps its number in words, the glued
+# thousands of de / nl / it, fr "douze cents", the article-one in front of a
+# scale word ("eine Million", "un milione"), and a few walker edges.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "lang,text,expected",
+    [
+        ("en", "a couple of thousand", "a couple of thousand"),
+        ("en", "half a million", "half a million"),
+        ("en", "hundreds of customers", "hundreds of customers"),
+        ("en", "a hundred and twenty thousand", "120000"),
+        ("en", "in the nineteen nineties", "in the nineteen nineties"),
+        ("en", "for ten seconds", "for 10 seconds"),
+        ("en", "one k", "1 k"),
+        ("en", "three and a half percent", "3 and a half percent"),
+        ("en", "one point five million dollars", "1.5 million dollars"),
+        ("fr", "des millions", "des millions"),
+        ("fr", "un demi-million", "un demi-million"),
+        ("fr", "deux virgule cinq millions", "2,5 millions"),
+        ("fr", "douze cents", "1200"),
+        ("fr", "dix-huit cents euros", "1800 euros"),
+        ("fr", "mille", "1000"),
+        ("fr", "C'est quarante-deux ?", "C'est 42 ?"),
+        ("fr", "un million et demi", "1000000 et demi"),
+        ("es", "millones de personas", "millones de personas"),
+        ("es", "medio millón", "medio millón"),
+        ("es", "dos coma cinco millones", "2,5 millones"),
+        ("es", "a las catorce treinta", "a las 14 30"),
+        ("es", "mil", "1000"),
+        ("de", "dreiundzwanzigtausend", "23000"),
+        ("de", "zweihunderttausend euro", "200000 euro"),
+        ("de", "hunderttausend", "100000"),
+        ("de", "eine million zweihunderttausend", "1200000"),
+        ("de", "zwei komma fünf millionen", "2,5 millionen"),
+        ("de", "neunzehnhundertneunzig", "1990"),
+        ("de", "einen moment bitte", "einen moment bitte"),
+        ("nl", "tweehonderdduizend", "200000"),
+        ("nl", "een miljoen", "1000000"),
+        ("nl", "negentien negenennegentig", "1999"),
+        ("it", "ventitremila", "23000"),
+        ("it", "centomila", "100000"),
+        ("it", "un milione e mezzo", "1000000 e mezzo"),
+        ("it", "un attimo", "un attimo"),
+    ],
+)
+def test_quantities_and_compounds(lang, text, expected):
+    assert words2num_sentence(text, lang=lang) == expected
