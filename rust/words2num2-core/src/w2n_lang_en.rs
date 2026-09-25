@@ -634,6 +634,18 @@ const TENS: [(&str, i64); 8] = [
     ("ninety", 90),
 ];
 
+/// Value of a unit or teen word (`_UNITS`: "zero".."nineteen", "oh"), for
+/// the sentence walker's digit-string and spoken-year readings.
+pub(crate) fn unit_value(word: &str) -> Option<i64> {
+    UNITS.iter().find(|(w, _)| *w == word).map(|&(_, v)| v)
+}
+
+/// Value of a tens word (`_TENS`: "twenty".."ninety"), for the sentence
+/// walker's spoken-year reading.
+pub(crate) fn tens_value(word: &str) -> Option<i64> {
+    TENS.iter().find(|(w, _)| *w == word).map(|&(_, v)| v)
+}
+
 /// `_SCALES`, as (word, power-of-ten). "hundred" is 100 = 10^2.
 ///
 /// Note "hundred" is a member here *and* is special-cased ahead of the
@@ -886,40 +898,56 @@ impl W2nLangEn {
         let mut total = BigInt::from(0);
         let mut current = BigInt::from(0);
         let mut seen_any = false;
-        // Whether the sub-hundred slot of `current` already holds a value.
+        // What the sub-hundred slot of `current` already holds.
         //
         // English composes a tens word with a *following* unit ("sixty
-        // three" = 63), never with a preceding one. "three sixty" is two
-        // numbers read in sequence, not 3 + 60, and "twenty twenty" is two
-        // twenties, not 40. Rejecting a tens word once the slot is taken is
-        // what makes them come out as separate runs in a sentence.
+        // three" = 63), never with a preceding one, and a unit closes the
+        // slot. "three sixty" is two numbers read in sequence, not 3 + 60;
+        // "twenty twenty" is two twenties, not 40; "four five six seven" is
+        // four digits read out, not 22; "twenty nineteen" is a year, not 39.
+        // Rejecting a word the slot cannot take is what makes them come out
+        // as separate runs — or a digit string, or a year — in a sentence.
         //
         // "hundred" and the scale words close the slot, so "one hundred
         // sixty" (160) and "two thousand sixty" (2060) are unaffected.
-        let mut sub_hundred_filled = false;
+        #[derive(PartialEq)]
+        enum Slot {
+            Empty,
+            /// A tens word; a single digit (0-9) may still follow.
+            Tens,
+            /// A unit, or a tens word plus its unit; nothing may follow.
+            Full,
+        }
+        let mut slot = Slot::Empty;
+        let cannot_follow = |tok: &str| {
+            W2nError::new(format!(
+                "{} cannot follow a smaller number in {}",
+                py_repr(tok),
+                py_repr(&toks.join(" "))
+            ))
+        };
         for tok in toks {
             if let Some(&v) = self.units.get(*tok) {
-                current += v;
-                seen_any = true;
-                sub_hundred_filled = true;
-            } else if let Some(&v) = self.tens.get(*tok) {
-                if sub_hundred_filled {
-                    return Err(W2nError::new(format!(
-                        "{} cannot follow a smaller number in {}",
-                        py_repr(tok),
-                        py_repr(&toks.join(" "))
-                    )));
+                if slot == Slot::Full || (slot == Slot::Tens && v >= 10) {
+                    return Err(cannot_follow(tok));
                 }
                 current += v;
                 seen_any = true;
-                sub_hundred_filled = true;
+                slot = Slot::Full;
+            } else if let Some(&v) = self.tens.get(*tok) {
+                if slot != Slot::Empty {
+                    return Err(cannot_follow(tok));
+                }
+                current += v;
+                seen_any = true;
+                slot = Slot::Tens;
             } else if *tok == "hundred" {
                 if current.sign() == Sign::NoSign {
                     current = BigInt::from(1);
                 }
                 current *= 100;
                 seen_any = true;
-                sub_hundred_filled = false;
+                slot = Slot::Empty;
             } else if let Some(scale) = self.scales.get(*tok) {
                 if current.sign() == Sign::NoSign {
                     current = BigInt::from(1);
@@ -927,7 +955,7 @@ impl W2nLangEn {
                 total += &current * scale;
                 current = BigInt::from(0);
                 seen_any = true;
-                sub_hundred_filled = false;
+                slot = Slot::Empty;
             } else if is_digits(tok) {
                 // Allow embedded digit groups, e.g. "two thousand 24".
                 match BigInt::from_str(&nd_to_ascii(tok)) {
@@ -993,8 +1021,9 @@ impl W2nLangEn {
     ///
     /// Tries every split point and takes the first where the high half is a
     /// 2-digit number and the low half is at most 99. When nothing matches it
-    /// falls back to plain cardinal addition, which is why "nine eleven" is
-    /// 20 rather than 911.
+    /// falls back to the plain cardinal reading — which, since a unit may
+    /// not follow a unit, now rejects "nine eleven" rather than summing it
+    /// to 20.
     fn year_value(&self, toks: &[&str]) -> W2nResult<BigInt> {
         if toks.len() < 2 {
             return self.cardinal_value(toks);

@@ -166,3 +166,72 @@ def test_valid_compositions_unchanged(text, expected):
 def test_year_path_still_reads_pairs(text, expected):
     # The pair reading lives in to="year" and is deliberately left there.
     assert words2num(text, to="year") == expected
+
+
+# ---------------------------------------------------------------------------
+# Sentence mode on bank IVR transcripts: a spoken year is a year, a string of
+# single digits is a digit string. Neither is summed.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    "sentence,expected",
+    [
+        ("twenty twenty five", "2025"),
+        ("nineteen ninety nine", "1999"),
+        ("december one twenty twenty five", "december 1 2025"),
+        ("in twenty twenty", "in 2020"),
+        ("twenty oh five", "2005"),
+        ("twenty nineteen", "2019"),
+        # Already a valid cardinal: unchanged.
+        ("two thousand twenty five", "2025"),
+        ("twenty hundred", "2000"),
+        ("twenty five people", "25 people"),
+        ("twenty first", "21"),
+    ],
+)
+def test_sentence_reads_spoken_years(sentence, expected):
+    assert words2num_sentence(sentence) == expected
+
+
+@pytest.mark.parametrize(
+    "sentence,expected",
+    [
+        ("your account ending in four five six seven", "your account ending in 4567"),
+        ("zero six one two", "0612"),
+        ("one two three", "123"),
+        ("one oh one", "101"),
+        ("seven eight", "78"),
+        # A lone digit word, and tens + unit, stay cardinals.
+        ("press one", "press 1"),
+        ("twenty five", "25"),
+        ("one hundred twenty three", "123"),
+        # unit + tens is two numbers, not 25 and not 520.
+        ("five twenty", "5 20"),
+        # "oh" does not open a digit run.
+        ("oh seven", "0 7"),
+    ],
+)
+def test_sentence_digit_runs_concatenate(sentence, expected):
+    assert words2num_sentence(sentence) == expected
+
+
+@pytest.mark.parametrize(
+    "text", ["twenty twenty five", "four five six seven", "one two three"]
+)
+def test_year_and_digit_runs_are_not_one_cardinal(text):
+    # "twenty twenty five" must never become 45, nor "one two three" 6.
+    with pytest.raises(Words2NumError):
+        words2num(text)
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("twenty twenty five", 2025),
+        ("twenty oh five", 2005),
+        ("twenty hundred", 2000),
+        ("two thousand twenty five", 2025),
+    ],
+)
+def test_explicit_year_mode_unchanged(text, expected):
+    assert words2num(text, to="year") == expected
