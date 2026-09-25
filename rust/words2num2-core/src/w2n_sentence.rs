@@ -16,8 +16,12 @@
 //! Verified against the live interpreter. These all look wrong and are all
 //! correct ports:
 //!
-//! * `words2num_sentence("nineteen ninety nine")` → `"118"`, **not** `"1999"`.
-//!   The sentence walker calls `to_cardinal` (19 + 99), never `to_year`.
+//! * `words2num_sentence("nineteen ninety nine")` used to be `"118"` (the
+//!   walker calls `to_cardinal`, 19 + 99). Since a tens word may no longer
+//!   follow a smaller number, and the walker now reads a spoken year that
+//!   outgrows the cardinal ([`en_year_run`]) and a digit string read one
+//!   digit at a time ([`en_digit_run`]), it is `"1999"` — and "four five six
+//!   seven" is `"4567"` rather than `"22"`.
 //! * `words2num_sentence("minus forty two")` → `"minus 42"`. A run may not
 //!   *start* with a connector, and `to_cardinal("minus")` raises, so "minus"
 //!   is not a run head. Same for `"a hundred and one dogs"` → `"a 101 dogs"`.
@@ -717,6 +721,12 @@ fn base_convert(lang: &str, text: &str, ordinal: bool) -> Result<W2nValue, W2nEr
         // Composition multi-échelle pour les valeurs hors table (> 10001) :
         // « soixante-neuf mille huit » → 69008. Uniquement en cardinal.
         if !ordinal {
+            // The bare hundred prefix num2words never renders alone (es
+            // "ciento"): 100, so the walker can open a run on it and grow it
+            // into the table hit "ciento cincuenta y cuatro".
+            if let Some(v) = crate::lookup_hundred_prefix(lang, text) {
+                return Ok(W2nValue::Int(BigInt::from(v)));
+            }
             if let Some(v) = crate::parse_scaled(lang, text) {
                 return Ok(W2nValue::Int(BigInt::from(v)));
             }
@@ -955,6 +965,129 @@ fn is_candidate(converter: &Converter, token: &str, includable: &[&str]) -> bool
         .any(|sub| converter.is_number_word(sub))
 }
 
+/// One word of an English number run: the word itself (lowercased, hyphens
+/// split), the index of the sentence part it came from, and whether it is the
+/// last word of that part — a reading may only stop on a part boundary, never
+/// halfway through "ninety-nine".
+struct EnWord {
+    word: String,
+    part: usize,
+    last: bool,
+}
+
+/// The consecutive English number words starting at part `i`: units, teens,
+/// tens and "oh"/"o", each part split on hyphens. Stops at the first part
+/// that is not wholly made of such words, and after one that ends in
+/// terminal punctuation — the same run boundaries the cardinal walk uses.
+fn en_number_words(parts: &[String], i: usize) -> Vec<EnWord> {
+    use crate::w2n_lang_en::{tens_value, unit_value};
+    let mut words = Vec::new();
+    let mut j = i;
+    while j < parts.len() {
+        let tok = &parts[j];
+        if py_str_isspace(tok) {
+            j += 1;
+            continue;
+        }
+        let clean = rstrip_punct(tok).to_lowercase().replace('-', " ");
+        let subs = py_split_whitespace(&clean);
+        if subs.is_empty()
+            || !subs
+                .iter()
+                .all(|w| *w == "o" || unit_value(w).is_some() || tens_value(w).is_some())
+        {
+            break;
+        }
+        let n = subs.len();
+        for (k, w) in subs.iter().enumerate() {
+            words.push(EnWord {
+                word: w.to_string(),
+                part: j,
+                last: k + 1 == n,
+            });
+        }
+        if ends_with_terminal_punct(tok) {
+            break;
+        }
+        j += 1;
+    }
+    words
+}
+
+/// A digit string read one digit at a time — an account number, ZIP code or
+/// phone number: "four five six seven" -> "4567", "zero six one two" ->
+/// "0612". Two or more consecutive single-digit words (zero, one..nine), no
+/// tens or scale word among them; "oh"/"o" count as 0 only *inside* such a
+/// run, never as its first word. A lone digit word ("press one") is left to
+/// the cardinal grammar, as is "twenty five". The digits are concatenated,
+/// never summed, and a leading zero is kept — which is why this returns the
+/// string rather than a value. Also returns the last part index covered.
+fn en_digit_run(parts: &[String], i: usize) -> Option<(String, usize)> {
+    use crate::w2n_lang_en::unit_value;
+    let mut digits = String::new();
+    let mut end: Option<(usize, usize)> = None;
+    for (k, w) in en_number_words(parts, i).iter().enumerate() {
+        let d = match w.word.as_str() {
+            "oh" | "o" if k > 0 => 0,
+            "oh" | "o" | "nought" | "naught" => break,
+            other => match unit_value(other) {
+                Some(v) if v <= 9 => v,
+                _ => break,
+            },
+        };
+        digits.push(char::from(b'0' + d as u8));
+        if w.last {
+            end = Some((digits.len(), w.part));
+        }
+    }
+    let (len, part) = end?;
+    if len < 2 {
+        return None;
+    }
+    digits.truncate(len);
+    Some((digits, part))
+}
+
+/// A spoken year that is not one English cardinal: "nineteen" or "twenty"
+/// followed by "oh" + digit ("twenty oh five" = 2005), a teen ("twenty
+/// nineteen" = 2019), or a tens word with an optional unit ("nineteen ninety
+/// nine" = 1999, "twenty twenty" = 2020). This is the pair reading of
+/// `to="year"`, applied by the cardinal walk only when it reaches further
+/// than the cardinal did — so "twenty five" stays 25, and "two thousand
+/// twenty five" never comes here. Returns the year and the last part index.
+fn en_year_run(parts: &[String], i: usize) -> Option<(i64, usize)> {
+    use crate::w2n_lang_en::{tens_value, unit_value};
+    let words = en_number_words(parts, i);
+    let word = |k: usize| words.get(k).map(|w| w.word.as_str());
+    let century = match word(0)? {
+        "nineteen" => 1900,
+        "twenty" => 2000,
+        _ => return None,
+    };
+    let digit = |k: usize| unit_value(word(k)?).filter(|v| (1..=9).contains(v));
+    // Candidate readings as (word count, value); the longest one that ends
+    // on a part boundary wins.
+    let mut readings: Vec<(usize, i64)> = Vec::new();
+    let second = word(1)?;
+    if second == "oh" || second == "o" {
+        if let Some(u) = digit(2) {
+            readings.push((3, century + u));
+        }
+    } else if let Some(t) = unit_value(second).filter(|v| (10..=19).contains(v)) {
+        readings.push((2, century + t));
+    } else if let Some(t) = tens_value(second) {
+        readings.push((2, century + t));
+        if let Some(u) = digit(2) {
+            readings.push((3, century + t + u));
+        }
+    }
+    readings
+        .into_iter()
+        .rev()
+        .find(|&(n, _)| words[n - 1].last)
+        .map(|(n, year)| (year, words[n - 1].part))
+}
+
 /// `SentenceConverter.INCLUDABLE` — tokens allowed *inside* a run though they
 /// are not numbers. Keyed by the **resolved** code, so only exactly `"en"`
 /// gets them: `words2num_sentence(..., lang="en_IN")` resolves to `"en_IN"`
@@ -1004,6 +1137,11 @@ pub fn words2num_sentence(
         includable_for(&resolved)
     };
 
+    // The digit-string and spoken-year readings are English-only and belong
+    // to the cardinal walk: `to="year"` keeps its own pair reading, and any
+    // extra keyword argument fails every conversion (see `has_kwargs`).
+    let en_cardinal = matches!(converter, Converter::En) && to == "cardinal" && !has_kwargs;
+
     let parts = tokenize(sentence);
     let n = parts.len();
     let mut out = String::new();
@@ -1022,6 +1160,18 @@ pub fn words2num_sentence(
             out.push_str(piece);
             i += 1;
             continue;
+        }
+
+        // A digit string read one digit at a time is concatenated, not
+        // summed: "four five six seven" is 4567, never 22.
+        if en_cardinal {
+            if let Some((digits, end)) = en_digit_run(&parts, i) {
+                let run = parts[i..=end].concat();
+                out.push_str(&digits);
+                out.push_str(trailing_punct(&run));
+                i = end + 1;
+                continue;
+            }
         }
 
         // Grow a number run starting at i.
@@ -1053,6 +1203,18 @@ pub fn words2num_sentence(
                 break;
             }
             j += 1;
+        }
+
+        // A spoken year outgrows the cardinal reading: "twenty twenty five"
+        // is the cardinal "twenty" and then a dangling "twenty five", but the
+        // year 2025.
+        if en_cardinal {
+            if let Some((year, end)) = en_year_run(&parts, i) {
+                if best_value.is_none() || end > best_end {
+                    best_value = Some(W2nValue::Int(BigInt::from(year)));
+                    best_end = end;
+                }
+            }
         }
 
         if let Some(v) = best_value {
@@ -2453,7 +2615,39 @@ mod digits_tests {
             s("sixty-one hundred Main Street", "en", "digits", false).unwrap(),
             "sixty-one hundred Main Street"
         );
-        // The old cardinal behaviour that motivated this: "two seven five" -> 14.
-        assert_eq!(s("Two seven five", "en", "cardinal", false).unwrap(), "14");
+        // The old cardinal behaviour that motivated this was "two seven five"
+        // -> 14; the cardinal walk now reads the digit string itself.
+        assert_eq!(s("Two seven five", "en", "cardinal", false).unwrap(), "275");
+    }
+
+    #[test]
+    fn cardinal_walk_reads_years_and_digit_strings() {
+        // Spoken years outgrow the cardinal reading.
+        assert_eq!(s("twenty twenty five", "en", "cardinal", false).unwrap(), "2025");
+        assert_eq!(s("nineteen ninety-nine", "en", "cardinal", false).unwrap(), "1999");
+        assert_eq!(s("twenty oh five", "en", "cardinal", false).unwrap(), "2005");
+        assert_eq!(
+            s("december one twenty twenty five.", "en", "cardinal", false).unwrap(),
+            "december 1 2025."
+        );
+        // Digit strings concatenate and keep a leading zero.
+        assert_eq!(
+            s("account ending in four five six seven", "en", "cardinal", false).unwrap(),
+            "account ending in 4567"
+        );
+        assert_eq!(s("zero six one two", "en", "cardinal", false).unwrap(), "0612");
+        // Valid cardinals and lone digits are untouched.
+        assert_eq!(s("twenty five people", "en", "cardinal", false).unwrap(), "25 people");
+        assert_eq!(s("press one", "en", "cardinal", false).unwrap(), "press 1");
+        assert_eq!(s("five twenty", "en", "cardinal", false).unwrap(), "5 20");
+        assert_eq!(s("two thousand twenty five", "en", "cardinal", false).unwrap(), "2025");
+        // `to="year"` keeps its own pair reading.
+        assert_eq!(s("twenty twenty five", "en", "year", false).unwrap(), "2025");
+        // es: the bare hundred prefix opens the run.
+        assert_eq!(
+            s("ciento cincuenta y cuatro dólares", "es", "cardinal", false).unwrap(),
+            "154 dólares"
+        );
+        assert_eq!(s("ciento uno", "es", "cardinal", false).unwrap(), "101");
     }
 }

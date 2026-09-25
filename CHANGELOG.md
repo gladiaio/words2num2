@@ -6,7 +6,35 @@ follows [Semantic Versioning](https://semver.org/) and uses
 
 ## [Unreleased]
 
+## [0.3.3] — 2026-09-24
+
 ### Fixed
+
+- **Spoken years in sentence mode.** `words2num_sentence` summed
+  `"twenty twenty five"` to `"45"` and `"nineteen ninety nine"` to `"118"`
+  (or, since the fix below, split them into `"20 25"` / `"19 99"`). A run
+  that is not one cardinal but reads as a year — "nineteen"/"twenty" +
+  "oh" + digit / a teen / a tens word (+ unit) — now gives the year:
+  `"2025"`, `"1999"`, `"december one twenty twenty five"` ->
+  `"december 1 2025"`, `"twenty oh five"` -> `"2005"`. `"two thousand
+  twenty five"` is still `"2025"`, `"twenty five people"` still
+  `"25 people"`; `to="year"` is unchanged.
+- **Digit strings in sentence mode.** Account numbers, ZIP codes and phone
+  numbers read one digit at a time were summed: `"your account ending in
+  four five six seven"` -> `"... 22"`. Two or more consecutive single-digit
+  words (with "oh"/"o" as 0 inside the run) now concatenate: `"... 4567"`,
+  `"zero six one two"` -> `"0612"`, `"one two three"` -> `"123"`. A lone
+  digit word stays a cardinal (`"press one"` -> `"press 1"`), as does
+  tens + unit (`"twenty five"` -> `"25"`); `"five twenty"` -> `"5 20"`.
+- **A unit may not follow a unit** (nor a teen follow a tens word) in an
+  English cardinal, the counterpart of the tens rule below: `"one two
+  three"` is three digits, not 6, and `words2num("one two three")` raises.
+- **Spanish "ciento".** num2words never renders `"ciento"` on its own (100 is
+  `"cien"`), so the reverse table had no entry for it and the sentence
+  walker could not open a run on it: `"ciento cincuenta y cuatro dólares"`
+  -> `"ciento 54 dólares"`. The bare hundred prefix now reads as 100 and
+  the run grows into the table hit: `"154 dólares"`, `"ciento uno"` ->
+  `"101"` (`"cien"` and `"doscientos treinta"` were already fine).
 
 - **A tens word no longer composes with a preceding unit.** English reads a
   tens word with a *following* unit ("sixty three" = 63), never the reverse,
@@ -20,6 +48,12 @@ follows [Semantic Versioning](https://semver.org/) and uses
   `"one hundred sixty"` (160), `"three hundred sixty"` (360) and
   `"two thousand sixty"` (2060) are unaffected — as is the pair reading on
   `to="year"`, where `"nineteen eighty four"` is still 1984. Resolves #17.
+
+### Changed
+
+- The two sentence-mode expectations recorded with the tens rule above,
+  `"nineteen eighty four"` -> `"19 84"` and `"twenty twenty"` -> `"20 20"`,
+  are superseded by the year reading: `"1984"`, `"2020"`.
 
 ## [0.2.3] — 2026-05-02
 

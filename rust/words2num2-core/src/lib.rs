@@ -422,6 +422,59 @@ fn hundred_word(lang: &str) -> Option<String> {
     out
 }
 
+/// Cache of the derived bare hundred prefix per language (es "ciento").
+fn hundred_prefix_cache() -> &'static RwLock<HashMap<String, Option<String>>> {
+    static P: OnceLock<RwLock<HashMap<String, Option<String>>>> = OnceLock::new();
+    P.get_or_init(|| RwLock::new(HashMap::new()))
+}
+
+/// The hundred word num2words never renders on its own, only as the head of
+/// a composed hundred: es "ciento" (100 is "cien", 101 is "ciento uno"),
+/// pt "cento" (100 is "cem"). The reverse table has no entry for it, so the
+/// sentence walker never opened a run on it and "ciento cincuenta y cuatro"
+/// came out as "ciento 54". Derived by rendering 101..=109 and keeping the
+/// head token when it is not a table word by itself while the rest is the
+/// unit. `None` where the hundred is a table word already (fr "cent") or is
+/// glued to its unit (de "hunderteins", it "centouno").
+fn hundred_prefix(lang: &str) -> Option<String> {
+    if let Some(v) = hundred_prefix_cache().read().unwrap().get(lang) {
+        return v.clone();
+    }
+    let out = (|| {
+        let l = num2words2_core::get_lang_by_key(lang)?;
+        let conns = connector_words(lang);
+        for n in 101i64..=109 {
+            let words = l.to_cardinal(&BigInt::from(n)).ok()?;
+            let norm = normalize(&words);
+            let toks: Vec<&str> = norm.split_whitespace().collect();
+            if toks.len() < 2 || lookup_plain(lang, toks[0]).is_some() {
+                continue;
+            }
+            let rest = trim_connectors(&toks[1..].join(" "), conns);
+            if lookup_plain(lang, &rest) == Some(n - 100) {
+                return Some(toks[0].to_string());
+            }
+        }
+        None
+    })();
+    hundred_prefix_cache()
+        .write()
+        .unwrap()
+        .insert(lang.to_string(), out.clone());
+    out
+}
+
+/// The bare hundred prefix on its own ("ciento") reads as 100. A run head in
+/// the sentence walker must be a number word by itself, and this is the one
+/// hundred word the reverse table cannot vouch for.
+pub fn lookup_hundred_prefix(lang: &str, text: &str) -> Option<i64> {
+    if !supported_langs().contains(&lang) {
+        return None;
+    }
+    let prefix = hundred_prefix(lang)?;
+    (normalize(text) == prefix).then_some(100)
+}
+
 /// Recover a spoken "year" reading that is not num2words' canonical spelling:
 /// `L <hundred> R` (explicit or glued) → `L*100 + R`, or two 2-digit groups
 /// `a b` → `a*100 + b`. All parts are resolved through the reverse table, so no
