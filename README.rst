@@ -273,6 +273,42 @@ What it leaves in words, on purpose:
   half"``);
 * anything that already holds a digit (``"850-820-9095"``, ``"$426"``).
 
+**Currency fold** (``currency=True``, off by default): an amount spoken as
+number + currency word (+ connector + subunit) is written the way the language
+writes that currency — the currency picks the symbol and its side, the language
+the separators (en ``1,355.28``, fr ``1 355,28``, de/es/it/pt/nl ``1.355,28``;
+dollars and pesos in Spanish keep the Latin-American ``$1,234.56``).
+
+.. code-block:: python
+
+    >>> words2num_sentence("one thousand three hundred fifty five dollars and twenty eight cents", currency=True)
+    '$1,355.28'
+    >>> words2num_sentence("ninety nine cents, twenty quid, ten thousand yen", currency=True)
+    '$0.99, £20, ¥10,000'
+    >>> words2num_sentence("quarante-trois dollars et vingt centimes", lang="fr", currency=True)
+    '43,20 $'
+    >>> words2num_sentence("mille deux cents euros cinquante", lang="fr", currency=True)
+    '1 200,50 €'
+    >>> words2num_sentence("ciento cincuenta y cuatro dólares con noventa y dos centavos", lang="es", currency=True)
+    '$154.92'
+    >>> words2num_sentence("dreiundzwanzig euro und fünfzig cent", lang="de", currency=True)
+    '23,50 €'
+    >>> words2num_sentence("duzentos reais e cinquenta centavos", lang="pt", currency=True)
+    'R$ 200,50'
+    >>> words2num_sentence("twintig euro vijftig", lang="nl", currency=True)
+    '€ 20,50'
+
+Subunits after a connector (``"and"``, ``"et"``, ``"con"``, ``"und"``, ``"e"``)
+or bare (``"two euros fifty"``), or on their own (``"vingt centimes"`` ->
+``"0,20 €"``: the language's default currency — USD for en/es, BRL for pt, EUR
+elsewhere). No decimals unless a subunit was spoken (``"twelve dollars"`` ->
+``"$12"``); JPY and KRW never carry any. A currency word without a number in
+front stays a word (``"des euros"``, ``"a couple of dollars"``), and so does an
+amount on a scale word (``"2.5 million dollars"``). Currencies: USD, EUR, GBP,
+JPY, CNY, CHF, CAD (fr ``5 $ CA``, the OQLF form), AUD, NZD, MXN and the
+unqualified peso (``$``), BRL, INR, KRW, RUB, TRY, PLN, SEK/NOK/DKK, XOF, MAD,
+ZAR, with their names and subunits in en, fr, es, de, it, pt, nl and ca.
+
 Auto-parse mode
 ---------------
 

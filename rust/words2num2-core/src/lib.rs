@@ -18,6 +18,7 @@ use num_bigint::BigInt;
 use std::collections::HashMap;
 use std::sync::{OnceLock, RwLock};
 
+pub mod w2n_currency;
 pub mod w2n_formats;
 pub mod w2n_lang_en;
 pub mod w2n_sentence;
@@ -531,6 +532,9 @@ fn split_glued_scale(lang: &str, tok: &str, scales: &[(String, i64)]) -> Option<
         _ => None,
     };
     if let Some(t) = thousand {
+        if tok == t {
+            return Some(1_000); // de "tausend Euro": the bare morpheme is 1000
+        }
         words.push((t.to_string(), 1_000));
     }
     for (w, mag) in &words {
