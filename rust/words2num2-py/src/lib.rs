@@ -234,18 +234,19 @@ fn words2num(
 
 /// `_rust.words2num_sentence(sentence, lang, to, kwargs)`.
 #[pyfunction]
-#[pyo3(signature = (sentence, lang="en", to="cardinal", kwargs=None))]
+#[pyo3(signature = (sentence, lang="en", to="cardinal", kwargs=None, currency=false))]
 fn words2num_sentence(
     py: Python<'_>,
     sentence: &str,
     lang: &str,
     to: &str,
     kwargs: Option<Bound<'_, PyDict>>,
+    currency: bool,
 ) -> PyResult<String> {
     // Python passed `kwargs or None`, so a present dict is always non-empty;
     // the guard keeps parity if an empty dict is ever passed directly.
     let has_kwargs = kwargs.as_ref().is_some_and(|d| !d.is_empty());
-    w2n_sentence::words2num_sentence(sentence, lang, to, has_kwargs)
+    w2n_sentence::words2num_sentence_opts(sentence, lang, to, has_kwargs, currency)
         .map_err(|e| w2n_error_to_pyerr(py, e))
 }
 

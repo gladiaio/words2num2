@@ -6,6 +6,89 @@ follows [Semantic Versioning](https://semver.org/) and uses
 
 ## [Unreleased]
 
+Sentence mode (`words2num_sentence`) was audited on ~300 real-life ASR finals
+(call-center, IVR, finance; en / fr / es, plus de / it / pt / nl and a sweep
+of 20 other locales): 59 % correct before, 96 % after. Every change is
+covered in `tests/test_sentence_realworld.py`.
+
+### Added
+
+- **Currency fold in sentence mode**, `words2num_sentence(..., currency=True)`
+  (off by default): an amount spoken as number + currency word (+ connector
+  + subunit) is written the way the language writes that currency — en
+  `"$1,355.28"`, `"$0.99"`, `"£20"`, `"¥10,000"`; fr `"43,20 $"`,
+  `"1 200,50 €"`, `"5 $ CA"`; es `"$154.92"` (dollars and pesos in the
+  Latin-American form) / `"500,20 €"`; de `"23,50 €"`; it `"20,50 €"`; pt
+  `"R$ 200,50"`; nl `"€ 20,50"`. 23 currencies, names and subunits in en /
+  fr / es / de / it / pt / nl / ca. A currency word without a number stays a
+  word.
+- it `"cinquanta centesimi"` is the cent, not the hundredth (was `"50 100º"`).
+- de `"tausend Euro"` -> `"1000 Euro"` (the bare thousand morpheme).
+- **Ordinals in sentence mode**, written in the language's figures: en
+  `21st` / `22nd` / `3rd` / `15th`, fr `1er` / `1re` / `2e`, es-pt-it `3º` /
+  `20ª`, de `2.`, nl `15e`, num2words2's `ordinal_num` elsewhere when it
+  carries a marker (tr `1'inci`; ru / pl keep the words). A compound is
+  always a rank (`"twenty first"`, `"vingt-troisième"`); a lone `first` /
+  `second` and its translations only next to a month or "of the month"
+  (`"first of all"`, `"wait a second"`, `"la première fois"` stay words);
+  fractions stay words (`"a fifth of"`, `"two thirds"`, `"deux tiers"`).
+  The ordinal table also matches the inflected forms speech uses (fr
+  `première`, es `primer(a)` / `tercer(a)`, de `zweiten`, it `prima`).
+- **Digit strings in every language** (were English-only): fr `"sept cinq
+  zéro un zéro"` -> `"75010"`, `"zéro six douze …"` -> `"06 12 …"`, es
+  `"seis uno nueve ocho cero"` -> `"61980"`; en `"double zero seven"` ->
+  `"007"`, `"triple five"` -> `"555"`.
+- **Spoken decimal separators**: fr `virgule`, es/ca `coma`, pt `vírgula`,
+  it `virgola`, de/nl `komma`, ro `virgulă`, pl `przecinek` -> `","`;
+  es/pt/it `punto` / `ponto` -> `"."`: `"trois virgule cinq"` -> `"3,5"`,
+  `"deux virgule cinquante"` -> `"2,50"`, `"dos coma cero cinco"` ->
+  `"2,05"`.
+- **Glued thousands** of de / nl / af / it / sv / da: `"dreiundzwanzigtausend"`
+  -> `23000`, `"tweehonderdduizend"` -> `200000`, `"ventitremila"` ->
+  `23000`, `"hunderttausend"` -> `100000`; de `"eine Million"`, it `"un
+  milione"` open a number.
+- fr counts hundreds by the dozen: `"douze cents"` -> `1200`.
+- es tens joined with the spoken connector: `"veinte y uno"` -> `21`.
+
+### Fixed
+
+- **The article / pronoun 1.** `"no one answered"` -> `"no 1 answered"`,
+  `"un solde de 43 euros"` -> `"1 solde …"`, `"um momento"` -> `"1
+  momento"`: a lone `one` / `un` / `une` / `uno` / `um` / `een` / `ein` now
+  stays a word unless something counts it — a unit, a currency or a time
+  word (`"one dollar"`, `"une heure"`, `"one o'clock"`), the percent phrase,
+  a label word before it (`"press one"`, `"number one"`, `"tapez un"`,
+  `"marque uno"`), a month, a counted list (`"one, two, three"`). `"one
+  second"` stays a pause. es `"un dólar"` now reads `"1 dólar"`.
+- **Compounds the walker broke apart.** A token that is not a number word on
+  its own is tried as the continuation of the run before the run closes:
+  `"deux cents euros"` -> `"200 euros"` (was `"2 cents euros"`), `"quatre
+  vingts"` -> `"80"`; fr `"mille deux cent"` / `"deux million"` (plural -s
+  dropped or added) match the table; fr `"cinquante et une personnes"` ->
+  `"51 personnes"`; ar / id / he compounds that stopped at the connector
+  now compose.
+- **Connectors are never eaten**: `"one and a half hours"` was `"1 half
+  hours"`, `"five point"` was `"5"`, `"one hundred and"` was `"100"`.
+- **Percent phrases**: `"vingt pour cent"` -> `"20 pour 100"`, `"diez por
+  ciento"` -> `"10 por 100"` — the second word is the percent sign.
+- **`"a"` before a scale word** opens the number: `"a hundred dollars"` ->
+  `"100 dollars"` (was `"a 100 dollars"`); not after `half` / `quarter`.
+- **Quantities stay words**: `"a couple of thousand"`, `"hundreds of"`,
+  `"des millions"`, `"millones de personas"`, `"half a million"`; a scale
+  word after a decimal stays a word (`"2.5 million"`, `"2,5 millions"`).
+- **Decades**: `"in the nineteen nineties"` (was `"in the 19 nineties"`).
+- **Year pairs only for Germanic languages**: es `"a las catorce treinta"`
+  is a time of day, not 1430.
+- `"ten seconds"` is time, not a fraction; `"one k"` counts.
+- A lone punctuation part never extends a run: `"quarante-deux ?"` keeps
+  its space.
+- vi cardinals were rendered as ordinals (its ordinal table holds every
+  cardinal).
+
+### Changed
+
+- `"twenty first"` in sentence mode is `"21st"` (was `"21"`).
+
 ## [0.3.3] — 2026-09-24
 
 ### Fixed
