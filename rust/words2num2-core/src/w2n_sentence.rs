@@ -1605,8 +1605,17 @@ fn ordinal_rendering(
     if single && is_indefinite(resolved, prev.as_deref()) {
         return None;
     }
-    // es/pt "cuartos", "tercios": the plural of an ordinal is a fraction.
+    // it "cinquanta centesimi": the cent, not the hundredth, after a number.
     let base = resolved.split(&['_', '-'][..]).next().unwrap_or(resolved);
+    if single
+        && crate::w2n_currency::is_subunit_word(base, &crate::normalize(words[0]))
+        && prev.as_deref().is_some_and(|p| {
+            p.chars().next().is_some_and(|c| c.is_ascii_digit()) || converter.is_number_word(p)
+        })
+    {
+        return None;
+    }
+    // es/pt "cuartos", "tercios": the plural of an ordinal is a fraction.
     if single && matches!(base, "es" | "pt" | "gl") && crate::normalize(words[0]).ends_with('s') {
         return None;
     }
@@ -1846,6 +1855,33 @@ fn en_decade(word: Option<&str>) -> bool {
 /// so any such call fails every conversion — matching Python's swallowed
 /// `TypeError`.
 pub fn words2num_sentence(
+    sentence: &str,
+    lang: &str,
+    to: &str,
+    has_kwargs: bool,
+) -> Result<String, W2nError> {
+    words2num_sentence_opts(sentence, lang, to, has_kwargs, false)
+}
+
+/// [`words2num_sentence`] with the currency fold: amounts spoken as number +
+/// currency word (+ subunit) are written the way the language writes that
+/// currency (`$1,355.28`, `43,20 $`, `20,50 €`). See [`crate::w2n_currency`].
+pub fn words2num_sentence_opts(
+    sentence: &str,
+    lang: &str,
+    to: &str,
+    has_kwargs: bool,
+    currency: bool,
+) -> Result<String, W2nError> {
+    let out = words2num_sentence_walk(sentence, lang, to, has_kwargs)?;
+    if currency {
+        let resolved = resolve_lang(lang)?;
+        return Ok(crate::w2n_currency::fold_currency(&out, &resolved));
+    }
+    Ok(out)
+}
+
+fn words2num_sentence_walk(
     sentence: &str,
     lang: &str,
     to: &str,

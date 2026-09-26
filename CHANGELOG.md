@@ -13,6 +13,17 @@ covered in `tests/test_sentence_realworld.py`.
 
 ### Added
 
+- **Currency fold in sentence mode**, `words2num_sentence(..., currency=True)`
+  (off by default): an amount spoken as number + currency word (+ connector
+  + subunit) is written the way the language writes that currency — en
+  `"$1,355.28"`, `"$0.99"`, `"£20"`, `"¥10,000"`; fr `"43,20 $"`,
+  `"1 200,50 €"`, `"5 $ CA"`; es `"$154.92"` (dollars and pesos in the
+  Latin-American form) / `"500,20 €"`; de `"23,50 €"`; it `"20,50 €"`; pt
+  `"R$ 200,50"`; nl `"€ 20,50"`. 23 currencies, names and subunits in en /
+  fr / es / de / it / pt / nl / ca. A currency word without a number stays a
+  word.
+- it `"cinquanta centesimi"` is the cent, not the hundredth (was `"50 100º"`).
+- de `"tausend Euro"` -> `"1000 Euro"` (the bare thousand morpheme).
 - **Ordinals in sentence mode**, written in the language's figures: en
   `21st` / `22nd` / `3rd` / `15th`, fr `1er` / `1re` / `2e`, es-pt-it `3º` /
   `20ª`, de `2.`, nl `15e`, num2words2's `ordinal_num` elsewhere when it
