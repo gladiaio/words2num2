@@ -725,6 +725,9 @@ fn apocope_word(lang: &str, token: &str) -> Option<&'static str> {
     match (base, token) {
         ("es" | "gl", "un" | "una") => Some("uno"),
         ("es", "veintiun" | "veintiún" | "veintiuna") => Some("veintiuno"),
+        // fr agrees "un" with a feminine noun: "cinquante et une personnes",
+        // "vingt et une heures". num2words only renders the masculine.
+        ("fr", "une") => Some("un"),
         _ => None,
     }
 }
@@ -738,7 +741,7 @@ fn canonical_apocopes(lang: &str, text: &str) -> Option<String> {
     if !toks.iter().any(|t| apocope_word(lang, t).is_some()) {
         return None;
     }
-    if toks.len() == 1 && matches!(toks[0], "un" | "una") {
+    if toks.len() == 1 && matches!(toks[0], "un" | "una" | "une") {
         return None;
     }
     let mut out: Vec<&str> = toks.iter().map(|t| apocope_word(lang, t).unwrap_or(t)).collect();
@@ -1020,6 +1023,21 @@ fn is_candidate(converter: &Converter, token: &str, includable: &[&str]) -> bool
         .any(|sub| converter.is_number_word(sub))
 }
 
+/// May a run END on this token? A connector ("and", "a", "point", es "y",
+/// fr "et") is includable inside a run but is not a number on its own, so a
+/// run that stops on one leaves it out — the walker then emits the connector
+/// as a word instead of swallowing it.
+fn candidate_is_number(converter: &Converter, token: &str, includable: &[&str]) -> bool {
+    if !includable.contains(&token) {
+        return true;
+    }
+    // en "point" parses as Decimal(0) on its own; still a connector here.
+    let dehyphened = token.replace('-', " ");
+    py_split_whitespace(&dehyphened)
+        .iter()
+        .any(|sub| converter.is_number_word(sub) && !includable.contains(sub))
+}
+
 /// One word of an English number run: the word itself (lowercased, hyphens
 /// split), the index of the sentence part it came from, and whether it is the
 /// last word of that part — a reading may only stop on a part boundary, never
@@ -1169,6 +1187,42 @@ fn includable_for(resolved: &str) -> &'static [&'static str] {
     }
 }
 
+/// "pour cent" / "por ciento" / "per cent": the second word is the number 100
+/// on its own, but after the preposition it is the percent sign. Keyed by
+/// language prefix; the walker leaves the pair as words ("vingt pour cent" →
+/// "20 pour cent", never "20 pour 100").
+fn percent_phrase(resolved: &str) -> Option<(&'static str, &'static str)> {
+    let base = resolved.split(&['_', '-'][..]).next().unwrap_or(resolved);
+    match base {
+        "fr" => Some(("pour", "cent")),
+        "es" | "gl" => Some(("por", "ciento")),
+        "pt" => Some(("por", "cento")),
+        "it" => Some(("per", "cento")),
+        "en" => Some(("per", "cent")),
+        "ca" => Some(("per", "cent")),
+        _ => None,
+    }
+}
+
+/// The previous non-blank part before `i`, lowercased and without trailing
+/// punctuation.
+fn prev_word(parts: &[String], i: usize) -> Option<String> {
+    parts[..i]
+        .iter()
+        .rev()
+        .find(|t| !py_str_isspace(t))
+        .map(|t| rstrip_punct(t).to_lowercase())
+}
+
+/// The next non-blank part after `i`, lowercased and without trailing
+/// punctuation.
+fn next_word(parts: &[String], i: usize) -> Option<String> {
+    parts[i + 1..]
+        .iter()
+        .find(|t| !py_str_isspace(t))
+        .map(|t| rstrip_punct(t).to_lowercase())
+}
+
 /// Port of `words2num2.words2num_sentence` → `SentenceConverter.convert`.
 ///
 /// Walks the sentence and, at each position that opens with a real number
@@ -1197,10 +1251,15 @@ pub fn words2num_sentence(
     // extra keyword argument fails every conversion (see `has_kwargs`).
     let en_cardinal = matches!(converter, Converter::En) && to == "cardinal" && !has_kwargs;
 
+    let percent = percent_phrase(&resolved);
+
     let parts = tokenize(sentence);
     let n = parts.len();
     let mut out = String::new();
     let mut i = 0usize;
+    // The run just emitted was a decimal ("two point five"): a scale word
+    // right after it stays a word ("2.5 million"), it is not a new number.
+    let mut after_decimal = false;
 
     while i < n {
         let piece = &parts[i];
@@ -1209,16 +1268,34 @@ pub fn words2num_sentence(
             i += 1;
             continue;
         }
-        // A run must START with a real number word, or with an apocope
-        // ("un" in es "un mil") followed by one.
         let head = rstrip_punct(piece).to_lowercase();
-        let apocope_head = converter.apocope(&head).is_some()
+        let next = next_word(&parts, i);
+        let next_starts_run = !ends_with_terminal_punct(piece)
+            && next.as_deref().is_some_and(|t| starts_run(&converter, t));
+        // A run must START with a real number word, or with an apocope
+        // ("un" in es "un mil") followed by one, or — in English — with
+        // "a"/"an" in front of a scale word ("a hundred dollars").
+        let apocope_head = converter.apocope(&head).is_some() && next_starts_run;
+        let article_head = en_cardinal
+            && matches!(head.as_str(), "a" | "an")
             && !ends_with_terminal_punct(piece)
-            && parts[i + 1..]
-                .iter()
-                .find(|t| !py_str_isspace(t))
-                .is_some_and(|t| starts_run(&converter, &rstrip_punct(t).to_lowercase()));
-        if !starts_run(&converter, &head) && !apocope_head {
+            && next
+                .as_deref()
+                .is_some_and(crate::w2n_lang_en::is_scale_word);
+        // "vingt pour cent": "cent" after "pour" is the percent sign, not 100.
+        let percent_tail = percent.is_some_and(|(prep, word)| {
+            head == word && prev_word(&parts, i).as_deref() == Some(prep)
+        });
+        // "two point five million": the scale word stays a word.
+        let decimal_scale = after_decimal
+            && en_cardinal
+            && crate::w2n_lang_en::is_scale_word(&head)
+            && !next_starts_run;
+        after_decimal = false;
+        if (!starts_run(&converter, &head) && !apocope_head && !article_head)
+            || percent_tail
+            || decimal_scale
+        {
             out.push_str(piece);
             i += 1;
             continue;
@@ -1247,18 +1324,26 @@ pub fn words2num_sentence(
                 continue;
             }
             let clean = rstrip_punct(tok).to_lowercase();
-            if !is_candidate(&converter, &clean, includable) {
-                break;
-            }
+            // A token that is not a number word on its own may still complete
+            // the run: fr "cents" / "vingts" only exist inside "deux cents" /
+            // "quatre vingts". So the run is tried *with* it before giving up.
+            let candidate = is_candidate(&converter, &clean, includable);
             let run = parts[i..=j].concat();
             let stripped = rstrip_punct(py_strip(&run)).to_string();
             // The standard converters never return `None`, so a successful
             // parse always both records the value and advances best_end. A
             // raised error is Python's `except Exception` — swallow and keep
             // growing.
-            if let Ok(v) = converter.convert(to, &stripped, has_kwargs) {
-                best_value = Some(v);
-                best_end = j;
+            match converter.convert(to, &stripped, has_kwargs) {
+                // A run never ends on a connector: "one and a half" is "1 and
+                // a half", not "1 half"; "five point" keeps its "point".
+                Ok(v) if candidate_is_number(&converter, &clean, includable) => {
+                    best_value = Some(v);
+                    best_end = j;
+                }
+                Ok(_) => {}
+                Err(_) if !candidate => break,
+                Err(_) => {}
             }
             // A token ending in terminal punctuation closes the run.
             if ends_with_terminal_punct(tok) {
@@ -1283,6 +1368,7 @@ pub fn words2num_sentence(
             // Preserve trailing punctuation that was stripped during parse.
             let run = parts[i..=best_end].concat();
             let trailing = trailing_punct(&run);
+            after_decimal = matches!(v, W2nValue::Dec(_)) && trailing.is_empty();
             out.push_str(&v.py_str());
             out.push_str(trailing);
             i = best_end + 1;
