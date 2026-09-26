@@ -1794,12 +1794,7 @@ fn is_scale_word(converter: &Converter, word: &str, min: i64) -> bool {
             };
             mag >= min
         }
-        Converter::Table(lang) => {
-            let norm = crate::normalize(word);
-            crate::scale_words(lang)
-                .iter()
-                .any(|(w, mag)| *w == norm && *mag >= min)
-        }
+        Converter::Table(lang) => crate::is_scale_word_of(lang, &crate::normalize(word), min),
     }
 }
 

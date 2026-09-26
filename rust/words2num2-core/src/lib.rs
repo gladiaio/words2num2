@@ -375,6 +375,18 @@ pub fn scale_words(lang: &str) -> Vec<(String, i64)> {
     out
 }
 
+/// Is `word` (normalized) a scale word of `lang` with magnitude >= `min`? Reads the
+/// cache in place — the sentence walker asks this for every run head.
+pub fn is_scale_word_of(lang: &str, word: &str, min: i64) -> bool {
+    {
+        let cache = scale_cache().read().unwrap();
+        if let Some(v) = cache.get(lang) {
+            return v.iter().any(|(w, mag)| w == word && *mag >= min);
+        }
+    }
+    scale_words(lang).iter().any(|(w, mag)| w == word && *mag >= min)
+}
+
 /// Table hit for a fragment (no sign handling), i.e. a number ≤ 10001.
 fn lookup_plain(lang: &str, text: &str) -> Option<i64> {
     lookup(lang, text, false, &[]).ok().flatten()
