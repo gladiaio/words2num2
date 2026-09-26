@@ -84,14 +84,20 @@ def words2num(text, lang="en", to="cardinal", **kwargs):
     return _RUST.words2num(text, lang, to, kwargs or None)
 
 
-def words2num_sentence(sentence, lang="en", to="cardinal", **kwargs):
+def words2num_sentence(sentence, lang="en", to="cardinal", currency=False, **kwargs):
     """Convert every word-number in ``sentence`` to numeric form.
 
     Walks the sentence, matching the longest run of number tokens at each
     position; non-number tokens pass through. The walk is a full port in the
     core; this is a thin binder over it.
+
+    With ``currency=True`` an amount spoken as number + currency word
+    (+ subunit) is written the way the language writes that currency:
+    ``"twelve dollars and fifty cents"`` -> ``"$12.50"``, fr ``"quarante-trois
+    dollars et vingt centimes"`` -> ``"43,20 $"``, de ``"zwanzig euro fünfzig"``
+    -> ``"20,50 €"``. Off by default: the output is unchanged.
     """
-    return _RUST.words2num_sentence(sentence, lang, to, kwargs or None)
+    return _RUST.words2num_sentence(sentence, lang, to, kwargs or None, currency)
 
 
 # Aliases (parity with num2words2)
