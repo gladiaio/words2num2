@@ -624,7 +624,12 @@ impl Converter {
                 .split('-')
                 .last()
                 .is_some_and(|w| crate::w2n_lang_en::ordinal_cardinal(w).is_some()),
-            Converter::Table(lang) => matches!(base_convert(lang, token, true), Ok(W2nValue::Int(_))),
+            // A word that is also a cardinal is not an ordinal: vi writes the ordinal
+            // as "thứ" + cardinal, so its ordinal table holds every cardinal too.
+            Converter::Table(lang) => {
+                matches!(base_convert(lang, token, true), Ok(W2nValue::Int(_)))
+                    && base_convert(lang, token, false).is_err()
+            }
         }
     }
 
@@ -1510,8 +1515,11 @@ fn ordinal_figures(resolved: &str, n2w_key: &str, n: &BigInt, feminine: bool) ->
         "de" => ".",
         "nl" => "e",
         _ => {
+            // Only when the language marks it (tr "1'inci"); a bare number would lose
+            // the rank (ru / pl render just the figure), so the words stay.
             return num2words2_core::get_lang_by_key(n2w_key)
-                .and_then(|l| l.to_ordinal_num(n).ok());
+                .and_then(|l| l.to_ordinal_num(n).ok())
+                .filter(|figures| *figures != n.to_string());
         }
     };
     Some(format!("{}{}", n, suffix))

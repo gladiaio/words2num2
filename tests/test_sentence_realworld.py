@@ -392,3 +392,26 @@ def test_fractions_stay_words(lang, text, expected):
 )
 def test_quantities_and_compounds(lang, text, expected):
     assert words2num_sentence(text, lang=lang) == expected
+
+
+@pytest.mark.parametrize(
+    "lang,text,expected",
+    [
+        # Other locales: the walker's new rules only change what they mean to.
+        ("vi", "bốn mươi hai", "42"),  # vi's ordinal table holds every cardinal ("thứ" + n)
+        ("ru", "первый", "первый"),  # no figure form with a rank marker: the words stay
+        ("pl", "pierwszy", "pierwszy"),
+        ("tr", "birinci", "1'inci"),
+        ("ru", "сорок два", "42"),
+        ("ar", "اثنان وأربعون", "42"),
+        ("id", "dua ribu dua puluh empat", "2024"),
+        ("he", "ארבעים ושתיים", "42"),
+        ("ca", "el primer de maig", "el 1r de maig"),
+        ("ca", "vint per cent", "20 per cent"),
+        ("pt_BR", "um momento", "um momento"),
+        ("sv", "nittonhundranittionio", "1999"),
+        ("da", "nitten nioghalvfems", "1999"),
+    ],
+)
+def test_other_locales(lang, text, expected):
+    assert words2num_sentence(text, lang=lang) == expected
