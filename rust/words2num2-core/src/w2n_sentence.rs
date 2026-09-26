@@ -586,7 +586,15 @@ fn converter_for(resolved: &str) -> Converter {
 impl Converter {
     /// `converter.to_cardinal(token)` did not raise? (`_token_is_number_word`).
     fn is_number_word(&self, token: &str) -> bool {
-        self.to_cardinal(token).is_ok()
+        match self {
+            Converter::En => self.to_cardinal(token).is_ok(),
+            Converter::Table(lang) => {
+                let norm = crate::normalize(token);
+                // Cheap gate first: most words of a transcript are not numbers.
+                (self.apocope(&norm).is_some() || crate::token_may_be_number(lang, &norm))
+                    && self.to_cardinal(&norm).is_ok()
+            }
+        }
     }
 
     /// The apocopated form a language uses inside a number ("cincuenta y
@@ -627,8 +635,8 @@ impl Converter {
             // A word that is also a cardinal is not an ordinal: vi writes the ordinal
             // as "thứ" + cardinal, so its ordinal table holds every cardinal too.
             Converter::Table(lang) => {
-                matches!(base_convert(lang, token, true), Ok(W2nValue::Int(_)))
-                    && base_convert(lang, token, false).is_err()
+                let norm = crate::normalize(token);
+                matches!(crate::lookup(lang, &norm, true, &[]), Ok(Some(_))) && !self.is_number_word(&norm)
             }
         }
     }
@@ -766,8 +774,7 @@ fn apocope_word(lang: &str, token: &str) -> Option<&'static str> {
 /// Canonicalize apocopes inside a number: "cincuenta y un" -> "cincuenta y
 /// uno", "un mil" -> "mil" (num2words spells 1000 without a unit). A lone
 /// "un" / "una" is left alone: on its own it is an article, not a count.
-fn canonical_apocopes(lang: &str, text: &str) -> Option<String> {
-    let norm = crate::normalize(text);
+fn canonical_apocopes_norm(lang: &str, norm: &str) -> Option<String> {
     let toks: Vec<&str> = norm.split_whitespace().collect();
     if !toks.iter().any(|t| apocope_word(lang, t).is_some()) {
         return None;
@@ -787,8 +794,11 @@ fn canonical_apocopes(lang: &str, text: &str) -> Option<String> {
 }
 
 fn base_convert(lang: &str, text: &str, ordinal: bool) -> Result<W2nValue, W2nError> {
-    if !ordinal && crate::supported_langs().contains(&lang) {
-        if let Some(canon) = canonical_apocopes(lang, text) {
+    // Normalized once here; every reading below works on `norm`.
+    let norm = crate::normalize(text);
+    let supported = crate::is_supported_lang(lang);
+    if !ordinal && supported {
+        if let Some(canon) = canonical_apocopes_norm(lang, &norm) {
             if let Ok(v) = base_convert(lang, &canon, false) {
                 return Ok(v);
             }
@@ -796,12 +806,8 @@ fn base_convert(lang: &str, text: &str, ordinal: bool) -> Result<W2nValue, W2nEr
     }
     // `_rust_lookup`: guarded on `LANG in _RUST_LANGS`, and any error from the
     // core is swallowed to `None` (`except Exception: return None`).
-    if crate::supported_langs().contains(&lang) {
-        let neg = [
-            BASE_NEGATIVE_WORDS[0].to_string(),
-            BASE_NEGATIVE_WORDS[1].to_string(),
-        ];
-        if let Ok(Some(v)) = crate::lookup(lang, text, ordinal, &neg) {
+    if supported {
+        if let Ok(Some(v)) = crate::lookup_norm(lang, &norm, ordinal, &BASE_NEGATIVE_WORDS) {
             return Ok(W2nValue::Int(BigInt::from(v)));
         }
         // Composition multi-échelle pour les valeurs hors table (> 10001) :
@@ -810,10 +816,10 @@ fn base_convert(lang: &str, text: &str, ordinal: bool) -> Result<W2nValue, W2nEr
             // The bare hundred prefix num2words never renders alone (es
             // "ciento"): 100, so the walker can open a run on it and grow it
             // into the table hit "ciento cincuenta y cuatro".
-            if let Some(v) = crate::lookup_hundred_prefix(lang, text) {
+            if let Some(v) = crate::lookup_hundred_prefix_norm(lang, &norm) {
                 return Ok(W2nValue::Int(BigInt::from(v)));
             }
-            if let Some(v) = crate::parse_scaled(lang, text) {
+            if let Some(v) = crate::parse_scaled_norm(lang, &norm) {
                 return Ok(W2nValue::Int(BigInt::from(v)));
             }
             // Compound spoken as separate tokens where num2words renders it
@@ -821,42 +827,45 @@ fn base_convert(lang: &str, text: &str, ordinal: bool) -> Result<W2nValue, W2nEr
             // "millenovecentottantotto". Only when de-spacing actually changes
             // the string (multi-token input), and only if that glued form is a
             // genuine table hit — so it never invents a value.
-            let norm = crate::normalize(text);
-            let despaced: String = norm.split_whitespace().collect();
-            if despaced != norm {
-                if let Ok(Some(v)) = crate::lookup(lang, &despaced, false, &neg) {
+            if norm.contains(' ') {
+                let despaced: String = norm.split_whitespace().collect();
+                if let Ok(Some(v)) =
+                    crate::lookup_norm(lang, &despaced, false, &BASE_NEGATIVE_WORDS)
+                {
                     return Ok(W2nValue::Int(BigInt::from(v)));
                 }
             }
             // Spoken "year" readings (two 2-digit groups, or an explicit/glued
             // hundred) that are not num2words' canonical spelling.
-            if let Some(v) = crate::parse_year(lang, text) {
+            if let Some(v) = crate::parse_year_norm(lang, &norm) {
                 return Ok(W2nValue::Int(BigInt::from(v)));
             }
         }
     }
-    parse_literal(text)
+    parse_literal_norm(&norm)
 }
 
 /// Port of `Words2Num_Base._parse_literal` — a bare digit string, a leading
 /// sign word, or genuinely unparseable input.
 ///
 /// `errmsg_unparseable` is `"cannot parse %r as a number"`.
-fn parse_literal(text: &str) -> Result<W2nValue, W2nError> {
-    let normalized = crate::normalize(text);
+fn parse_literal_norm(normalized: &str) -> Result<W2nValue, W2nError> {
     let unparseable = |s: &str| W2nError::Words2Num(format!("cannot parse {} as a number", py_repr_str(s)));
     if normalized.is_empty() {
-        return Err(unparseable(&normalized));
+        return Err(unparseable(normalized));
     }
     for neg in BASE_NEGATIVE_WORDS {
-        if let Some(rest) = normalized.strip_prefix(&format!("{} ", neg)) {
+        if let Some(rest) = normalized
+            .strip_prefix(neg)
+            .and_then(|r| r.strip_prefix(' '))
+        {
             return finish_parse_literal(rest, -1);
         }
         if normalized == neg {
-            return Err(unparseable(&normalized));
+            return Err(unparseable(normalized));
         }
     }
-    finish_parse_literal(&normalized, 1)
+    finish_parse_literal(normalized, 1)
 }
 
 /// The `try: … except ValueError: pass; raise` tail of `_parse_literal`.
@@ -1876,6 +1885,28 @@ pub fn words2num_sentence(
             continue;
         }
         let head = rstrip_punct(piece).to_lowercase();
+        // Most words of a transcript are not numbers: decide that with one cheap
+        // check before anything that looks at the neighbours or the ordinal table.
+        let head_is_number = starts_run(&converter, &head);
+        let article_number = plain && is_article_word(&resolved, &head);
+        let head_is_apocope = converter.apocope(&head).is_some();
+        let head_is_article = en_cardinal && matches!(head.as_str(), "a" | "an");
+        let head_is_repeat = en_cardinal && matches!(head.as_str(), "double" | "triple");
+        let head_is_scale = after_decimal && is_scale_word(&converter, &head, 1_000);
+        let head_is_percent = percent.is_some_and(|(_, word)| head == word);
+        let ordinal_head = plain && !head_is_number && converter.is_ordinal_word(&head);
+        after_decimal = false;
+        if !head_is_number
+            && !article_number
+            && !head_is_apocope
+            && !head_is_article
+            && !head_is_repeat
+            && !ordinal_head
+        {
+            out.push_str(piece);
+            i += 1;
+            continue;
+        }
         let next = next_word(&parts, i);
         // "one second", "one third": the English grammar reads an ordinal as a
         // number word, but it does not count the article in front of it.
@@ -1889,9 +1920,8 @@ pub fn words2num_sentence(
         // A run must START with a real number word, or with an apocope
         // ("un" in es "un mil") followed by one, or — in English — with
         // "a"/"an" in front of a scale word ("a hundred dollars").
-        let apocope_head = converter.apocope(&head).is_some() && next_starts_run;
-        let article_head = en_cardinal
-            && matches!(head.as_str(), "a" | "an")
+        let apocope_head = head_is_apocope && next_starts_run;
+        let article_head = head_is_article
             && !ends_with_terminal_punct(piece)
             && next
                 .as_deref()
@@ -1899,24 +1929,13 @@ pub fn words2num_sentence(
             // "half a million", "a quarter of a million": a quantity, kept in words.
             && !matches!(prev_word(&parts, i).as_deref(), Some("half" | "quarter"));
         // "vingt pour cent": "cent" after "pour" is the percent sign, not 100.
-        let percent_tail = percent.is_some_and(|(prep, word)| {
-            head == word && prev_word(&parts, i).as_deref() == Some(prep)
-        });
+        let percent_tail = head_is_percent
+            && percent.is_some_and(|(prep, _)| prev_word(&parts, i).as_deref() == Some(prep));
         // "two point five million", "deux virgule cinq millions": the scale word stays a word.
-        let decimal_scale =
-            after_decimal && is_scale_word(&converter, &head, 1_000) && !next_starts_run;
-        after_decimal = false;
-        let ordinal_head = plain && converter.is_ordinal_word(&head);
-        let article_number = plain && is_article_word(&resolved, &head);
+        let decimal_scale = head_is_scale && !next_starts_run;
         // en "double zero seven".
-        let repeat_head = en_cardinal
-            && matches!(head.as_str(), "double" | "triple")
-            && en_digit_run(&parts, i).is_some();
-        if (!starts_run(&converter, &head)
-            && !apocope_head
-            && !article_head
-            && !ordinal_head
-            && !repeat_head)
+        let repeat_head = head_is_repeat && en_digit_run(&parts, i).is_some();
+        if (!head_is_number && !apocope_head && !article_head && !ordinal_head && !repeat_head)
             || percent_tail
             || decimal_scale
         {
