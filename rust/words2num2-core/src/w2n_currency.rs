@@ -893,8 +893,12 @@ pub fn fold_currency(text: &str, lang: &str) -> String {
             Some(num.frac.clone())
         };
         let mut trailing = trailing;
-        // Subunit after the currency: "[and] twenty eight cents" | "fifty".
-        if trailing.is_empty() && frac.is_none() && cur.decimals > 0 {
+        // Subunit after the currency: "[and] twenty eight cents" | "fifty". A comma
+        // after the unit is a pause, not the end of the amount, when a connector and
+        // a spoken subunit follow ("zéro dollar, et cinquante-cinq centimes": the
+        // punctuation of a transcript); it goes with the fold.
+        let comma = trailing == ",";
+        if (trailing.is_empty() || comma) && frac.is_none() && cur.decimals > 0 {
             if let Some(k) = next_word(&parts, end) {
                 let (kkey, _) = word_key(&parts[k].text);
                 let (mut m, mut had_conn) = (k, false);
@@ -915,12 +919,12 @@ pub fn fold_currency(text: &str, lang: &str) -> String {
                                 .and_then(|a| match_currency(base, &parts, a))
                                 .filter(|(w, _, _)| w.sub);
                             if let Some((_, sub_end, sub_trailing)) = sub_word {
-                                if sub_num.trailing.is_empty() {
+                                if sub_num.trailing.is_empty() && (had_conn || !comma) {
                                     frac = Some(pad2(&sub_num.int));
                                     consumed_end = sub_end;
                                     trailing = sub_trailing;
                                 }
-                            } else if !had_conn {
+                            } else if !had_conn && !comma {
                                 // "two euros fifty": bare subunit, only when nothing
                                 // number-like follows (no "fifty three people" risk
                                 // beyond what speech allows).

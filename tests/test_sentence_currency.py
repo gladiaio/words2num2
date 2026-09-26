@@ -145,3 +145,26 @@ def test_off_by_default(lang, text):
 def test_it_centesimi_is_the_cent_after_a_number_even_without_the_fold():
     assert words2num_sentence("cinquanta centesimi", lang="it") == "50 centesimi"
     assert words2num_sentence("il centesimo cliente", lang="it") == "il 100º cliente"
+
+
+@pytest.mark.parametrize(
+    "lang,text,expected",
+    [
+        # A transcript's punctuation puts a comma where the speaker paused: the
+        # subunit that follows (connector + number + subunit word) is the same amount.
+        ("fr", "le solde est de zéro dollar, et cinquante-cinq centimes.", "le solde est de 0,55 $."),
+        ("fr", "deux euros, et cinquante centimes", "2,50 €"),
+        ("en", "zero dollars, and fifty five cents", "$0.55"),
+        ("es", "dos dólares, con cincuenta centavos", "$2.50"),
+        ("de", "zwei euro, und fünfzig cent", "2,50 €"),
+        ("it", "due euro, e cinquanta centesimi", "2,50 €"),
+        ("pt", "dois reais, e cinquenta centavos", "R$ 2,50"),
+        ("nl", "twee euro, en vijftig cent", "€ 2,50"),
+        # Without a spoken subunit the comma still ends the amount.
+        ("en", "five dollars, and fifty people came", "$5, and 50 people came"),
+        ("fr", "deux euros, cinquante", "2 €, 50"),
+        ("en", "twelve dollars, and", "$12, and"),
+    ],
+)
+def test_comma_before_the_subunit(lang, text, expected):
+    assert fold(text, lang) == expected
