@@ -18,6 +18,7 @@ use num_bigint::BigInt;
 use std::collections::HashMap;
 use std::sync::{OnceLock, RwLock};
 
+pub mod w2n_currency;
 pub mod w2n_formats;
 pub mod w2n_lang_en;
 pub mod w2n_sentence;
@@ -90,6 +91,9 @@ pub fn normalize_tail(decomposed: &str) -> String {
 /// self-contained.
 pub fn normalize(s: &str) -> String {
     use unicode_normalization::UnicodeNormalization;
+    if s.is_ascii() {
+        return normalize_tail(s); // NFKD and the combining-mark filter are no-ops on ASCII
+    }
     let nfkd: String = s.nfkd().collect();
     let stripped: String = nfkd
         .chars()
@@ -139,7 +143,19 @@ pub fn lookup(
     ordinal: bool,
     negative_words: &[String],
 ) -> Result<Option<i64>, LookupError> {
-    let mut normalized = normalize(text);
+    let negs: Vec<&str> = negative_words.iter().map(String::as_str).collect();
+    lookup_norm(lang, &normalize(text), ordinal, &negs)
+}
+
+/// [`lookup`] on text that is already normalized (the walker normalizes a run once
+/// and then tries every reading on it).
+pub fn lookup_norm(
+    lang: &str,
+    normalized: &str,
+    ordinal: bool,
+    negative_words: &[&str],
+) -> Result<Option<i64>, LookupError> {
+    let mut normalized = normalized;
     if normalized.is_empty() {
         return Ok(None);
     }
@@ -149,9 +165,12 @@ pub fn lookup(
         if normalized == *neg {
             return Ok(None); // a bare negword is unparseable
         }
-        if let Some(rest) = normalized.strip_prefix(&format!("{} ", neg)) {
+        if let Some(rest) = normalized
+            .strip_prefix(neg)
+            .and_then(|r| r.strip_prefix(' '))
+        {
             sign = -1;
-            normalized = rest.to_string();
+            normalized = rest;
             break;
         }
     }
@@ -160,26 +179,98 @@ pub fn lookup(
     {
         let t = tables().read().unwrap();
         if let Some(tab) = t.get(&key) {
-            return Ok(table_get(tab, lang, &normalized).map(|v| sign * v));
+            return Ok(table_get(tab, lang, normalized, ordinal).map(|v| sign * v));
         }
     }
     let built = build_table(lang, ordinal)?;
-    let got = table_get(&built, lang, &normalized).map(|v| sign * v);
+    let got = table_get(&built, lang, normalized, ordinal).map(|v| sign * v);
     tables().write().unwrap().insert(key, built);
     Ok(got)
 }
 
-/// A table hit for `normalized`, or for one of its spoken plural variants.
-fn table_get(tab: &HashMap<String, i64>, lang: &str, normalized: &str) -> Option<i64> {
+/// A table hit for `normalized`, or for one of its spoken variants: the fr
+/// plural -s on a cardinal, the gender / declension / apocope of an ordinal.
+fn table_get(
+    tab: &HashMap<String, i64>,
+    lang: &str,
+    normalized: &str,
+    ordinal: bool,
+) -> Option<i64> {
     if let Some(v) = tab.get(normalized) {
         return Some(*v);
     }
-    for variant in fr_plural_variants(lang, normalized) {
+    let variants = if ordinal {
+        ordinal_variants(lang, normalized)
+    } else {
+        fr_plural_variants(lang, normalized)
+    };
+    for variant in variants {
         if let Some(v) = tab.get(&variant) {
             return Some(*v);
         }
     }
     None
+}
+
+/// num2words renders one ordinal form per number (fr "premier", es "primero",
+/// de "zweite", it "primo"); speech agrees it with the noun. The canonical
+/// spelling of an inflected token, or `None` when it is not one.
+fn ordinal_canonical(base: &str, tok: &str) -> Option<String> {
+    let s = match (base, tok) {
+        ("fr", "premiere") => "premier".to_string(),
+        ("fr", "second" | "seconde") => "deuxieme".to_string(),
+        ("es", "primer" | "primera") => "primero".to_string(),
+        ("es", "tercer" | "tercera") => "tercero".to_string(),
+        ("es" | "pt" | "it", t) if t.ends_with('a') && t.len() > 3 => {
+            format!("{}o", &t[..t.len() - 1])
+        }
+        ("es" | "pt", t) if t.ends_with("os") || t.ends_with("as") => {
+            format!("{}o", &t[..t.len() - 2])
+        }
+        ("it", t) if (t.ends_with('i') || t.ends_with('e')) && t.len() > 3 => {
+            format!("{}o", &t[..t.len() - 1])
+        }
+        // de declines "zweite" -> zweiten / zweiter / zweites / zweitem.
+        ("de", t)
+            if t.len() > 4
+                && (t.ends_with("ten")
+                    || t.ends_with("ter")
+                    || t.ends_with("tes")
+                    || t.ends_with("tem")) =>
+        {
+            t[..t.len() - 1].to_string()
+        }
+        _ => return None,
+    };
+    Some(s)
+}
+
+/// Every combination of canonicalising the inflected ordinal tokens of
+/// `normalized` (at most three such tokens).
+fn ordinal_variants(lang: &str, normalized: &str) -> Vec<String> {
+    let base = lang.split(&['_', '-'][..]).next().unwrap_or(lang);
+    let toks: Vec<&str> = normalized.split_whitespace().collect();
+    let canon: Vec<Option<String>> = toks.iter().map(|t| ordinal_canonical(base, t)).collect();
+    let slots: Vec<usize> = canon
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| c.is_some())
+        .map(|(i, _)| i)
+        .collect();
+    if slots.is_empty() || slots.len() > 3 {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    for mask in 1u32..(1 << slots.len()) {
+        let mut v: Vec<&str> = toks.clone();
+        for (k, &pos) in slots.iter().enumerate() {
+            if mask & (1 << k) != 0 {
+                v[pos] = canon[pos].as_deref().unwrap_or(toks[pos]);
+            }
+        }
+        out.push(v.join(" "));
+    }
+    out
 }
 
 /// fr: num2words writes "deux cents" and "quatre-vingts" but speech (and ASR)
@@ -229,6 +320,13 @@ fn fr_plural_variants(lang: &str, normalized: &str) -> Vec<String> {
 /// Languages the Rust core can serve (Python's `_RUST.supported_langs()`).
 pub fn supported_langs() -> Vec<&'static str> {
     num2words2_core::supported_lang_keys()
+}
+
+/// `supported_langs().contains(lang)` without rebuilding the list on every call.
+pub fn is_supported_lang(lang: &str) -> bool {
+    static S: OnceLock<std::collections::HashSet<&'static str>> = OnceLock::new();
+    S.get_or_init(|| num2words2_core::supported_lang_keys().into_iter().collect())
+        .contains(lang)
 }
 
 // ---------------------------------------------------------------------------
@@ -303,6 +401,59 @@ pub fn scale_words(lang: &str) -> Vec<(String, i64)> {
     out
 }
 
+/// Is `word` (normalized) a scale word of `lang` with magnitude >= `min`? Reads the
+/// cache in place — the sentence walker asks this for every run head.
+pub fn is_scale_word_of(lang: &str, word: &str, min: i64) -> bool {
+    {
+        let cache = scale_cache().read().unwrap();
+        if let Some(v) = cache.get(lang) {
+            return v.iter().any(|(w, mag)| w == word && *mag >= min);
+        }
+    }
+    scale_words(lang)
+        .iter()
+        .any(|(w, mag)| w == word && *mag >= min)
+}
+
+/// Can a single normalized token be a number of `lang` at all? A table hit, or a
+/// token that carries a scale / hundred morpheme or an apocope and so may compose
+/// ("dreiundzwanzigtausend", "ciento", "neunzehnhundertneunzig"). The sentence
+/// walker asks this for every word of the text; the full `to_cardinal` (several
+/// normalisations and composition passes) only runs for the tokens that pass.
+pub fn token_may_be_number(lang: &str, norm: &str) -> bool {
+    if norm.is_empty() || norm.contains(' ') {
+        return true; // not a single token: let the full parse decide
+    }
+    if lookup_plain(lang, norm).is_some() {
+        return true;
+    }
+    if hundred_word(lang).is_some_and(|h| norm.contains(h.as_str()))
+        || hundred_prefix(lang).is_some_and(|h| norm == h)
+    {
+        return true;
+    }
+    if with_scale_words(lang, |scales| {
+        scales.iter().any(|(w, _)| norm.contains(w.as_str()))
+    }) {
+        return true;
+    }
+    matches!(
+        lang.split(&['_', '-'][..]).next().unwrap_or(lang),
+        "de" | "nl" | "af" | "it" | "sv" | "no" | "nb" | "nn" | "da"
+    ) && ["tausend", "duizend", "duisend", "mila", "tusen", "tusind"]
+        .iter()
+        .any(|t| norm.contains(t))
+}
+
+/// Run `f` on the cached scale words of `lang` without cloning them.
+fn with_scale_words<R>(lang: &str, f: impl FnOnce(&[(String, i64)]) -> R) -> R {
+    if scale_cache().read().unwrap().get(lang).is_none() {
+        scale_words(lang); // builds and caches
+    }
+    let cache = scale_cache().read().unwrap();
+    f(cache.get(lang).map(Vec::as_slice).unwrap_or(&[]))
+}
+
 /// Table hit for a fragment (no sign handling), i.e. a number ≤ 10001.
 fn lookup_plain(lang: &str, text: &str) -> Option<i64> {
     lookup(lang, text, false, &[]).ok().flatten()
@@ -343,10 +494,71 @@ fn trim_connectors<'a>(s: &'a str, conns: &[&str]) -> String {
 /// (`> 10001`), e.g. "soixante-neuf mille huit" → 69008, "soixante-quinze mille
 /// treize" → 75013. `None` if any fragment is not a known number word.
 pub fn parse_scaled(lang: &str, text: &str) -> Option<i64> {
-    if !supported_langs().contains(&lang) {
+    parse_scaled_norm(lang, &normalize(text))
+}
+
+/// [`parse_scaled`] on normalized text.
+pub fn parse_scaled_norm(lang: &str, norm: &str) -> Option<i64> {
+    if !is_supported_lang(lang) {
         return None;
     }
-    parse_scaled_inner(lang, &normalize(text), &scale_words(lang), connector_words(lang))
+    with_scale_words(lang, |scales| {
+        parse_scaled_inner(lang, norm, scales, connector_words(lang))
+    })
+}
+
+/// The article that is also "one" in front of a scale word, for languages whose table
+/// does not hold it as a number: de "eine Million", nl "een miljoen".
+fn article_one(lang: &str, word: &str) -> bool {
+    let base = lang.split(&['_', '-'][..]).next().unwrap_or(lang);
+    matches!((base, word), ("de", "ein" | "eine") | ("nl" | "af", "een"))
+}
+
+/// A scale word glued into one token, as de / nl / it write it:
+/// "dreiundzwanzigtausend" -> (23, 1000, 0), "tweehonderdduizend" -> (200, 1000, 0),
+/// "ventitremila" -> (23, 1000, 0). `None` when the token holds no scale morpheme.
+fn split_glued_scale(lang: &str, tok: &str, scales: &[(String, i64)]) -> Option<i64> {
+    let base = lang.split(&['_', '-'][..]).next().unwrap_or(lang);
+    let mut words: Vec<(String, i64)> = scales.to_vec();
+    // The thousand morpheme of the agglutinative languages: `scale_words` derives its
+    // entries from whole renderings ("zweitausend"), never from the bare morpheme.
+    let thousand = match base {
+        "de" => Some("tausend"),
+        "nl" => Some("duizend"),
+        "af" => Some("duisend"),
+        "it" => Some("mila"), // "duemila", "ventitremila"
+        "sv" | "no" | "nb" | "nn" => Some("tusen"),
+        "da" => Some("tusind"),
+        _ => None,
+    };
+    if let Some(t) = thousand {
+        if tok == t {
+            return Some(1_000); // de "tausend Euro": the bare morpheme is 1000
+        }
+        words.push((t.to_string(), 1_000));
+    }
+    for (w, mag) in &words {
+        let Some(pos) = tok.find(w.as_str()) else {
+            continue;
+        };
+        if pos == 0 || *mag < 1_000 {
+            continue; // the scale word itself, or a hundred morpheme (parse_year's job)
+        }
+        let pre = &tok[..pos];
+        let suf = &tok[pos + w.len()..];
+        // de "hunderttausend": the bare hundred morpheme is 100 (num2words writes "einhundert").
+        let high = lookup_plain(lang, pre)
+            .or_else(|| hundred_word(lang).filter(|h| h == pre).map(|_| 100))?;
+        let low = if suf.is_empty() {
+            0
+        } else {
+            lookup_plain(lang, suf)?
+        };
+        if (1..1000).contains(&high) && (0..*mag).contains(&low) {
+            return Some(high * mag + low);
+        }
+    }
+    None
 }
 
 fn parse_scaled_inner(lang: &str, text: &str, scales: &[(String, i64)], conns: &[&str]) -> Option<i64> {
@@ -359,14 +571,20 @@ fn parse_scaled_inner(lang: &str, text: &str, scales: &[(String, i64)], conns: &
     if let Some(v) = lookup_plain(lang, text) {
         return Some(v);
     }
+    if !text.contains(' ') {
+        if let Some(v) = split_glued_scale(lang, text, scales) {
+            return Some(v);
+        }
+    }
     // Split on the largest scale word present (whole-token match).
     let toks: Vec<&str> = text.split_whitespace().collect();
     for (word, mag) in scales {
         if let Some(pos) = toks.iter().position(|t| t == word) {
             let left = toks[..pos].join(" ");
             let right = toks[pos + 1..].join(" ");
-            // « mille » nu (pas de multiplicateur à gauche) = 1×mille.
-            let l = if trim_connectors(left.trim(), conns).is_empty() {
+            // « mille » nu (pas de multiplicateur à gauche) = 1×mille ; de « eine Million ».
+            let left_trim = trim_connectors(left.trim(), conns);
+            let l = if left_trim.is_empty() || article_one(lang, &left_trim) {
                 1
             } else {
                 parse_scaled_inner(lang, &left, scales, conns)?
@@ -394,6 +612,10 @@ fn parse_scaled_inner(lang: &str, text: &str, scales: &[(String, i64)], conns: &
         if let (Some(l), Some(r)) = (lookup_plain(lang, &left), lookup_plain(lang, &right)) {
             if l >= 100 && l % 100 == 0 && (1..100).contains(&r) {
                 return Some(l + r);
+            }
+            // fr counts hundreds by the dozen: "douze cents" = 1200, "dix-huit cents" = 1800.
+            if lang.starts_with("fr") && (11..100).contains(&l) && r == 100 {
+                return Some(l * 100);
             }
             // Tens joined with the connector where num2words glues them: es
             // "veinte y uno" (num2words: "veintiuno") = 21. The connector must
@@ -535,11 +757,16 @@ fn hundred_prefix(lang: &str) -> Option<String> {
 /// the sentence walker must be a number word by itself, and this is the one
 /// hundred word the reverse table cannot vouch for.
 pub fn lookup_hundred_prefix(lang: &str, text: &str) -> Option<i64> {
-    if !supported_langs().contains(&lang) {
+    lookup_hundred_prefix_norm(lang, &normalize(text))
+}
+
+/// [`lookup_hundred_prefix`] on normalized text.
+pub fn lookup_hundred_prefix_norm(lang: &str, norm: &str) -> Option<i64> {
+    if !is_supported_lang(lang) {
         return None;
     }
     let prefix = hundred_prefix(lang)?;
-    (normalize(text) == prefix).then_some(100)
+    (norm == prefix).then_some(100)
 }
 
 /// Recover a spoken "year" reading that is not num2words' canonical spelling:
@@ -549,10 +776,14 @@ pub fn lookup_hundred_prefix(lang: &str, text: &str) -> Option<i64> {
 /// after the whole-string table hit and [`parse_scaled`] have both declined —
 /// so a canonical number (`vingt trois` = 23) never reaches here.
 pub fn parse_year(lang: &str, text: &str) -> Option<i64> {
-    if !supported_langs().contains(&lang) {
+    parse_year_norm(lang, &normalize(text))
+}
+
+/// [`parse_year`] on normalized text.
+pub fn parse_year_norm(lang: &str, norm: &str) -> Option<i64> {
+    if !is_supported_lang(lang) {
         return None;
     }
-    let norm = normalize(text);
     let toks: Vec<&str> = norm.split_whitespace().collect();
     if toks.is_empty() {
         return None;
@@ -592,8 +823,12 @@ pub fn parse_year(lang: &str, text: &str) -> Option<i64> {
             }
         }
     }
-    // (A) two spoken 2-digit groups ("nineteen ninety-nine") -> a*100 + b.
-    if toks.len() == 2 {
+    // (A) two spoken 2-digit groups ("nineteen ninety-nine") -> a*100 + b. A Germanic
+    // habit (nl "negentien negenennegentig", da "nitten nitti"): Romance languages say
+    // the thousand ("mil novecientos"), and es "catorce treinta" is a time of day.
+    let base = lang.split(&['_', '-'][..]).next().unwrap_or(lang);
+    let pairs = matches!(base, "de" | "nl" | "af" | "da" | "sv" | "no" | "nb" | "nn" | "is");
+    if pairs && toks.len() == 2 {
         if let (Some(a), Some(b)) = (lookup_plain(lang, toks[0]), lookup_plain(lang, toks[1])) {
             if (10..=99).contains(&a) && (0..=99).contains(&b) {
                 return Some(a * 100 + b);
@@ -609,17 +844,24 @@ pub fn parse_year(lang: &str, text: &str) -> Option<i64> {
 
 /// `Words2Num_EN().to_cardinal(text)`.
 pub fn en_to_cardinal(text: &str) -> Result<w2n_lang_en::W2nValue, w2n_lang_en::W2nError> {
-    w2n_lang_en::W2nLangEn::new().to_cardinal(text)
+    en_grammar().to_cardinal(text)
+}
+
+/// The English grammar, built once: its tables are static and the sentence walker
+/// asks it about every token.
+fn en_grammar() -> &'static w2n_lang_en::W2nLangEn {
+    static G: OnceLock<w2n_lang_en::W2nLangEn> = OnceLock::new();
+    G.get_or_init(w2n_lang_en::W2nLangEn::new)
 }
 
 /// `Words2Num_EN().to_ordinal(text)`.
 pub fn en_to_ordinal(text: &str) -> Result<w2n_lang_en::W2nValue, w2n_lang_en::W2nError> {
-    w2n_lang_en::W2nLangEn::new().to_ordinal(text)
+    en_grammar().to_ordinal(text)
 }
 
 /// `Words2Num_EN().to_year(text)`.
 pub fn en_to_year(text: &str) -> Result<w2n_lang_en::W2nValue, w2n_lang_en::W2nError> {
-    w2n_lang_en::W2nLangEn::new().to_year(text)
+    en_grammar().to_year(text)
 }
 
 #[cfg(test)]
