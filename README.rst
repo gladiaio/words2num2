@@ -213,6 +213,102 @@ Quickstart
     >>> words2num_sentence("I bought twenty-three apples and fourteen pears.")
     'I bought 23 apples and 14 pears.'
 
+Sentence mode
+-------------
+
+``words2num_sentence`` is built for transcripts (ASR, LLM output): it reads
+what the speaker meant and leaves everything else alone.
+
+.. code-block:: python
+
+    >>> words2num_sentence("due on the fifteenth of march, twenty twenty five")
+    'due on the 15th of march, 2025'
+    >>> words2num_sentence("call eight five zero eight two oh nine oh nine five")
+    'call 8508209095'
+    >>> words2num_sentence("one thousand three hundred fifty five dollars and two point five percent")
+    '1355 dollars and 2.5 percent'
+    >>> words2num_sentence("no one answered, wait a second, one of them owes me a hundred bucks")
+    'no one answered, wait a second, one of them owes me 100 bucks'
+    >>> words2num_sentence("un solde de deux cents euros et vingt et une personnes", lang="fr")
+    'un solde de 200 euros et 21 personnes'
+    >>> words2num_sentence("le vingt-troisième jour, trois virgule cinq pour cent", lang="fr")
+    'le 23e jour, 3,5 pour cent'
+    >>> words2num_sentence("el primero de mayo, cincuenta y un centavos", lang="es")
+    'el 1º de mayo, 51 centavos'
+    >>> words2num_sentence("am zweiten April, dreiundzwanzigtausend Euro", lang="de")
+    'am 2. April, 23000 Euro'
+
+What it reads:
+
+* **Cardinals and compounds** across scale words (``"un million deux cent
+  mille"``, ``"dreiundzwanzigtausend"``, ``"ventitremila"``), with the
+  spoken connectors (``"and"``, ``"et"``, ``"y"``) and the plural or
+  feminine forms speech adds (``"deux cents"``, ``"quatre vingts"``,
+  ``"cinquante et une"``).
+* **Spoken years** (``"nineteen ninety nine"``, ``"twenty oh five"``, nl
+  ``"negentien negenennegentig"``) and **digit strings** read one digit at a
+  time in every language (phone numbers, ZIP codes, ``"double zero
+  seven"``), leading zeros kept.
+* **Decimals** with the language's separator word: en ``"point"``, fr
+  ``"virgule"``, es ``"coma"`` / ``"punto"``, de/nl ``"komma"``, written with
+  that separator (``"3,5"``).
+* **Ordinals**, written in the language's figures: ``21st``, fr ``1er`` /
+  ``2e``, es ``3º`` / ``20ª``, de ``2.``, nl ``15e``.
+* **Percent phrases**: ``"vingt pour cent"`` -> ``"20 pour cent"`` (the
+  ``cent`` after ``pour`` is not 100).
+
+What it leaves in words, on purpose:
+
+* the number 1 when it is an article or a pronoun (``"one of them"``,
+  ``"no one"``, ``"un instant"``, ``"um momento"``), unless something counts
+  it: a unit or currency (``"one dollar"``, ``"une heure"``), a label
+  (``"press one"``, ``"option one"``, ``"tapez un"``), a month, a list;
+* ``"first"`` / ``"second"`` and their translations away from a date
+  (``"first of all"``, ``"wait a second"``, ``"la première fois"``);
+* fractions (``"two thirds"``, ``"a fifth of"``, ``"deux tiers"``) and
+  quantities (``"a couple of thousand"``, ``"hundreds of"``, ``"des
+  millions"``, ``"half a million"``);
+* a decade (``"the nineteen nineties"``), a scale word after a decimal
+  (``"2.5 million"``), a dangling connector (``"five point"``, ``"one and a
+  half"``);
+* anything that already holds a digit (``"850-820-9095"``, ``"$426"``).
+
+**Currency fold** (``currency=True``, off by default): an amount spoken as
+number + currency word (+ connector + subunit) is written the way the language
+writes that currency — the currency picks the symbol and its side, the language
+the separators (en ``1,355.28``, fr ``1 355,28``, de/es/it/pt/nl ``1.355,28``;
+dollars and pesos in Spanish keep the Latin-American ``$1,234.56``).
+
+.. code-block:: python
+
+    >>> words2num_sentence("one thousand three hundred fifty five dollars and twenty eight cents", currency=True)
+    '$1,355.28'
+    >>> words2num_sentence("ninety nine cents, twenty quid, ten thousand yen", currency=True)
+    '$0.99, £20, ¥10,000'
+    >>> words2num_sentence("quarante-trois dollars et vingt centimes", lang="fr", currency=True)
+    '43,20 $'
+    >>> words2num_sentence("mille deux cents euros cinquante", lang="fr", currency=True)
+    '1 200,50 €'
+    >>> words2num_sentence("ciento cincuenta y cuatro dólares con noventa y dos centavos", lang="es", currency=True)
+    '$154.92'
+    >>> words2num_sentence("dreiundzwanzig euro und fünfzig cent", lang="de", currency=True)
+    '23,50 €'
+    >>> words2num_sentence("duzentos reais e cinquenta centavos", lang="pt", currency=True)
+    'R$ 200,50'
+    >>> words2num_sentence("twintig euro vijftig", lang="nl", currency=True)
+    '€ 20,50'
+
+Subunits after a connector (``"and"``, ``"et"``, ``"con"``, ``"und"``, ``"e"``)
+or bare (``"two euros fifty"``), or on their own (``"vingt centimes"`` ->
+``"0,20 €"``: the language's default currency — USD for en/es, BRL for pt, EUR
+elsewhere). No decimals unless a subunit was spoken (``"twelve dollars"`` ->
+``"$12"``); JPY and KRW never carry any. A currency word without a number in
+front stays a word (``"des euros"``, ``"a couple of dollars"``), and so does an
+amount on a scale word (``"2.5 million dollars"``). Currencies: USD, EUR, GBP,
+JPY, CNY, CHF, CAD (fr ``5 $ CA``, the OQLF form), AUD, NZD, MXN and the
+unqualified peso (``$``), BRL, INR, KRW, RUB, TRY, PLN, SEK/NOK/DKK, XOF, MAD,
+ZAR, with their names and subunits in en, fr, es, de, it, pt, nl and ca.
+
 Auto-parse mode
 ---------------
 

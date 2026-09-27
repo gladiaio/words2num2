@@ -188,7 +188,8 @@ def test_year_path_still_reads_pairs(text, expected):
         ("two thousand twenty five", "2025"),
         ("twenty hundred", "2000"),
         ("twenty five people", "25 people"),
-        ("twenty first", "21"),
+        # Not a year either: an ordinal, written in figures.
+        ("twenty first", "21st"),
     ],
 )
 def test_sentence_reads_spoken_years(sentence, expected):
