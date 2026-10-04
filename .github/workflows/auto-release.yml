@@ -1,0 +1,83 @@
+name: Auto release
+
+# Releases the version main declares, so PyPI never lags behind main again
+# (0.3.4 sat unreleased on main while PyPI still served 0.3.3).
+#
+# On every push to main that touches the version (pyproject.toml or
+# words2num2/_version.py): when pyproject's version has no `v<version>` tag
+# yet and is not on PyPI, it checks that _version.py agrees, tags HEAD
+# `v<version>`, and dispatches release.yml (PyPI + GitHub Release) and
+# crates.yml on that tag. A tag pushed with GITHUB_TOKEN does not trigger the
+# tag workflows itself, so each runs exactly once, from the dispatch.
+# Nothing happens when the version is already tagged or published: merges
+# that do not bump the version are no-ops.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - pyproject.toml
+      - words2num2/_version.py
+      - .github/workflows/auto-release.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write   # push the tag
+  actions: write    # dispatch release.yml and crates.yml
+
+concurrency:
+  group: auto-release
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    name: Tag and release the declared version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve the version
+        id: v
+        run: |
+          set -euo pipefail
+          ver=$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')
+          pkg=$(python3 -c 'import runpy; print(runpy.run_path("words2num2/_version.py")["__version__"])')
+          if [ "$ver" != "$pkg" ]; then
+            echo "::error::pyproject.toml says $ver but words2num2/_version.py says $pkg: bump both"
+            exit 1
+          fi
+          echo "version=$ver" >> "$GITHUB_OUTPUT"
+          if git rev-parse -q --verify "refs/tags/v$ver" >/dev/null; then
+            echo "v$ver is already tagged: nothing to release."
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          code=$(curl -s -o /dev/null -w '%{http_code}' "https://pypi.org/pypi/words2num2/$ver/json")
+          if [ "$code" = "200" ]; then
+            echo "$ver is already on PyPI: nothing to release."
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "release=true" >> "$GITHUB_OUTPUT"
+
+      - name: Tag v${{ steps.v.outputs.version }}
+        if: steps.v.outputs.release == 'true'
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "v${{ steps.v.outputs.version }}" -m "words2num2 ${{ steps.v.outputs.version }}"
+          git push origin "v${{ steps.v.outputs.version }}"
+
+      - name: Dispatch the release workflows on the tag
+        if: steps.v.outputs.release == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VER: ${{ steps.v.outputs.version }}
+        run: |
+          set -euo pipefail
+          gh workflow run release.yml --ref "v$VER" -f version="$VER"
+          gh workflow run crates.yml --ref "v$VER"
+          echo "Release of $VER dispatched: https://github.com/${{ github.repository }}/actions/workflows/release.yml"
