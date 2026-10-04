@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """English words-to-number tests."""
+
 from decimal import Decimal
 
 import pytest
@@ -91,10 +92,7 @@ def test_empty_input_raises():
 
 
 def test_sentence_simple():
-    assert (
-        words2num_sentence("I bought twenty-three apples.")
-        == "I bought 23 apples."
-    )
+    assert words2num_sentence("I bought twenty-three apples.") == "I bought 23 apples."
 
 
 def test_sentence_multiple_runs():
@@ -119,13 +117,16 @@ def test_sentence_preserves_punctuation():
 # See gladiaio/words2num2#17.
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.parametrize(
     "sentence,expected",
     [
         ("three sixty", "3 60"),
         ("three sixty five", "3 65"),
-        ("nineteen eighty four", "19 84"),
-        ("twenty twenty", "20 20"),
+        # Not one cardinal either, but the sentence walker reads the pair as
+        # a spoken year since 0.3.3 (was "19 84" / "20 20").
+        ("nineteen eighty four", "1984"),
+        ("twenty twenty", "2020"),
         ("five forty", "5 40"),
     ],
 )
@@ -168,6 +169,92 @@ def test_year_path_still_reads_pairs(text, expected):
     assert words2num(text, to="year") == expected
 
 
+# ---------------------------------------------------------------------------
+# Sentence mode on bank IVR transcripts: a spoken year is a year, a string of
+# single digits is a digit string. Neither is summed.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "sentence,expected",
+    [
+        ("twenty twenty five", "2025"),
+        ("nineteen ninety nine", "1999"),
+        ("december one twenty twenty five", "december 1 2025"),
+        ("in twenty twenty", "in 2020"),
+        ("twenty oh five", "2005"),
+        ("twenty nineteen", "2019"),
+        # Already a valid cardinal: unchanged.
+        ("two thousand twenty five", "2025"),
+        ("twenty hundred", "2000"),
+        ("twenty five people", "25 people"),
+        # Not a year either: an ordinal, written in figures.
+        ("twenty first", "21st"),
+    ],
+)
+def test_sentence_reads_spoken_years(sentence, expected):
+    assert words2num_sentence(sentence) == expected
+
+
+@pytest.mark.parametrize(
+    "sentence,expected",
+    [
+        ("your account ending in four five six seven", "your account ending in 4567"),
+        ("zero six one two", "0612"),
+        ("one two three", "123"),
+        ("one oh one", "101"),
+        ("seven eight", "78"),
+        # A lone digit word, and tens + unit, stay cardinals.
+        ("press one", "press 1"),
+        ("twenty five", "25"),
+        ("one hundred twenty three", "123"),
+        # unit + tens is two numbers, not 25 and not 520.
+        ("five twenty", "5 20"),
+        # "oh" does not open a digit run.
+        ("oh seven", "0 7"),
+    ],
+)
+def test_sentence_digit_runs_concatenate(sentence, expected):
+    assert words2num_sentence(sentence) == expected
+
+
+@pytest.mark.parametrize(
+    "sentence,expected",
+    [
+        # A token that already holds digits is a literal: adjacent numerals were
+        # summed ("850 820 9095" came out as 10765, a phone number lost).
+        ("calling from 850 820 9095.", "calling from 850 820 9095."),
+        ("850-820-9095", "850-820-9095"),
+        ("zip 94504 amount 426 and 93 cents", "zip 94504 amount 426 and 93 cents"),
+        ("press 1 or two", "press 1 or 2"),
+        ("$426 and ninety three cents", "$426 and 93 cents"),
+        ("2025 and twenty five", "2025 and 25"),
+    ],
+)
+def test_sentence_digit_tokens_are_literals(sentence, expected):
+    assert words2num_sentence(sentence) == expected
+
+
+@pytest.mark.parametrize(
+    "text", ["twenty twenty five", "four five six seven", "one two three"]
+)
+def test_year_and_digit_runs_are_not_one_cardinal(text):
+    # "twenty twenty five" must never become 45, nor "one two three" 6.
+    with pytest.raises(Words2NumError):
+        words2num(text)
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("twenty twenty five", 2025),
+        ("twenty oh five", 2005),
+        ("twenty hundred", 2000),
+        ("two thousand twenty five", 2025),
+    ],
+)
+def test_explicit_year_mode_unchanged(text, expected):
+    assert words2num(text, to="year") == expected
 
 
 # ---------------------------------------------------------------------------
@@ -232,7 +319,10 @@ def test_decimal_still_parses(text, expected):
         ("the answer is point five.", "the answer is 0.5."),
         ("a dot five gain", "a 0.5 gain"),
         # A dangling separator is left as prose rather than swallowed.
-        ("one point", "1 point"),
+        ("five point", "5 point"),
+        ("two thousand point", "2000 point"),
+        # A lone "one" that nothing counts stays a word (the article rule).
+        ("one point", "one point"),
     ],
 )
 def test_sentence_decimal_head(sentence, expected):

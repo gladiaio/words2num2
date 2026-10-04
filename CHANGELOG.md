@@ -6,6 +6,50 @@ follows [Semantic Versioning](https://semver.org/) and uses
 
 ## [Unreleased]
 
+Sentence mode (`words2num_sentence`) was audited on ~300 real-life ASR finals
+(call-center, IVR, finance; en / fr / es, plus de / it / pt / nl and a sweep
+of 20 other locales): 59 % correct before, 96 % after. Every change is
+covered in `tests/test_sentence_realworld.py`.
+
+### Added
+
+- **Currency fold in sentence mode**, `words2num_sentence(..., currency=True)`
+  (off by default): an amount spoken as number + currency word (+ connector
+  + subunit) is written the way the language writes that currency — en
+  `"$1,355.28"`, `"$0.99"`, `"£20"`, `"¥10,000"`; fr `"43,20 $"`,
+  `"1 200,50 €"`, `"5 $ CA"`; es `"$154.92"` (dollars and pesos in the
+  Latin-American form) / `"500,20 €"`; de `"23,50 €"`; it `"20,50 €"`; pt
+  `"R$ 200,50"`; nl `"€ 20,50"`. 23 currencies, names and subunits in en /
+  fr / es / de / it / pt / nl / ca. A currency word without a number stays a
+  word.
+- it `"cinquanta centesimi"` is the cent, not the hundredth (was `"50 100º"`).
+- de `"tausend Euro"` -> `"1000 Euro"` (the bare thousand morpheme).
+- **Ordinals in sentence mode**, written in the language's figures: en
+  `21st` / `22nd` / `3rd` / `15th`, fr `1er` / `1re` / `2e`, es-pt-it `3º` /
+  `20ª`, de `2.`, nl `15e`, num2words2's `ordinal_num` elsewhere when it
+  carries a marker (tr `1'inci`; ru / pl keep the words). A compound is
+  always a rank (`"twenty first"`, `"vingt-troisième"`); a lone `first` /
+  `second` and its translations only next to a month or "of the month"
+  (`"first of all"`, `"wait a second"`, `"la première fois"` stay words);
+  fractions stay words (`"a fifth of"`, `"two thirds"`, `"deux tiers"`).
+  The ordinal table also matches the inflected forms speech uses (fr
+  `première`, es `primer(a)` / `tercer(a)`, de `zweiten`, it `prima`).
+- **Digit strings in every language** (were English-only): fr `"sept cinq
+  zéro un zéro"` -> `"75010"`, `"zéro six douze …"` -> `"06 12 …"`, es
+  `"seis uno nueve ocho cero"` -> `"61980"`; en `"double zero seven"` ->
+  `"007"`, `"triple five"` -> `"555"`.
+- **Spoken decimal separators**: fr `virgule`, es/ca `coma`, pt `vírgula`,
+  it `virgola`, de/nl `komma`, ro `virgulă`, pl `przecinek` -> `","`;
+  es/pt/it `punto` / `ponto` -> `"."`: `"trois virgule cinq"` -> `"3,5"`,
+  `"deux virgule cinquante"` -> `"2,50"`, `"dos coma cero cinco"` ->
+  `"2,05"`.
+- **Glued thousands** of de / nl / af / it / sv / da: `"dreiundzwanzigtausend"`
+  -> `23000`, `"tweehonderdduizend"` -> `200000`, `"ventitremila"` ->
+  `23000`, `"hunderttausend"` -> `100000`; de `"eine Million"`, it `"un
+  milione"` open a number.
+- fr counts hundreds by the dozen: `"douze cents"` -> `1200`.
+- es tens joined with the spoken connector: `"veinte y uno"` -> `21`.
+
 ### Ported from upstream
 
 - **Reject a decimal separator with nothing after it.** Ports
@@ -17,8 +61,87 @@ follows [Semantic Versioning](https://semver.org/) and uses
   following 'point'"*. Legitimate decimals are unaffected — `"point five"` is
   still `Decimal('0.5')`, and `"minus zero point zero"` still keeps its
   signed zero.
+- **A decimal separator is now an explicit sentence-run head.** The sentence
+  walker decides where a number run may start with
+  `is_number_word(token)`, which is `to_cardinal(token).is_ok()` — so
+  `"point"` qualified only because `to_cardinal("point")` returned `0`, i.e.
+  because of the bug above. `words2num_sentence("point five")` would have
+  regressed to `"point 5"`. The separators are named explicitly now, so the
+  behaviour is a property of the walker rather than a side effect. The rest
+  of the run-internal words are unchanged: a run still may not open with
+  `and`, `minus`, `negative`, `a` or `an`.
+
+[w2n5]: https://github.com/revdotcom/words2num/pull/5
+[qmac]: https://github.com/qmac
 
 ### Fixed
+
+- **The article / pronoun 1.** `"no one answered"` -> `"no 1 answered"`,
+  `"un solde de 43 euros"` -> `"1 solde …"`, `"um momento"` -> `"1
+  momento"`: a lone `one` / `un` / `une` / `uno` / `um` / `een` / `ein` now
+  stays a word unless something counts it — a unit, a currency or a time
+  word (`"one dollar"`, `"une heure"`, `"one o'clock"`), the percent phrase,
+  a label word before it (`"press one"`, `"number one"`, `"tapez un"`,
+  `"marque uno"`), a month, a counted list (`"one, two, three"`). `"one
+  second"` stays a pause. es `"un dólar"` now reads `"1 dólar"`.
+- **Compounds the walker broke apart.** A token that is not a number word on
+  its own is tried as the continuation of the run before the run closes:
+  `"deux cents euros"` -> `"200 euros"` (was `"2 cents euros"`), `"quatre
+  vingts"` -> `"80"`; fr `"mille deux cent"` / `"deux million"` (plural -s
+  dropped or added) match the table; fr `"cinquante et une personnes"` ->
+  `"51 personnes"`; ar / id / he compounds that stopped at the connector
+  now compose.
+- **Connectors are never eaten**: `"one and a half hours"` was `"1 half
+  hours"`, `"five point"` was `"5"`, `"one hundred and"` was `"100"`.
+- **Percent phrases**: `"vingt pour cent"` -> `"20 pour 100"`, `"diez por
+  ciento"` -> `"10 por 100"` — the second word is the percent sign.
+- **`"a"` before a scale word** opens the number: `"a hundred dollars"` ->
+  `"100 dollars"` (was `"a 100 dollars"`); not after `half` / `quarter`.
+- **Quantities stay words**: `"a couple of thousand"`, `"hundreds of"`,
+  `"des millions"`, `"millones de personas"`, `"half a million"`; a scale
+  word after a decimal stays a word (`"2.5 million"`, `"2,5 millions"`).
+- **Decades**: `"in the nineteen nineties"` (was `"in the 19 nineties"`).
+- **Year pairs only for Germanic languages**: es `"a las catorce treinta"`
+  is a time of day, not 1430.
+- `"ten seconds"` is time, not a fraction; `"one k"` counts.
+- A lone punctuation part never extends a run: `"quarante-deux ?"` keeps
+  its space.
+- vi cardinals were rendered as ordinals (its ordinal table holds every
+  cardinal).
+
+### Changed
+
+- `"twenty first"` in sentence mode is `"21st"` (was `"21"`).
+
+## [0.3.3] — 2026-09-24
+
+### Fixed
+
+- **Spoken years in sentence mode.** `words2num_sentence` summed
+  `"twenty twenty five"` to `"45"` and `"nineteen ninety nine"` to `"118"`
+  (or, since the fix below, split them into `"20 25"` / `"19 99"`). A run
+  that is not one cardinal but reads as a year — "nineteen"/"twenty" +
+  "oh" + digit / a teen / a tens word (+ unit) — now gives the year:
+  `"2025"`, `"1999"`, `"december one twenty twenty five"` ->
+  `"december 1 2025"`, `"twenty oh five"` -> `"2005"`. `"two thousand
+  twenty five"` is still `"2025"`, `"twenty five people"` still
+  `"25 people"`; `to="year"` is unchanged.
+- **Digit strings in sentence mode.** Account numbers, ZIP codes and phone
+  numbers read one digit at a time were summed: `"your account ending in
+  four five six seven"` -> `"... 22"`. Two or more consecutive single-digit
+  words (with "oh"/"o" as 0 inside the run) now concatenate: `"... 4567"`,
+  `"zero six one two"` -> `"0612"`, `"one two three"` -> `"123"`. A lone
+  digit word stays a cardinal (`"press one"` -> `"press 1"`), as does
+  tens + unit (`"twenty five"` -> `"25"`); `"five twenty"` -> `"5 20"`.
+- **A unit may not follow a unit** (nor a teen follow a tens word) in an
+  English cardinal, the counterpart of the tens rule below: `"one two
+  three"` is three digits, not 6, and `words2num("one two three")` raises.
+- **Spanish "ciento".** num2words never renders `"ciento"` on its own (100 is
+  `"cien"`), so the reverse table had no entry for it and the sentence
+  walker could not open a run on it: `"ciento cincuenta y cuatro dólares"`
+  -> `"ciento 54 dólares"`. The bare hundred prefix now reads as 100 and
+  the run grows into the table hit: `"154 dólares"`, `"ciento uno"` ->
+  `"101"` (`"cien"` and `"doscientos treinta"` were already fine).
 
 - **A tens word no longer composes with a preceding unit.** English reads a
   tens word with a *following* unit ("sixty three" = 63), never the reverse,
@@ -33,18 +156,11 @@ follows [Semantic Versioning](https://semver.org/) and uses
   `"two thousand sixty"` (2060) are unaffected — as is the pair reading on
   `to="year"`, where `"nineteen eighty four"` is still 1984. Resolves #17.
 
-- **A decimal separator is now an explicit sentence-run head.** The sentence
-  walker decides where a number run may start with
-  `is_number_word(token)`, which is `to_cardinal(token).is_ok()` — so
-  `"point"` qualified only because `to_cardinal("point")` returned `0`, i.e.
-  because of the bug above. `words2num_sentence("point five")` would have
-  regressed to `"point 5"`. The separators are named explicitly now, so the
-  behaviour is a property of the walker rather than a side effect. The rest
-  of the run-internal words are unchanged: a run still may not open with
-  `and`, `minus`, `negative`, `a` or `an`.
+### Changed
 
-[w2n5]: https://github.com/revdotcom/words2num/pull/5
-[qmac]: https://github.com/qmac
+- The two sentence-mode expectations recorded with the tens rule above,
+  `"nineteen eighty four"` -> `"19 84"` and `"twenty twenty"` -> `"20 20"`,
+  are superseded by the year reading: `"1984"`, `"2020"`.
 
 ## [0.2.3] — 2026-05-02
 
