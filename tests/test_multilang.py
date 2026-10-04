@@ -3,11 +3,12 @@
 
 These tests require ``num2words2`` to be installed.
 """
+
 import pytest
 
 num2words2 = pytest.importorskip("num2words2")
 
-from words2num2 import words2num
+from words2num2 import words2num, words2num_sentence
 
 
 @pytest.mark.parametrize(
@@ -63,8 +64,11 @@ from words2num2 import supported_langs  # noqa: E402
 # gladiaio/num2words2#134, but the reverse tables are built from the pinned
 # `num2words2-core` dependency, which still renders the old Latin
 # transliteration. It round-trips again once that pin is bumped — see #14.
-# This list may shrink; it must never grow.
-KNOWN_ROUNDTRIP_GAPS = {"ti"}
+# Against a num2words2 that predates #134 (still Latin), both sides agree and
+# `ti` round-trips, so the gap only applies when the installed renderer has
+# moved to Ge'ez. This list may shrink; it must never grow.
+_TI_IN_GEEZ = any("\u1200" <= ch <= "\u137f" for ch in num2words2.num2words(1, lang="ti"))
+KNOWN_ROUNDTRIP_GAPS = {"ti"} if _TI_IN_GEEZ else set()
 
 
 def _roundtrip_param(lang):
@@ -121,3 +125,43 @@ def test_roundtrip_every_language(lang):
 def test_codes_are_not_misresolved_to_another_language(code):
     """A known code must be answered by itself, not by a prefix match."""
     assert words2num(num2words2.num2words(42, lang=code), lang=code) == 42
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        # "ciento" is never rendered on its own by num2words (100 is "cien"),
+        # so the reverse table had no entry for it and the sentence walker
+        # could not open a run on it: "ciento 54 dólares".
+        ("ciento cincuenta y cuatro dólares", "154 dólares"),
+        ("ciento uno", "101"),
+        ("cien", "100"),
+        ("doscientos treinta", "230"),
+        ("ciento veinte mil", "120000"),
+    ],
+)
+def test_es_ciento_composes_in_sentence(text, expected):
+    assert words2num_sentence(text, lang="es") == expected
+
+
+def test_es_bare_ciento_is_one_hundred():
+    assert words2num("ciento", lang="es") == 100
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        # Apocope inside a number ("un" for "uno" before a noun or a scale word):
+        # num2words never renders it, so the walker stopped the run before it.
+        ("cincuenta y un centavos", "51 centavos"),
+        ("un mil treinta y cuatro dólares", "1034 dólares"),
+        ("veintiún dólares", "21 dólares"),
+        ("treinta y una llamadas", "31 llamadas"),
+        # On its own it is an article.
+        ("un momento por favor", "un momento por favor"),
+        ("una llamada", "una llamada"),
+        ("el 2 y cinco", "el 2 y 5"),
+    ],
+)
+def test_es_apocope_inside_a_number(text, expected):
+    assert words2num_sentence(text, lang="es") == expected
