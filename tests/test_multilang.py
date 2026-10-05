@@ -60,15 +60,31 @@ def test_multilang_roundtrip(lang, n):
 
 from words2num2 import supported_langs  # noqa: E402
 
-# `ti` renders in Ge'ez from num2words2 >= the release carrying
-# gladiaio/num2words2#134, but the reverse tables are built from the pinned
-# `num2words2-core` dependency, which still renders the old Latin
-# transliteration. It round-trips again once that pin is bumped — see #14.
-# Against a num2words2 that predates #134 (still Latin), both sides agree and
-# `ti` round-trips, so the gap only applies when the installed renderer has
-# moved to Ge'ez. This list may shrink; it must never grow.
-_TI_IN_GEEZ = any("\u1200" <= ch <= "\u137f" for ch in num2words2.num2words(1, lang="ti"))
-KNOWN_ROUNDTRIP_GAPS = {"ti"} if _TI_IN_GEEZ else set()
+# gladiaio/num2words2#134-#142 moved five languages from a Latin
+# transliteration to their own script. The reverse tables are built from the
+# embedded `num2words2-core`, so whenever the installed `num2words2` and that
+# core disagree on the script, the language cannot round-trip — see #14.
+# This list may shrink; it must never grow.
+_NATIVE_SCRIPT = {
+    "ti": (0x1200, 0x137F),   # Ge'ez
+    "ky": (0x0400, 0x04FF),   # Cyrillic
+    "or": (0x0B00, 0x0B7F),   # Odia
+    "ckb": (0x0600, 0x06FF),  # Arabic
+    "kok": (0x0900, 0x097F),  # Devanagari
+}
+# Whether the embedded num2words2-core renders them in their own script.
+# Flip in the change that bumps it.
+_CORE_RENDERS_NATIVE = True
+
+
+def _renders_native(lang):
+    lo, hi = _NATIVE_SCRIPT[lang]
+    return any(lo <= ord(ch) <= hi for ch in num2words2.num2words(1, lang=lang))
+
+
+KNOWN_ROUNDTRIP_GAPS = {
+    lang for lang in _NATIVE_SCRIPT if _renders_native(lang) != _CORE_RENDERS_NATIVE
+}
 
 
 def _roundtrip_param(lang):
@@ -83,9 +99,9 @@ def _roundtrip_param(lang):
             lang,
             marks=pytest.mark.xfail(
                 strict=True,
-                reason="gladiaio/words2num2#14 — reverse tables come from the "
-                       "pinned num2words2-core, which still renders this "
-                       "language in Latin transliteration",
+                reason="gladiaio/words2num2#14 — the installed num2words2 "
+                       "and the embedded num2words2-core render this "
+                       "language in different scripts",
             ),
         )
     return lang
@@ -113,7 +129,7 @@ def test_roundtrip_every_language(lang):
         "ceb",   # was -> ce  (Chechen)
         "cnh",   # was -> cn  (Chinese)
         "fil",   # was -> fi  (Finnish)
-        "kok",   # was -> ko  (Korean)
+        _roundtrip_param("kok"),   # was -> ko  (Korean)
         "miz",   # was -> mi  (Maori)
         "pap",   # was -> pa  (Punjabi)
         "pli",   # was -> pl  (Polish)

@@ -1,5 +1,5 @@
 [workspace]
-members = ["num2words2-core", "words2num2-core", "words2num2-py"]
+members = ["words2num2-core", "words2num2-py"]
 resolver = "2"
 
 [workspace.package]
