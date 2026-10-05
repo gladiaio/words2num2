@@ -1063,8 +1063,6 @@ fn sentence_to_en_value(v: W2nValue) -> crate::w2n_lang_en::W2nValue {
 // `words2num_sentence` / `convert_sentence` / `sentence_to_words`
 // ===========================================================================
 
-/// `SentenceConverter._starts_run` — a run must open with a real number word,
-/// never with `"and"` / `"point"` / `"minus"`.
 /// A token that already holds a digit ("850", "850-820-9095", "$426", "94504")
 /// is a literal: it never starts or extends a run. Without this, adjacent
 /// numerals were summed ("calling from 850 820 9095" came out as "10765").
@@ -1072,14 +1070,48 @@ fn holds_digit(token: &str) -> bool {
     token.chars().any(|c| c.is_ascii_digit())
 }
 
-fn starts_run(converter: &Converter, token: &str) -> bool {
+/// `SentenceConverter._starts_run` — a run must open with a real number word
+/// or with a decimal separator, never with `"and"` / `"minus"` / `"a"`.
+///
+/// **Why the decimal separator is listed explicitly.** `is_number_word` is
+/// `to_cardinal(token).is_ok()`, so before
+/// revdotcom/words2num#5 was ported, `"point"` qualified as a run head only
+/// because `to_cardinal("point")` silently returned `Decimal('0')` — the very
+/// bug that port fixes. Once a dangling separator raises, the accident that
+/// made `"point five"` parse in a sentence disappears with it.
+///
+/// `"point five"` is a real spoken number and `words2num("point five")`
+/// returns `0.5`, so the walker has to reach it too. Naming the separators
+/// here makes that a property of the walker rather than a side effect of a
+/// bug, and the guarantee is pinned by the `"point is a valid head"` case in
+/// [`tests::walker_matches_python`].
+///
+/// Only separators are promoted. The rest of [`INCLUDABLE_EN`] stays
+/// run-internal: a run still may not open with `"and"`, `"minus"`,
+/// `"negative"`, `"a"` or `"an"`.
+fn starts_run(converter: &Converter, token: &str, decimal_heads: &[&str]) -> bool {
     if token.is_empty() || holds_digit(token) {
         return false;
+    }
+    if decimal_heads.contains(&token) {
+        return true;
     }
     let dehyphened = token.replace('-', " ");
     py_split_whitespace(&dehyphened)
         .iter()
         .any(|sub| converter.is_number_word(sub))
+}
+
+/// The decimal separator words that may open a run, by resolved language.
+///
+/// English only: the non-English locales go through the reverse-table
+/// converter, whose separator handling this change does not touch.
+fn decimal_heads_for(resolved: &str) -> &'static [&'static str] {
+    if resolved == "en" {
+        &["point", "dot"]
+    } else {
+        &[]
+    }
 }
 
 /// `SentenceConverter._is_candidate` — cheap pre-filter for run growth.
@@ -1923,6 +1955,7 @@ fn words2num_sentence_walk(
     } else {
         includable_for(&resolved)
     };
+    let decimal_heads = decimal_heads_for(&resolved);
 
     // The digit-string and spoken-year readings are English-only and belong
     // to the cardinal walk: `to="year"` keeps its own pair reading, and any
@@ -1952,7 +1985,7 @@ fn words2num_sentence_walk(
         let head = rstrip_punct(piece).to_lowercase();
         // Most words of a transcript are not numbers: decide that with one cheap
         // check before anything that looks at the neighbours or the ordinal table.
-        let head_is_number = starts_run(&converter, &head);
+        let head_is_number = starts_run(&converter, &head, decimal_heads);
         let article_number = plain && is_article_word(&resolved, &head);
         let head_is_apocope = converter.apocope(&head).is_some();
         let head_is_article = en_cardinal && matches!(head.as_str(), "a" | "an");
@@ -1976,12 +2009,12 @@ fn words2num_sentence_walk(
         // "one second", "one third": the English grammar reads an ordinal as a
         // number word, but it does not count the article in front of it.
         let next_is_number = next.as_deref().is_some_and(|t| {
-            starts_run(&converter, t)
+            starts_run(&converter, t, decimal_heads)
                 && !converter.is_ordinal_word(t)
                 && converter.is_number_word(t)
         });
         let next_starts_run = !ends_with_terminal_punct(piece)
-            && next.as_deref().is_some_and(|t| starts_run(&converter, t));
+            && next.as_deref().is_some_and(|t| starts_run(&converter, t, decimal_heads));
         // A run must START with a real number word, or with an apocope
         // ("un" in es "un mil") followed by one, or — in English — with
         // "a"/"an" in front of a scale word ("a hundred dollars").
