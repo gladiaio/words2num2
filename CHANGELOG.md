@@ -85,7 +85,8 @@ covered in `tests/test_sentence_realworld.py`.
   The 101 that remain (or 70 vs 17, ha 10000 vs 1010) are the renderer
   spelling two numbers the same way.
   Only optional diacritics are stripped now: the generic combining blocks
-  (é, ñ, й), Arabic harakat and Hebrew points. Behaviour change for
+  (é, ñ, й), Arabic harakat, Hebrew points and the Indic nukta (so hi
+  `"सडसठ"` still reads as 67). Behaviour change for
   `normalize()`: Brahmic, Tibetan, Thaana, Thai and Lao marks are kept.
 - **Every advertised language is now actually accepted.** `supported_langs()`
   reported 172 codes while the resolver knew 120, because the two were

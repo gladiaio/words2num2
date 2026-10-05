@@ -110,8 +110,9 @@ pub fn normalize(s: &str) -> String {
 
 /// A combining mark that a writer may omit without changing the word: the
 /// generic diacritic blocks NFKD produces for Latin, Greek and Cyrillic
-/// (é, ñ, ά, й), plus Arabic harakat and Hebrew points, which ordinary text
-/// leaves out. Script-intrinsic marks — Brahmic vowel signs and viramas,
+/// (é, ñ, ά, й), Arabic harakat and Hebrew points, which ordinary text
+/// leaves out, and the Indic nukta (hi "सड़सठ" is often typed "सडसठ").
+/// Script-intrinsic marks — Brahmic vowel signs and viramas,
 /// Tibetan and Thaana vowels, Thai/Lao vowels and tone marks — are part of
 /// the spelling and are kept.
 fn is_optional_diacritic(c: char) -> bool {
@@ -124,6 +125,9 @@ fn is_optional_diacritic(c: char) -> bool {
         | '\u{064B}'..='\u{065F}'   // Arabic harakat
         | '\u{0670}'                // Arabic superscript alef
         | '\u{0591}'..='\u{05C7}'   // Hebrew cantillation and points
+        // Nukta: Devanagari, Bengali, Gurmukhi, Gujarati, Odia, Telugu, Kannada
+        | '\u{093C}' | '\u{09BC}' | '\u{0A3C}' | '\u{0ABC}'
+        | '\u{0B3C}' | '\u{0C3C}' | '\u{0CBC}'
     ) && unicode_normalization::char::is_combining_mark(c)
 }
 
@@ -915,6 +919,9 @@ mod tests {
         assert_ne!(normalize("पचासी"), normalize("पचास")); // hi 85 / 50
         assert_ne!(normalize("དགུ་"), normalize("དྲུག་")); // bo 9 / 6
         assert_ne!(normalize("একাশি"), normalize("একুশ")); // bn 81 / 21
+        // The nukta is optional: hi 67 with and without it.
+        assert_eq!(normalize("सड़सठ"), normalize("सडसठ"));
+        assert_eq!(lookup("hi", "सडसठ", false, &[]).ok().flatten(), Some(67));
     }
 
     #[test]
