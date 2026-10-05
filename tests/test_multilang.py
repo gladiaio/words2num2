@@ -74,7 +74,7 @@ _NATIVE_SCRIPT = {
 }
 # Whether the embedded num2words2-core renders them in their own script.
 # Flip in the change that bumps it.
-_CORE_RENDERS_NATIVE = False
+_CORE_RENDERS_NATIVE = True
 
 
 def _renders_native(lang):
@@ -129,7 +129,7 @@ def test_roundtrip_every_language(lang):
         "ceb",   # was -> ce  (Chechen)
         "cnh",   # was -> cn  (Chinese)
         "fil",   # was -> fi  (Finnish)
-        "kok",   # was -> ko  (Korean)
+        _roundtrip_param("kok"),   # was -> ko  (Korean)
         "miz",   # was -> mi  (Maori)
         "pap",   # was -> pa  (Punjabi)
         "pli",   # was -> pl  (Polish)

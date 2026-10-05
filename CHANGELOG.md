@@ -145,6 +145,19 @@ covered in `tests/test_sentence_realworld.py`.
 ### Changed
 
 - `"twenty first"` in sentence mode is `"21st"` (was `"21"`).
+- **Breaking for five languages: Tigrinya, Kyrgyz, Odia, Central Kurdish
+  and Konkani parse their own script, and no longer parse a Latin
+  transliteration** (#14). ti `"ሓደ"`, ky `"кырк эки"`, or `"ଚାଳିଶ"`, ckb
+  `"یەک هەزار"`, kok `"एक शंभर"` now parse; `"ḥade"`, `"kırk eki"`,
+  `"calīśa"`, `"yek hezar"`, `"ek xambhar"` — spellings no native writer
+  uses — raise `Words2NumError`. The reverse tables follow the renderer,
+  which moved to the native scripts in gladiaio/num2words2#134–#142. Odia
+  70 (`"ସତୁରୀ"`) and 17 are distinct again; before, 70 / 170 / … parsed as
+  17 / 117 / ….
+- `num2words2-core` dependency floor raised to **0.1.3** (was `"0.1"`,
+  which the lockfile resolved to 0.1.0), and the unlinked copy at
+  `rust/num2words2-core/` is gone (#15). It was a workspace member nothing
+  depended on: compiled on every build, and editing it changed nothing.
 
 ## [0.3.3] — 2026-09-24
 
