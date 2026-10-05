@@ -25,6 +25,9 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install pytest pytest-cov coveralls
+        # tests/test_multilang.py round-trips the published renderer through
+        # this parser; without it the whole file is skipped.
+        pip install num2words2
         pip install -e .
 
     - name: Run tests
@@ -52,6 +55,20 @@ jobs:
         COVERALLS_FLAG_NAME: ${{ matrix.python-version }}
         COVERALLS_PARALLEL: true
       continue-on-error: true
+
+  rust:
+    # The Rust round-trip ratchet (rust/words2num2-core/tests/roundtrip.rs):
+    # renders with the embedded num2words2-core and parses back, every
+    # advertised language, including the exhaustive 0..=10000 sweep.
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: rust
+    steps:
+    - uses: actions/checkout@v4
+    - uses: dtolnay/rust-toolchain@stable
+    - name: Test words2num2-core
+      run: cargo test --release -p words2num2-core -- --include-ignored
 
   coveralls:
     name: Indicate completion to coveralls.io
