@@ -106,16 +106,16 @@ Detail in [LOCAL_TESTING.md](LOCAL_TESTING.md).
 
 ## Release process
 
-Maintainers cut releases by tagging:
+A release is a version bump merged into `main`: set the same version in
+`pyproject.toml` and `words2num2/_version.py`. On that merge the
+`Auto release` workflow (`.github/workflows/auto-release.yml`) tags
+`vX.Y.Z` and dispatches the `Release` workflow, which builds the wheels,
+creates a GitHub Release and uploads to PyPI via Trusted Publishing, and
+the crates.io publish. It does nothing when the version is already tagged
+or on PyPI, and fails when the two version files disagree.
 
-```bash
-git tag vX.Y.Z
-git push origin vX.Y.Z
-```
-
-This fires the `Build and Release` GitHub Actions workflow, which
-builds, tests, creates a GitHub Release, and uploads to PyPI via
-Trusted Publishing. Pre-flight checklist:
+Tagging by hand still works (`git tag vX.Y.Z && git push origin vX.Y.Z`),
+for a release that is not main's head. Pre-flight checklist:
 
 - [ ] All tests pass (`make test`).
 - [ ] `CHANGELOG.md` updated.
