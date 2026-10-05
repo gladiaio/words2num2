@@ -10,8 +10,10 @@ categories = ["parser-implementations", "internationalization", "text-processing
 
 [dependencies]
 # Published on crates.io; supplies the num2words2 rendering used to build the
-# reverse lookup tables.
-num2words2-core = "0.1"
+# reverse lookup tables. The floor is explicit: the tables are derived from
+# this renderer, so a words2num2 release must be reproducible from crates.io
+# alone. 0.1.3 renders ti / ky / or / ckb / kok in their own scripts (#14).
+num2words2-core = "0.1.3"
 num-bigint = "0.4"
 bigdecimal = "0.4"
 # NFKD normalisation + combining-mark detection, matching Python's unicodedata.

@@ -136,9 +136,8 @@ const KNOWN_WRONG_VALUES: &[(&str, &[i64])] = &[
 
 /// Values in 0..=10000 the renderer spells exactly like a smaller number, so
 /// first-write-wins in the reverse table can only return the smaller one:
-/// or 70 / 17 ("satara", fixed upstream by gladiaio/num2words2#138) and
 /// ha 10000 / 1010 ("dubu goma"). Counts, per language.
-const KNOWN_TABLE_COLLISIONS: &[(&str, usize)] = &[("ha", 1), ("or", 100)];
+const KNOWN_TABLE_COLLISIONS: &[(&str, usize)] = &[("ha", 1)];
 
 #[derive(Default, Debug, PartialEq)]
 struct Outcome {
