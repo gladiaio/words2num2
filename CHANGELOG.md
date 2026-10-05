@@ -76,6 +76,18 @@ covered in `tests/test_sentence_realworld.py`.
 
 ### Fixed
 
+- **Indic, Tibetan and Thaana numbers no longer parse to a different
+  number.** `normalize()` stripped every combining mark, which erased the
+  vowel signs of these scripts — they are letters, not accents. hi `"पचासी"`
+  (85) normalized to `"पचास"` (50) and parsed as **50**; bo `"དགུ་"` (9) as 6;
+  bn `"একাশি"` (81) as 21; dv 8000 as 1000. Across the 0..=10000 tables that
+  was **5310 silently wrong values in 7 languages** (bn bo dv gu hi kn pa).
+  The 101 that remain (or 70 vs 17, ha 10000 vs 1010) are the renderer
+  spelling two numbers the same way.
+  Only optional diacritics are stripped now: the generic combining blocks
+  (é, ñ, й), Arabic harakat, Hebrew points and the Indic nukta (so hi
+  `"सडसठ"` still reads as 67). Behaviour change for
+  `normalize()`: Brahmic, Tibetan, Thaana, Thai and Lao marks are kept.
 - **Every advertised language is now actually accepted.** `supported_langs()`
   reported 172 codes while the resolver knew 120, because the two were
   separate hand-maintained lists. **28 languages raised

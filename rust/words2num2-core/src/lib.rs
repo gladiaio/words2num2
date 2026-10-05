@@ -89,6 +89,12 @@ pub fn normalize_tail(decomposed: &str) -> String {
 /// match "trente deux". It is done here with the `unicode-normalization`
 /// crate rather than round-tripping to Python's `unicodedata`, so the core is
 /// self-contained.
+///
+/// Only *optional* diacritics are stripped (see [`is_optional_diacritic`]).
+/// Stripping every combining mark erased the vowel signs of the Indic,
+/// Tibetan and Thaana scripts, which are letters, not accents: hi "पचासी"
+/// (85) became "पचास" (50) and parsed as 50. Across the 0..=10000 tables
+/// that was 5310 silently wrong values in 7 languages.
 pub fn normalize(s: &str) -> String {
     use unicode_normalization::UnicodeNormalization;
     if s.is_ascii() {
@@ -97,9 +103,32 @@ pub fn normalize(s: &str) -> String {
     let nfkd: String = s.nfkd().collect();
     let stripped: String = nfkd
         .chars()
-        .filter(|&c| !unicode_normalization::char::is_combining_mark(c))
+        .filter(|&c| !is_optional_diacritic(c))
         .collect();
     normalize_tail(&stripped)
+}
+
+/// A combining mark that a writer may omit without changing the word: the
+/// generic diacritic blocks NFKD produces for Latin, Greek and Cyrillic
+/// (é, ñ, ά, й), Arabic harakat and Hebrew points, which ordinary text
+/// leaves out, and the Indic nukta (hi "सड़सठ" is often typed "सडसठ").
+/// Script-intrinsic marks — Brahmic vowel signs and viramas,
+/// Tibetan and Thaana vowels, Thai/Lao vowels and tone marks — are part of
+/// the spelling and are kept.
+fn is_optional_diacritic(c: char) -> bool {
+    matches!(c,
+        '\u{0300}'..='\u{036F}'     // Combining Diacritical Marks
+        | '\u{1AB0}'..='\u{1AFF}'   // … Extended
+        | '\u{1DC0}'..='\u{1DFF}'   // … Supplement
+        | '\u{20D0}'..='\u{20FF}'   // … for Symbols
+        | '\u{FE20}'..='\u{FE2F}'   // Combining Half Marks
+        | '\u{064B}'..='\u{065F}'   // Arabic harakat
+        | '\u{0670}'                // Arabic superscript alef
+        | '\u{0591}'..='\u{05C7}'   // Hebrew cantillation and points
+        // Nukta: Devanagari, Bengali, Gurmukhi, Gujarati, Odia, Telugu, Kannada
+        | '\u{093C}' | '\u{09BC}' | '\u{0A3C}' | '\u{0ABC}'
+        | '\u{0B3C}' | '\u{0C3C}' | '\u{0CBC}'
+    ) && unicode_normalization::char::is_combining_mark(c)
 }
 
 /// One reverse table: `{normalized_words: number}`.
@@ -879,6 +908,36 @@ mod tests {
         // NFKD + combining-mark strip: "trente-deux" family.
         assert_eq!(normalize("tr\u{e9}nte"), "trente"); // é -> e
         assert_eq!(normalize("f\u{f3}rty"), "forty"); // ó -> o
+    }
+
+    #[test]
+    fn normalize_keeps_script_vowel_signs() {
+        // Optional diacritics still go: Cyrillic breve, Arabic harakat.
+        assert_eq!(normalize("\u{439}"), "\u{438}"); // й -> и
+        assert_eq!(normalize("\u{648}\u{64e}\u{627}"), "\u{648}\u{627}");
+        // Vowel signs are letters: stripping them merged distinct numbers.
+        assert_ne!(normalize("पचासी"), normalize("पचास")); // hi 85 / 50
+        assert_ne!(normalize("དགུ་"), normalize("དྲུག་")); // bo 9 / 6
+        assert_ne!(normalize("একাশি"), normalize("একুশ")); // bn 81 / 21
+        // The nukta is optional: hi 67 with and without it.
+        assert_eq!(normalize("सड़सठ"), normalize("सडसठ"));
+        assert_eq!(lookup("hi", "सडसठ", false, &[]).ok().flatten(), Some(67));
+    }
+
+    #[test]
+    fn script_vowel_signs_parse_to_their_own_number() {
+        for (lang, text, n) in [
+            ("hi", "पचासी", 85),
+            ("hi", "पचास", 50),
+            ("bo", "དགུ་", 9),
+            ("bn", "একাশি", 81),
+            ("kn", "ನಲವತ್ತೈದು", 45),
+            ("gu", "નેવું", 90),
+            ("pa", "ਸੱਤਰ", 70),
+            ("dv", "އައްހާސް", 8000),
+        ] {
+            assert_eq!(lookup(lang, text, false, &[]).ok().flatten(), Some(n), "{lang} {text}");
+        }
     }
 
     #[test]
