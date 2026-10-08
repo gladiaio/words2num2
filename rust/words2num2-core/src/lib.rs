@@ -20,6 +20,7 @@ use std::sync::{Arc, OnceLock, RwLock};
 
 pub mod w2n_currency;
 pub mod w2n_formats;
+pub mod w2n_forms;
 pub mod w2n_lang_en;
 pub mod w2n_sentence;
 
@@ -238,7 +239,26 @@ fn table_get(
             return Some(*v);
         }
     }
-    None
+    if ordinal {
+        return None;
+    }
+    // Gender / construct / attributive forms and glued connectors (ru "две",
+    // he "שני" before מיליון, ar "وواحد" after a scale word).
+    w2n_forms::fragment_value(lang, tab, normalized).map(|(v, _)| v)
+}
+
+/// Run `f` on the cardinal reverse table of `lang`, building it first if needed.
+/// `f` must not look anything up itself (it runs under the table lock).
+pub(crate) fn with_cardinal_table<R>(lang: &str, f: impl FnOnce(&ReverseTable) -> R) -> Option<R> {
+    if !is_supported_lang(lang) {
+        return None;
+    }
+    let key = (lang.to_string(), false);
+    if !tables().read().unwrap().contains_key(&key) {
+        lookup_norm(lang, "0", false, &[]).ok()?;
+    }
+    let t = tables().read().unwrap();
+    t.get(&key).map(f)
 }
 
 /// num2words renders one ordinal form per number (fr "premier", es "primero",
@@ -629,25 +649,10 @@ fn lookup_plain(lang: &str, text: &str) -> Option<i64> {
     lookup(lang, text, false, &[]).ok().flatten()
 }
 
-/// Connector/particle words that may sit between number groups and must be
-/// stripped from a fragment's edges before lookup: es « y », pt/it « e »,
-/// ro « de » (« nouă **de** mii »), etc. Keyed by language prefix.
+/// Connector words stripped from a fragment's edges (es « y », fa « و »):
+/// see [`w2n_forms::connectors`].
 fn connector_words(lang: &str) -> &'static [&'static str] {
-    let base = lang.split(&['_', '-'][..]).next().unwrap_or(lang);
-    match base {
-        "es" | "gl" => &["y", "e"],
-        "pt" | "it" => &["e"],
-        "fr" => &["et"],
-        "ca" => &["i"],
-        "de" => &["und"],
-        "nl" | "af" => &["en"],
-        "ro" => &["si", "și", "de"],
-        "pl" => &["i"],
-        "en" => &["and"],
-        "ff" => &["e"], // "ujunere sappo e ɗiɗi" = 12000
-        "sw" => &["na"], // "elfu kumi na mbili" = 12000
-        _ => &[],
-    }
+    w2n_forms::connectors(lang)
 }
 
 /// Strip leading/trailing connector tokens from a fragment.
@@ -676,6 +681,9 @@ pub fn parse_scaled_norm(lang: &str, norm: &str) -> Option<i64> {
     }
     let sc = scales_of(lang);
     let v = parse_scaled_inner(lang, norm, &sc, connector_words(lang))?;
+    if w2n_forms::has_rival_reading(lang, v, norm) {
+        return None; // bm "ba tan ni kelen": 10001 and 11000 render alike
+    }
     // Where the multiplier may follow the scale word (ha, ff, sw, sn, bm, tet,
     // eu), a spelling can split several ways and num2words2 sometimes renders
     // two values alike. Only a reading the renderer spells this way is kept:
@@ -684,6 +692,11 @@ pub fn parse_scaled_norm(lang: &str, norm: &str) -> Option<i64> {
         return None;
     }
     Some(v)
+}
+
+/// [`parse_scaled_norm`] without its ambiguity checks, for a fragment.
+pub(crate) fn parse_scaled_norm_unchecked(lang: &str, norm: &str) -> Option<i64> {
+    parse_scaled_inner(lang, norm, &scales_of(lang), connector_words(lang))
 }
 
 /// The article that is also "one" in front of a scale word, for languages whose table
@@ -731,7 +744,10 @@ fn split_glued_scale(lang: &str, tok: &str, scales: &[(String, i64)]) -> Option<
         let low = if suf.is_empty() {
             0
         } else {
-            lookup_plain(lang, suf)?
+            // rm "dieschmilliedin" = 10001: the connector "ed" sits between the
+            // morpheme and "in", and only "milliedin" (1001) is a table word.
+            lookup_plain(lang, suf)
+                .or_else(|| lookup_plain(lang, &format!("{w}{suf}")).map(|v| v - mag).filter(|v| *v > 0))?
         };
         if (1..1000).contains(&high) && (0..*mag).contains(&low) {
             return Some(high * mag + low);
@@ -851,7 +867,7 @@ fn parse_scaled_inner(lang: &str, text: &str, sc: &Scales, conns: &[&str]) -> Op
                 // ha "dubu sha biyu ɗari uku ..." : the longest multiplier that
                 // leaves a remainder below the scale. A multiplier of 1000 or more
                 // only ends the number: tet "miliaun rihun ida" = 10^6 · 1000.
-                if sc.postfix.contains(word) {
+                if sc.postfix.contains(word) && !w2n_forms::opens_with_connector(lang, after.first()) {
                     for j in (1..=after.len()).rev() {
                         let m = trim_connectors(&after[..j].join(" "), conns);
                         let ends = j == after.len();

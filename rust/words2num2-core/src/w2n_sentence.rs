@@ -622,6 +622,34 @@ impl Converter {
                 // Cheap gate first: most words of a transcript are not numbers.
                 (self.apocope(&norm).is_some() || crate::token_may_be_number(lang, &norm))
                     && self.to_cardinal(&norm).is_ok()
+                    // he "שני" is 2 only in front of מיליון, ar "وواحد" only after a scale.
+                    && (self.apocope(&norm).is_some()
+                        || crate::lookup_hundred_prefix_norm(lang, &norm).is_some()
+                        || !crate::w2n_forms::is_bound_form(lang, &norm))
+            }
+        }
+    }
+
+    /// A word read as a number only inside a longer one (see [`Self::is_number_part`]).
+    fn is_bound(&self, token: &str) -> bool {
+        match self {
+            Converter::En => false,
+            Converter::Table(lang) => {
+                let norm = crate::normalize(token);
+                self.apocope(&norm).is_none() && crate::w2n_forms::is_bound_form(lang, &norm)
+            }
+        }
+    }
+
+    /// A word that is a number only as part of a longer one: a multiplier form
+    /// (he "שני" מיליון), a combining form (kn "ನೂರ", mn "дөчин"), a glued "and"
+    /// (ar "وواحد"). It may carry a run on, never make one by itself.
+    fn is_number_part(&self, token: &str) -> bool {
+        match self {
+            Converter::En => false,
+            Converter::Table(lang) => {
+                let norm = crate::normalize(token);
+                crate::w2n_forms::is_number_part(lang, &norm) || crate::w2n_forms::is_bound_form(lang, &norm)
             }
         }
     }
@@ -868,6 +896,13 @@ fn base_convert(lang: &str, text: &str, ordinal: bool) -> Result<W2nValue, W2nEr
             // hundred) that are not num2words' canonical spelling.
             if let Some(v) = crate::parse_year_norm(lang, &norm) {
                 return Ok(W2nValue::Int(BigInt::from(v)));
+            }
+            // Scale words in an oblique, dual or glued form (kn "ಸಾವಿರದ", ar
+            // "مليونان", da "tolvtusinde"), respelled for the scale split.
+            if let Some(respelled) = crate::w2n_forms::scale_spelling(lang, &norm) {
+                if let Ok(v) = base_convert(lang, &respelled, false) {
+                    return Ok(v);
+                }
             }
         }
     }
@@ -1125,7 +1160,7 @@ fn is_candidate(converter: &Converter, token: &str, includable: &[&str]) -> bool
     let dehyphened = token.replace('-', " ");
     py_split_whitespace(&dehyphened)
         .iter()
-        .any(|sub| converter.is_number_word(sub))
+        .any(|sub| converter.is_number_word(sub) || converter.is_number_part(sub))
 }
 
 /// May a run END on this token? A connector ("and", "a", "point", es "y",
@@ -1269,6 +1304,10 @@ fn table_digit_run(
             break;
         }
         let article = is_article_word(resolved, &clean);
+        // ar "ثلاثة وخمسة" is "three and five", not the digits 3 5.
+        if !article && converter.is_bound(&clean) {
+            break;
+        }
         let d = match converter.to_cardinal(&clean) {
             Ok(W2nValue::Int(v)) if v >= BigInt::from(0) && v <= BigInt::from(9) => v.to_string(),
             // es "un", fr "une": not in the table on their own, but 1 here.
@@ -1354,9 +1393,11 @@ fn includable_for(resolved: &str) -> &'static [&'static str] {
         "ca" => &["i", "coma"],
         "de" => &["und", "komma"],
         "nl" | "af" => &["en", "komma"],
-        "ro" => &["si", "și", "virgulă", "virgula"],
+        // ro "două mii de lei": "de" stays with the noun, never ends the number.
+        "ro" => &["si", "și", "de", "virgulă", "virgula"],
         "pl" => &["i", "przecinek"],
-        _ => &[],
+        // fa "و", da/nb "og", ha "da": a run may hold the connector but not end on it.
+        _ => crate::w2n_forms::connectors(resolved),
     }
 }
 
@@ -1985,7 +2026,17 @@ fn words2num_sentence_walk(
         let head = rstrip_punct(piece).to_lowercase();
         // Most words of a transcript are not numbers: decide that with one cheap
         // check before anything that looks at the neighbours or the ordinal table.
-        let head_is_number = starts_run(&converter, &head, decimal_heads);
+        // kn "ನೂರ", he "שני", mn "дөчин": a number only with what follows, so it
+        // opens a run only in front of another number word, and alone stays a word.
+        let starts = starts_run(&converter, &head, decimal_heads);
+        let part_head = !starts
+            && !ends_with_terminal_punct(piece)
+            && !includable.contains(&head.as_str())
+            && converter.is_number_part(&head)
+            && next_word(&parts, i).is_some_and(|t| {
+                !includable.contains(&t.as_str()) && is_candidate(&converter, &t, includable)
+            });
+        let head_is_number = starts || part_head;
         let article_number = plain && is_article_word(&resolved, &head);
         let head_is_apocope = converter.apocope(&head).is_some();
         let head_is_article = en_cardinal && matches!(head.as_str(), "a" | "an");
@@ -2173,6 +2224,8 @@ fn words2num_sentence_walk(
                 && !article_is_count(&resolved, &parts, i, next_is_number)
             {
                 // A lone "one" / "un" / "um" is an article or a pronoun.
+                None
+            } else if part_head && best_end == i {
                 None
             } else if plain && best_end == i && lone_scale_word(&converter, &head) {
                 // "a couple of thousand", "des millions": a quantity, not a number.
