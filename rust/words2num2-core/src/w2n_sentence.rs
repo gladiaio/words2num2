@@ -839,6 +839,12 @@ fn base_convert(lang: &str, text: &str, ordinal: bool) -> Result<W2nValue, W2nEr
         if let Ok(Some(v)) = crate::lookup_norm(lang, &norm, ordinal, &BASE_NEGATIVE_WORDS) {
             return Ok(W2nValue::Int(BigInt::from(v)));
         }
+        // A compound ordinal the renderer never writes (cs "dvacátý první").
+        if ordinal {
+            if let Some(v) = crate::ord_forms::compose(lang, &norm) {
+                return Ok(W2nValue::Int(BigInt::from(v)));
+            }
+        }
         // Composition multi-échelle pour les valeurs hors table (> 10001) :
         // « soixante-neuf mille huit » → 69008. Uniquement en cardinal.
         if !ordinal {
@@ -1537,13 +1543,41 @@ fn is_ambiguous_ordinal(resolved: &str, word: &str) -> bool {
     }
     let list: &[&str] = match base {
         "en" => &["first", "second"],
-        "fr" => &["premier", "premiere", "second", "seconde"],
         "es" | "gl" => &["primero", "primer", "primera", "segundo", "segunda"],
         "it" => &["primo", "prima", "secondo", "seconda"],
         "pt" => &["primeiro", "primeira", "segundo", "segunda"],
         "de" => &["erste", "ersten", "erster", "erstes", "erstem"],
         "nl" => &["eerste"],
-        "ca" => &["primer", "primera", "segon", "segona"],
+        "ca" => &[
+            "primer", "primera", "segon", "segona",
+            // Also the collective nouns "a ten / dozen / hundred / thousand".
+            "desena", "desenes", "dotzena", "dotzenes", "centena", "centenes", "milena", "milenes",
+            // And the time unit "seconds", the fraction "quarters".
+            "segons", "segones", "quarts", "quartes",
+        ],
+        // The weekdays Monday-Thursday are the feminine ordinals 2nd-5th.
+        "el" => &[
+            // "πρώτα" is also "first(ly)", "δεύτερο" the time unit.
+            "πρωτα", "δευτερο",
+            "δευτερα", "δευτερας", "τριτη", "τριτης", "τεταρτη", "τεταρτης", "πεμπτη", "πεμπτης",
+        ],
+        // "secondes" is also the time unit ("quelques secondes").
+        "fr" => &["premier", "premiere", "second", "seconde", "secondes", "seconds"],
+        // "(wait a) second"
+        "he" => &["שנייה", "שניה"],
+        // "annað" / "önnur" are also "other".
+        "is" => &[
+            "onnur", "annað", "annan", "annarri", "annars", "aðra", "aðrir", "aðrar", "oðrum", "oðru",
+        ],
+        // "kwanza" is also the adverb "first(ly)".
+        "sw" => &["kwanza", "pili"],
+        // The inflected 2nd that is also the everyday "other": da "noget andet",
+        // nb "en annen", sv "de andre", et "teise", fi "toisen".
+        "da" => &["andet"],
+        "nb" | "no" => &["annen", "annet"],
+        "sv" => &["andre"],
+        "et" => &["teise", "teist", "teised", "teisel", "teisele", "teises", "teiseks"],
+        "fi" => &["toisen", "toista", "toisena", "toiset", "toisessa", "toiseen", "toisella"],
         _ => &[],
     };
     list.contains(&w.as_str())
@@ -1708,13 +1742,87 @@ fn ordinal_rendering(
             return None;
         }
     }
+    // fr "trois cinquièmes", ca "tres quarts", el "δύο τρίτα", bg "две стотни": an
+    // inflected ordinal right after a number is a fraction's denominator.
+    if single
+        && matches!(base, "fr" | "ca" | "el" | "bg")
+        && !is_canonical_ordinal(converter, words[0])
+        && prev.as_deref().is_some_and(|p| {
+            p.chars().next().is_some_and(|c| c.is_ascii_digit()) || converter.is_number_word(p)
+        })
+    {
+        return None;
+    }
     let last = crate::normalize(words[words.len() - 1]);
     let feminine = match base {
-        "fr" => last == "premiere",
-        "es" | "pt" | "it" | "gl" => last.ends_with('a') || last.ends_with("as"),
+        "fr" => last == "premiere" || last == "premieres",
+        "es" | "pt" | "gl" => last.ends_with('a') || last.ends_with("as"),
+        // it: the feminine plural ends in -e ("le prime volte"), the masculine in -i.
+        "it" => last.ends_with('a') || last.ends_with('e'),
         _ => false,
     };
-    ordinal_figures(resolved, converter.n2w_key(), n, feminine)
+    ordinal_figures(resolved, converter.n2w_key(), n, feminine).map(|f| agree_figure(base, &last, f))
+}
+
+/// Is `word` the ordinal exactly as num2words2 renders it (fr "cinquième",
+/// not the plural "cinquièmes")? The inflected forms reach the table through
+/// `ord_forms`; the rendered form is the one a renderer would print back.
+fn is_canonical_ordinal(converter: &Converter, word: &str) -> bool {
+    let Converter::Table(lang) = converter else { return true };
+    let Some(r) = num2words2_core::get_lang_by_key(lang) else { return true };
+    let norm = crate::normalize(word);
+    match crate::lookup(lang, &norm, true, &[]) {
+        Ok(Some(v)) => r
+            .to_ordinal(&BigInt::from(v))
+            .is_ok_and(|w| crate::normalize(&w) == norm),
+        _ => true,
+    }
+}
+
+/// The figures of an ordinal agree with the spoken form where the language
+/// marks it: fr plural "2es" / "1ers", ca "5a" / "1a" for the feminine, el
+/// "1η" / "1ο" (the abbreviation is the figure + the word's ending), bg
+/// "1-ва" / "1-во" / "1-вия". `fig` is the masculine singular figure.
+fn agree_figure(base: &str, last: &str, fig: String) -> String {
+    match base {
+        "fr" if last.ends_with('s') => format!("{fig}s"),
+        "ca" => {
+            let n: String = fig.chars().take_while(char::is_ascii_digit).collect();
+            if last.ends_with("es") {
+                format!("{n}es") // primeres, cinquenes
+            } else if last.ends_with('a') {
+                format!("{n}a") // primera, cinquena
+            } else if last.ends_with("ens") {
+                format!("{n}ns") // cinquens
+            } else if last.ends_with('s') {
+                format!("{fig}s") // primers -> 1rs, segons -> 2ns
+            } else {
+                fig
+            }
+        }
+        "el" => {
+            let n: String = fig.chars().take_while(char::is_ascii_digit).collect();
+            let ending = ["ους", "ος", "ου", "ον", "οι", "ες", "ης", "ων", "η", "ο", "α"]
+                .into_iter()
+                .find(|e| last.ends_with(e));
+            match ending {
+                Some(e) => format!("{n}{e}"),
+                None => fig,
+            }
+        }
+        "bg" => {
+            // The masculine figure is "N-" + the last two letters ("1-ви"); swap its
+            // final -и for the spoken ending.
+            let ending = ["ият", "ия", "ата", "ото", "ите", "а", "о"]
+                .into_iter()
+                .find(|e| last.ends_with(e));
+            match (ending, fig.strip_suffix('и')) {
+                (Some(e), Some(stem)) if fig.contains('-') => format!("{stem}{e}"),
+                _ => fig,
+            }
+        }
+        _ => fig,
+    }
 }
 
 /// The words that are both the number 1 and an article or pronoun: en "one"
