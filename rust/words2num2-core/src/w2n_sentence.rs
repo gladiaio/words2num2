@@ -733,8 +733,25 @@ impl Converter {
     }
 
     /// `Words2Num_Base.to_ordinal_num` — EN inherits it unchanged.
+    ///
+    /// A language whose renderer writes `ordinal_num` in Roman numerals (la)
+    /// or in words (ar, bn) also reads those forms back (#127, #246).
     fn to_ordinal_num(&self, text: &str) -> Result<W2nValue, W2nError> {
-        base_ordinal_num(text)
+        let key = self.n2w_key();
+        let err = match base_ordinal_num(text, key) {
+            Ok(v) => return Ok(v),
+            Err(e) => e,
+        };
+        if text.chars().any(is_unicode_digit) {
+            return Err(err);
+        }
+        match ordinal_num_shape(key) {
+            OrdinalNumShape::Roman => roman_value(text)
+                .map(|n| W2nValue::Int(BigInt::from(n)))
+                .ok_or(err),
+            OrdinalNumShape::Words => self.to_ordinal(text).map_err(|_| err),
+            OrdinalNumShape::Figures => Err(err),
+        }
     }
 
     /// `Words2Num_Base.to_currency` == `self.to_cardinal` (polymorphic, so EN
@@ -972,10 +989,25 @@ fn base_convert_unsigned(lang: &str, norm: &str, ordinal: bool) -> Result<W2nVal
         if let Ok(Some(v)) = crate::lookup_norm(lang, &norm, ordinal, &[]) {
             return Ok(W2nValue::Int(BigInt::from(v)));
         }
-        // A compound ordinal the renderer never writes (cs "dvacátý první").
         if ordinal {
+            // A compound ordinal the renderer never writes (cs "dvacátý
+            // první"): every element read through the ordinal table.
             if let Some(v) = crate::ord_forms::compose(lang, &norm) {
                 return Ok(W2nValue::Int(BigInt::from(v)));
+            }
+            // Above the table: a cardinal head + an ordinal tail, checked
+            // against the renderer (#125).
+            if let Some(v) = crate::ord_compose::compose(lang, &norm) {
+                return Ok(W2nValue::Int(BigInt::from(v)));
+            }
+            // A compound ordinal spoken in parts where num2words glues it:
+            // es "vigésimo cuarto" is "vigesimocuarto", tr "kırk ikinci" is
+            // "kırkikinci" (#70). Only a genuine table hit counts.
+            if norm.contains(' ') {
+                let despaced: String = norm.split_whitespace().collect();
+                if let Ok(Some(v)) = crate::lookup_norm(lang, &despaced, true, &[]) {
+                    return Ok(W2nValue::Int(BigInt::from(v)));
+                }
             }
         }
         // Composition multi-échelle pour les valeurs hors table (> 10001) :
@@ -1090,39 +1122,140 @@ fn finish_parse_literal(normalized: &str, sign: i64) -> Result<W2nValue, W2nErro
     )))
 }
 
-/// Port of `Words2Num_Base.to_ordinal_num`.
+/// Port of `Words2Num_Base.to_ordinal_num`, for the language `lang` (a
+/// num2words2 key).
 ///
 /// ```python
 /// m = re.search(r"-?\d+", text)
 /// if not m: raise Words2NumError("cannot parse %r as a number" % text)
 /// return int(m.group())
 /// ```
-fn base_ordinal_num(text: &str) -> Result<W2nValue, W2nError> {
+///
+/// The Python regex is too loose for the forms the renderers write:
+/// - a hyphen after a letter is a prefix, not a sign: id "ke-21", fil
+///   "ika-21", zu "we-100" are 21 / 21 / 100 (#63);
+/// - a thousands-grouped figure is one number: en "1,000th", de "1.000.",
+///   fr "1 000e" are all 1000; a decimal ("2.5th") has no rank and raises (#64);
+/// - figures glued to a Latin word ("covid19") are not a rank, unless the
+///   language writes its ordinal that way (xh "we21") (#64).
+fn base_ordinal_num(text: &str, lang: &str) -> Result<W2nValue, W2nError> {
+    let fail = || W2nError::Words2Num(unparseable_msg(text));
     let chars: Vec<char> = text.chars().collect();
-    for i in 0..chars.len() {
-        // `-?\d+`: a '-' counts only when a digit follows it.
-        if chars[i] == '-' && chars.get(i + 1).copied().is_some_and(is_unicode_digit) {
-            let mut j = i + 1;
-            while j < chars.len() && is_unicode_digit(chars[j]) {
-                j += 1;
+    let Some(start) = chars.iter().position(|&c| is_unicode_digit(c)) else {
+        return Err(fail());
+    };
+    // `-?`: a '-' is the sign only where a sign can stand — at the start or
+    // after a space / punctuation, never glued to a word.
+    let negative = start > 0
+        && chars[start - 1] == '-'
+        && (start == 1 || !chars[start - 2].is_alphanumeric());
+    let before = if negative { start.checked_sub(2) } else { start.checked_sub(1) };
+    if before.is_some_and(|b| chars[b].is_ascii_alphabetic()) && !glues_latin_prefix(lang) {
+        return Err(fail());
+    }
+    let mut j = start;
+    while j < chars.len() && is_unicode_digit(chars[j]) {
+        j += 1;
+    }
+    let mut digits: String = chars[start..j].iter().collect();
+    // Thousands groups: a separator followed by exactly three digits, only
+    // after a leading group of one to three digits.
+    if j - start <= 3 {
+        while j + 4 <= chars.len() {
+            let is_sep = matches!(
+                chars[j],
+                ',' | '.' | ' ' | '\'' | '\u{00A0}' | '\u{202F}' | '\u{2009}'
+            );
+            let group = chars[j + 1..j + 4].iter().all(|&c| is_unicode_digit(c));
+            let closed = chars.get(j + 4).is_none_or(|&c| !is_unicode_digit(c));
+            if !(is_sep && group && closed) {
+                break;
             }
-            let group: String = chars[i..j].iter().collect();
-            return py_int(&group)
-                .map(W2nValue::Int)
-                .ok_or_else(|| W2nError::Words2Num(unparseable_msg(text)));
-        }
-        if is_unicode_digit(chars[i]) {
-            let mut j = i;
-            while j < chars.len() && is_unicode_digit(chars[j]) {
-                j += 1;
-            }
-            let group: String = chars[i..j].iter().collect();
-            return py_int(&group)
-                .map(W2nValue::Int)
-                .ok_or_else(|| W2nError::Words2Num(unparseable_msg(text)));
+            digits.extend(&chars[j + 1..j + 4]);
+            j += 4;
         }
     }
-    Err(W2nError::Words2Num(unparseable_msg(text)))
+    // A decimal point or comma followed by a digit is a fraction: no rank.
+    if matches!(chars.get(j), Some(',' | '.')) && chars.get(j + 1).copied().is_some_and(is_unicode_digit) {
+        return Err(fail());
+    }
+    let value = py_int(&digits).ok_or_else(fail)?;
+    Ok(W2nValue::Int(if negative { -value } else { value }))
+}
+
+/// Does the renderer write this language's ordinal figures glued after a
+/// Latin-letter prefix (xh "we21")? Then a letter before the figures is the
+/// ordinal marker, not part of a word like "covid19".
+fn glues_latin_prefix(lang: &str) -> bool {
+    num2words2_core::get_lang_by_key(lang)
+        .and_then(|l| l.to_ordinal_num(&BigInt::from(21)).ok())
+        .and_then(|s| s.find("21").map(|at| s[..at].chars().last()))
+        .flatten()
+        .is_some_and(|c| c.is_ascii_alphabetic())
+}
+
+/// A Roman numeral (la renders its `ordinal_num` as "XXI", "MMXXIV"), read
+/// only in its canonical spelling: the value must re-render to the same
+/// letters, so "IIII" or "VX" raise.
+fn roman_value(text: &str) -> Option<i64> {
+    let t = text.trim().trim_end_matches('.').to_ascii_uppercase();
+    if t.is_empty() || t.len() > 15 || !t.chars().all(|c| "IVXLCDM".contains(c)) {
+        return None;
+    }
+    let val = |c: char| match c {
+        'I' => 1,
+        'V' => 5,
+        'X' => 10,
+        'L' => 50,
+        'C' => 100,
+        'D' => 500,
+        _ => 1000,
+    };
+    let cs: Vec<i64> = t.chars().map(val).collect();
+    let mut total = 0i64;
+    for (k, &v) in cs.iter().enumerate() {
+        if cs.get(k + 1).is_some_and(|&n| n > v) {
+            total -= v;
+        } else {
+            total += v;
+        }
+    }
+    (1..4000).contains(&total).then_some(total).filter(|&n| to_roman(n) == t)
+}
+
+fn to_roman(mut n: i64) -> String {
+    const R: [(i64, &str); 13] = [
+        (1000, "M"), (900, "CM"), (500, "D"), (400, "CD"), (100, "C"), (90, "XC"),
+        (50, "L"), (40, "XL"), (10, "X"), (9, "IX"), (5, "V"), (4, "IV"), (1, "I"),
+    ];
+    let mut out = String::new();
+    for (v, s) in R {
+        while n >= v {
+            out.push_str(s);
+            n -= v;
+        }
+    }
+    out
+}
+
+/// How the renderer writes `to_ordinal_num` for this language, probed on 21:
+/// in figures (the common case), in Roman numerals (la "XXI"), or in words
+/// (ar "الأول والعشرون", bn "একুশতম").
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum OrdinalNumShape {
+    Figures,
+    Roman,
+    Words,
+}
+
+fn ordinal_num_shape(lang: &str) -> OrdinalNumShape {
+    let rendered = num2words2_core::get_lang_by_key(lang)
+        .and_then(|l| l.to_ordinal_num(&BigInt::from(21)).ok());
+    match rendered {
+        Some(s) if s == "XXI" => OrdinalNumShape::Roman,
+        Some(s) if !s.chars().any(is_unicode_digit) => OrdinalNumShape::Words,
+        _ => OrdinalNumShape::Figures,
+    }
 }
 
 fn unparseable_msg(text: &str) -> String {
@@ -1209,7 +1342,7 @@ pub fn words2num(
             "year" => crate::en_to_year(text).map_err(|e| W2nError::Words2Num(e.msg)),
             "digits" => converter.to_digits(text).map(sentence_to_en_value),
             // `Words2Num_EN` inherits `Words2Num_Base.to_ordinal_num`.
-            _ => base_ordinal_num(text).map(sentence_to_en_value),
+            _ => base_ordinal_num(text, "en").map(sentence_to_en_value),
         },
         Converter::Table(lang) => {
             // Regional English (#193): the English grammar answers what the
@@ -1868,6 +2001,125 @@ fn next_word2(parts: &[String], i: usize) -> Option<String> {
     it.next().map(|t| rstrip_punct(t).to_lowercase())
 }
 
+/// The ordinal reading of a run in plain mode. A table language whose
+/// ordinal opens with a particle (ro "al douăzeci și unulea") has it just
+/// before the run, so the reading may take that word along (#70); the
+/// rendering then drops it from the figures ("al 21-lea").
+fn ordinal_reading(converter: &Converter, parts: &[String], i: usize, run: &str) -> Option<W2nValue> {
+    if let Ok(v) = converter.to_ordinal(run) {
+        return Some(v);
+    }
+    let Converter::Table(lang) = converter else { return None };
+    if !ordinal_opens_with_particle(lang) {
+        return None;
+    }
+    let raw = parts[..i].iter().rev().find(|t| !py_str_isspace(t))?;
+    let prev = raw.to_lowercase();
+    if prev.is_empty()
+        || !trailing_punct(raw).is_empty()
+        || holds_digit(&prev)
+        || converter.is_number_word(&prev)
+    {
+        return None;
+    }
+    converter.to_ordinal(&format!("{prev} {run}")).ok()
+}
+
+/// Does the renderer open its ordinals with a word that is not a number (ro
+/// "al doilea")? Probed on 2; only then may an ordinal reading take the word
+/// before a run.
+fn ordinal_opens_with_particle(lang: &str) -> bool {
+    let Some(l) = num2words2_core::get_lang_by_key(lang) else { return false };
+    let Some(two) = l.to_ordinal(&BigInt::from(2)).ok().map(|w| crate::normalize(&w)) else {
+        return false;
+    };
+    match two.split_once(' ') {
+        Some((first, _)) => !matches!(crate::lookup(lang, first, false, &[]), Ok(Some(_))),
+        None => false,
+    }
+}
+
+/// Does the renderer write a compound ordinal as words + the ordinal of the
+/// unit ("двадцать первый", "dwudziesty pierwszy")? Probed on 21.
+fn unit_ordinal_compounds(lang: &str) -> bool {
+    let Some(l) = num2words2_core::get_lang_by_key(lang) else { return false };
+    let render = |n: i64| l.to_ordinal(&BigInt::from(n)).ok().map(|w| crate::normalize(&w));
+    match (render(21), render(1)) {
+        (Some(r21), Some(r1)) => !r1.is_empty() && r21.ends_with(&format!(" {r1}")),
+        _ => false,
+    }
+}
+
+/// The part index of an ordinal word right after the cardinal run ending at
+/// `end` that makes the two one compound ordinal ("двадцать" + "первый":
+/// the unit 1 is below the 10s of 20), in a language that composes its
+/// ordinals that way. `None` otherwise.
+fn split_compound_ordinal(
+    converter: &Converter,
+    parts: &[String],
+    end: usize,
+    value: Option<&W2nValue>,
+) -> Option<usize> {
+    let Converter::Table(lang) = converter else { return None };
+    let Some(W2nValue::Int(c)) = value else { return None };
+    if ends_with_terminal_punct(&parts[end]) || *c <= BigInt::from(0) {
+        return None;
+    }
+    let k = (end + 1..parts.len()).find(|&k| !py_str_isspace(&parts[k]))?;
+    let word = rstrip_punct(&parts[k]).to_lowercase();
+    if !converter.is_ordinal_word(&word) {
+        return None;
+    }
+    let Ok(W2nValue::Int(o)) = converter.to_ordinal(&word) else { return None };
+    // The largest power of ten dividing the cardinal: 20 -> 10, 300 -> 100.
+    let mut place = BigInt::from(1);
+    while c % (&place * 10) == BigInt::from(0) {
+        place *= 10;
+    }
+    (o > BigInt::from(0) && o < place && unit_ordinal_compounds(lang)).then_some(k)
+}
+
+/// The spoken ordinal agreed with its noun (hi "पहली", tr "ikinciye") where
+/// the renderer writes one form: carry that ending over to the figures, so
+/// "पहली बार" is "१ली बार" and not the masculine "१ला बार" (#153). Only a
+/// short ending swap on a shared stem is carried over; anything else keeps
+/// the renderer's figures.
+fn agree_figures(n2w_key: &str, n: &BigInt, spoken: &str, figures: String) -> String {
+    use unicode_normalization::UnicodeNormalization;
+    if !figures.chars().any(is_unicode_digit) {
+        return figures;
+    }
+    let Some(canonical) = num2words2_core::get_lang_by_key(n2w_key)
+        .and_then(|l| l.to_ordinal(n).ok())
+        .map(|w| crate::normalize(&w))
+    else {
+        return figures;
+    };
+    let canon: Vec<char> = canonical.rsplit(' ').next().unwrap_or("").chars().collect();
+    let norm: Vec<char> = crate::normalize(spoken).chars().collect();
+    let raw: Vec<char> = spoken.nfc().collect::<String>().to_lowercase().chars().collect();
+    if raw.len() != norm.len() {
+        return figures; // the normalized spelling does not line up with the raw one
+    }
+    let common = canon.iter().zip(&norm).take_while(|(a, b)| a == b).count();
+    let (k, s) = (&canon[common..], &raw[common..]);
+    if common < 2 || k.len() > 3 || s.len() > 3 || k == &norm[common..] {
+        return figures;
+    }
+    let k: String = k.iter().collect();
+    let s: String = s.iter().collect();
+    // With nothing to swap (tr "ikinci" + "ye"), the ending is only appended
+    // to figures that end in a letter ("2'nci" -> "2'nciye"); hu "1." stays
+    // "1.", never "1.t".
+    if k.is_empty() && !figures.chars().last().is_some_and(char::is_alphabetic) {
+        return figures;
+    }
+    match figures.strip_suffix(k.as_str()) {
+        Some(stem) if !k.is_empty() || !s.is_empty() => format!("{stem}{s}"),
+        _ => figures,
+    }
+}
+
 /// The figures for an ordinal run (`parts[i..=end]`, value `v`), or `None`
 /// when it stays in words: a lone "first"/"second" away from a month, or a
 /// fraction ("a fifth", "un dixième"). A compound ("twenty first", "one
@@ -1952,7 +2204,23 @@ fn ordinal_rendering(
         "it" => last.ends_with('a') || last.ends_with('e'),
         _ => false,
     };
-    ordinal_figures(resolved, converter.n2w_key(), n, feminine).map(|f| agree_figure(base, &last, f))
+    let figures = ordinal_figures(resolved, converter.n2w_key(), n, feminine)?;
+    // ro "al douăzeci și unulea" read with the "al" before the run: the
+    // figures "al 21-lea" must not repeat it.
+    let figures = match prev.as_deref() {
+        Some(p) if !p.is_empty() => figures
+            .strip_prefix(&format!("{p} "))
+            .map(str::to_string)
+            .unwrap_or(figures),
+        _ => figures,
+    };
+    match base {
+        // these spell their own agreement above
+        "en" | "es" | "pt" | "it" | "gl" | "de" | "nl" => Some(figures),
+        // hand-written agreement: fr plural "2es", ca "5a", el "1η", bg "1-ва"
+        "fr" | "ca" | "el" | "bg" => Some(agree_figure(base, &last, figures)),
+        _ => Some(agree_figures(converter.n2w_key(), n, words[words.len() - 1], figures)),
+    }
 }
 
 /// Is `word` the ordinal exactly as num2words2 renders it (fr "cinquième",
@@ -2427,10 +2695,10 @@ fn words2num_sentence_walk(
                             best_sep = Some(sep);
                             Some((v, false))
                         }
-                        None => converter.to_ordinal(&stripped).ok().map(|v| (v, true)),
+                        None => ordinal_reading(&converter, &parts, i, &stripped).map(|v| (v, true)),
                     }
                 }
-                Err(_) if plain => converter.to_ordinal(&stripped).ok().map(|v| (v, true)),
+                Err(_) if plain => ordinal_reading(&converter, &parts, i, &stripped).map(|v| (v, true)),
                 Err(_) => None,
             };
             match hit {
@@ -2461,6 +2729,18 @@ fn words2num_sentence_walk(
                     best_value = Some(W2nValue::Int(BigInt::from(year)));
                     best_end = end;
                 }
+            }
+        }
+
+        // ru "двадцать первый", pl "dwadzieścia pierwszy": a cardinal followed
+        // by the ordinal of a smaller unit is one compound ordinal. When it
+        // did not read as one, converting the cardinal alone would split it
+        // into "20 первый"; the whole compound stays in words (#70).
+        if plain && !best_ordinal {
+            if let Some(k) = split_compound_ordinal(&converter, &parts, best_end, best_value.as_ref()) {
+                out.push_str(&parts[i..=k].concat());
+                i = k + 1;
+                continue;
             }
         }
 
@@ -3994,6 +4274,108 @@ mod digits_tests {
         );
         assert_eq!(s("una llamada", "es", "cardinal", false).unwrap(), "una llamada");
         assert_eq!(s("ciento uno", "es", "cardinal", false).unwrap(), "101");
+    }
+
+}
+
+#[cfg(test)]
+mod ordinal_tests {
+    use super::{words2num, words2num_sentence};
+
+    fn ordnum(text: &str, lang: &str) -> Option<i64> {
+        match words2num(text, lang, "ordinal_num") {
+            Ok(crate::w2n_lang_en::W2nValue::Int(n)) => n.to_string().parse().ok(),
+            _ => None,
+        }
+    }
+
+    fn ord(text: &str, lang: &str) -> Option<i64> {
+        match words2num(text, lang, "ordinal") {
+            Ok(crate::w2n_lang_en::W2nValue::Int(n)) => n.to_string().parse().ok(),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn ordinal_table_has_no_minus_first_issue_62() {
+        assert_eq!(ord("üheksas", "et"), Some(9));
+        assert_eq!(ord("kesepuluh", "ms"), Some(10));
+    }
+
+    #[test]
+    fn ordinal_num_prefix_hyphen_is_not_a_sign_issue_63() {
+        assert_eq!(ordnum("ika-1", "fil"), Some(1));
+        assert_eq!(ordnum("ika-21", "tl"), Some(21));
+        assert_eq!(ordnum("we-100", "zu"), Some(100));
+        assert_eq!(ordnum("ka-21", "ban"), Some(21));
+        assert_eq!(ordnum("ke-21", "ms"), Some(21));
+        assert_eq!(ordnum("-5th", "en"), Some(-5));
+    }
+
+    #[test]
+    fn ordinal_num_reads_grouped_figures_issue_64() {
+        assert_eq!(ordnum("1,000th", "en"), Some(1000));
+        assert_eq!(ordnum("1.000.", "de"), Some(1000));
+        assert_eq!(ordnum("1 000e", "fr"), Some(1000));
+        assert_eq!(ordnum("1.000.000th", "en"), Some(1000000));
+        assert_eq!(ordnum("2.5th", "en"), None);
+        assert_eq!(ordnum("covid19", "en"), None);
+        assert_eq!(ordnum("we21", "xh"), Some(21)); // xh glues its marker
+        assert_eq!(ordnum("第21", "ja"), Some(21));
+        assert_eq!(ordnum("21.", "sr_Latn"), Some(21));
+    }
+
+    #[test]
+    fn ordinal_num_reads_latin_roman_numerals_issue_127() {
+        assert_eq!(ordnum("XXI", "la"), Some(21));
+        assert_eq!(ordnum("MMXXIV", "la"), Some(2024));
+        assert_eq!(ordnum("IIII", "la"), None);
+        assert_eq!(ordnum("XXI", "en"), None);
+    }
+
+    #[test]
+    fn ordinal_num_reads_the_word_forms_ar_bn_render_issue_246() {
+        assert_eq!(ordnum("الأول", "ar"), Some(1));
+        assert_eq!(ordnum("الأول والعشرون", "ar"), Some(21));
+        assert_eq!(ordnum("একুশতম", "bn"), Some(21));
+        assert_eq!(ordnum("প্রথম", "bn"), Some(1));
+        assert_eq!(ordnum("twenty-first", "en"), None); // en renders figures
+    }
+
+    #[test]
+    fn ordinals_above_the_table_issue_125() {
+        assert_eq!(ord("dix mille unième", "fr"), Some(10001));
+        assert_eq!(ord("douze mille trois cent quarante-cinquième", "fr"), Some(12345));
+        assert_eq!(ord("zwanzigtausendste", "de"), Some(20000));
+        assert_eq!(ord("millonésimo", "es"), Some(1000000));
+    }
+
+    #[test]
+    fn compound_ordinal_spoken_in_parts_issue_70() {
+        let s = |t: &str, l: &str| words2num_sentence(t, l, "cardinal", false).unwrap();
+        assert_eq!(s("vigésimo cuarto piso", "es"), "24º piso");
+        assert_eq!(s("el vigésimo segundo piso", "es"), "el 22º piso");
+        assert_eq!(s("kırk ikinci", "tr"), "42'nci");
+        assert_eq!(s("venti quattresimo", "it"), "24º");
+        assert_eq!(s("al douăzeci și unulea", "ro"), "al 21-lea");
+        assert_eq!(s("dwadzieścia pierwszy", "pl"), "dwadzieścia pierwszy");
+        assert_eq!(s("двадцать первый день", "ru"), "двадцать первый день");
+        // Not a compound where the language does not build one that way.
+        assert_eq!(s("les vingt premiers", "fr"), "les 20 premiers");
+        assert_eq!(s("los veinte primeros", "es"), "los 20 primeros");
+    }
+
+    #[test]
+    fn agreed_ordinal_keeps_its_ending_in_figures_issue_153() {
+        let s = |t: &str, l: &str| words2num_sentence(t, l, "cardinal", false).unwrap();
+        assert_eq!(s("पहली बार", "hi"), "१ली बार");
+        assert_eq!(s("पहला दिन", "hi"), "१ला दिन");
+        assert_eq!(s("પહેલી વાર", "gu"), "૧લી વાર");
+        assert_eq!(s("ikinciye geldi", "tr"), "2'nciye geldi");
+        assert_eq!(s("нэгдүгээр анги", "mn"), "1 дүгээр анги");
+        // Nothing is appended to figures that end in punctuation.
+        let one = num_bigint::BigInt::from(1);
+        assert_eq!(super::agree_figures("hu", &one, "elsőt", "1.".to_string()), "1.");
     }
 }
 

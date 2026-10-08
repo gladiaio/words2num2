@@ -1,41 +1,56 @@
-//! Inflected ordinals -> the renderer's canonical ordinal spelling.
+//! Inflected and alternative spoken ordinals -> the renderer's canonical
+//! ordinal spelling.
 //!
 //! num2words2 renders one ordinal form per number, usually the masculine
-//! nominative singular (ru "первый", pl "pierwszy", el "πρώτος", ca "primer").
-//! Speech agrees the ordinal with its noun: ru "первая", "третьего", pl
-//! "dwudziesta pierwsza", el "πρώτη", ca "cinquena", hu "másodikán". The
-//! reverse table only holds the rendered form, so every other form raised.
+//! nominative singular definite form (ru "первый", pl "pierwszy", el "πρώτος",
+//! ca "primer", tr "ikinci"). Speech agrees the ordinal with its noun: ru
+//! "первая", "третьего", pl "dwudziesta pierwsza", el "πρώτη", ca "cinquena",
+//! hi "पहली बार"; adds a case suffix (hu "másodikán", tr "ikinciye"); or uses an
+//! equally standard second form (ja "第一", fa "دومین"). The reverse table only
+//! holds the rendered form, so every other form raised.
 //!
-//! [`variants`] maps a normalized inflected input onto candidate spellings in
-//! the renderer's canonical form. The candidates are only ever used as table
-//! keys: a candidate that is not a rendered ordinal is a miss, never a guess.
-//! The functions here are pure string work — they must not call back into the
-//! lookup (the caller holds the table lock while it tries the candidates).
+//! [`variants`] maps a normalized input onto candidate spellings in the
+//! renderer's canonical form. The candidates are only ever used as table keys:
+//! a candidate that is not a rendered ordinal is a miss, never a guess. The
+//! caller computes them with no table lock held (hy reads the cardinal table
+//! inside its rule).
 //!
 //! One file per language; [`variants`] dispatches on the base language code.
 
-mod endings;
-
+mod ar;
 mod be;
 mod bg;
+mod bn;
 mod ca;
 mod cs;
 mod cy;
 mod da;
 mod el;
+mod endings;
 mod eo;
 mod et;
+mod fa;
 mod fi;
 mod fr;
 mod gl;
+mod gu;
 mod he;
+mod hi;
 mod hu;
+mod hy;
 mod is;
+mod ja;
+mod ko;
 mod la;
 mod lt;
 mod lv;
+mod mn;
+mod mr;
+mod ms;
 mod mt;
 mod nb;
+mod ne;
+mod pa;
 mod pl;
 mod ro;
 mod ru;
@@ -43,18 +58,25 @@ mod sh;
 mod sk;
 mod sl;
 mod sq;
+mod suffix;
 mod sv;
 mod sw;
+mod tr;
 mod uk;
+mod ur;
+mod vi;
 
 /// Candidate spellings, in the renderer's canonical ordinal form, of the
-/// inflected normalized ordinal `norm` (empty when the language has no rule or
-/// nothing in `norm` is inflected). The input itself is never included.
+/// normalized ordinal `norm` (empty when the language has no rule or nothing in
+/// `norm` is inflected). Every candidate is normalized like the table keys,
+/// duplicates are dropped and the input itself is never included.
 pub fn variants(lang: &str, norm: &str) -> Vec<String> {
     let base = lang.split(&['_', '-'][..]).next().unwrap_or(lang);
-    let mut out = match base {
+    let raw = match base {
+        "ar" => ar::variants(norm),
         "be" => be::variants(norm),
         "bg" => bg::variants(norm),
+        "bn" => bn::variants(norm),
         "bs" | "hr" | "sr" => sh::variants(norm),
         "ca" => ca::variants(norm),
         "cs" => cs::variants(norm),
@@ -63,17 +85,28 @@ pub fn variants(lang: &str, norm: &str) -> Vec<String> {
         "el" => el::variants(norm),
         "eo" => eo::variants(norm),
         "et" => et::variants(norm),
+        "fa" => fa::variants(norm),
         "fi" => fi::variants(norm),
         "fr" => fr::variants(norm),
         "gl" => gl::variants(norm),
+        "gu" => gu::variants(norm),
         "he" => he::variants(norm),
+        "hi" => hi::variants(norm),
         "hu" => hu::variants(norm),
+        "hy" => hy::variants(norm),
         "is" => is::variants(norm),
+        "ja" | "jp" => ja::variants(norm),
+        "ko" => ko::variants(norm),
         "la" => la::variants(norm),
         "lt" => lt::variants(norm),
         "lv" => lv::variants(norm),
+        "mn" => mn::variants(norm),
+        "mr" => mr::variants(norm),
+        "ms" => ms::variants(norm),
         "mt" => mt::variants(norm),
         "nb" | "no" => nb::variants(norm),
+        "ne" => ne::variants(norm),
+        "pa" => pa::variants(norm),
         "pl" => pl::variants(norm),
         "ro" => ro::variants(norm),
         "ru" => ru::variants(norm),
@@ -82,12 +115,19 @@ pub fn variants(lang: &str, norm: &str) -> Vec<String> {
         "sq" => sq::variants(norm),
         "sv" => sv::variants(norm),
         "sw" => sw::variants(norm),
+        "tr" => tr::variants(norm),
         "uk" => uk::variants(norm),
-        _ => Vec::new(),
+        "ur" => ur::variants(norm),
+        "vi" => vi::variants(norm),
+        _ => return Vec::new(),
     };
-    out.retain(|v| v != norm);
-    let mut seen = std::collections::HashSet::new();
-    out.retain(|v| seen.insert(v.clone()));
+    let mut out: Vec<String> = Vec::new();
+    for v in raw {
+        let v = crate::normalize(&v);
+        if !v.is_empty() && v != norm && !out.contains(&v) {
+            out.push(v);
+        }
+    }
     out
 }
 
@@ -170,5 +210,27 @@ pub fn extra_keys(lang: &str, n: i64, rendered: Option<&str>) -> Vec<String> {
         "be" => be::extra_keys(n, rendered),
         "cy" => cy::extra_keys(n, rendered),
         _ => Vec::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unknown_language_has_no_variants() {
+        assert!(variants("xx", "abc").is_empty());
+        assert!(variants("en", "firsts").is_empty());
+    }
+
+    #[test]
+    fn candidates_are_normalized_and_exclude_the_input() {
+        for (lang, input) in [("ar", "الاولى"), ("hi", "पहली"), ("tr", "ikinciye")] {
+            let norm = crate::normalize(input);
+            for v in variants(lang, &norm) {
+                assert_eq!(crate::normalize(&v), v, "{lang} {input}");
+                assert_ne!(v, norm);
+            }
+        }
     }
 }
