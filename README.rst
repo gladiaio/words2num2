@@ -324,11 +324,11 @@ SI/imperial units, percent, and disambiguation hints.
 
     # Currencies
     >>> auto_parse("$12,345.00")
-    Quantity(value=12345.0, unit='USD', kind='currency', confidence=1.0)
+    Quantity(value=Decimal('12345.00'), unit='USD', kind='currency', confidence=1.0)
     >>> auto_parse("$5m").value
     5000000
     >>> auto_parse("12,50 €", lang="de").value
-    12.5
+    Decimal('12.50')
 
     # Units
     >>> auto_parse("5cm")
@@ -340,9 +340,9 @@ SI/imperial units, percent, and disambiguation hints.
 
     # Configurable separators
     >>> auto_parse("1.234,56", lang="de").value
-    1234.56
+    Decimal('1234.56')
     >>> auto_parse("1 234,56", lang="fr").value
-    1234.56
+    Decimal('1234.56')
 
     # Disambiguation for ambiguous unit tokens
     >>> auto_parse("5m", prefer={"m": "mile"}).unit_long

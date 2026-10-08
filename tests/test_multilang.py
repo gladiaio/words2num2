@@ -4,6 +4,8 @@
 These tests require ``num2words2`` to be installed.
 """
 
+from decimal import Decimal
+
 import pytest
 
 num2words2 = pytest.importorskip("num2words2")
@@ -181,3 +183,20 @@ def test_es_bare_ciento_is_one_hundred():
 )
 def test_es_apocope_inside_a_number(text, expected):
     assert words2num_sentence(text, lang="es") == expected
+
+
+@pytest.mark.parametrize(
+    "text,lang,expected",
+    [
+        # Numbers in figures follow the language's separators (#60).
+        ("1.234", "de", 1234),
+        ("1.234", "es", 1234),
+        ("2,5", "de", Decimal("2.5")),
+        ("1 234,5", "fr", Decimal("1234.5")),
+        ("3.14", "fr", Decimal("3.14")),
+    ],
+)
+def test_digit_literal_locale_separators(text, lang, expected):
+    got = words2num(text, lang=lang)
+    assert got == expected
+    assert type(got) is type(expected)

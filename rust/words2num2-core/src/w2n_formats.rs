@@ -64,9 +64,9 @@ impl std::error::Error for Words2NumError {}
 /// `words2num2` hands back an `int`, a `float` or a `Decimal` depending on the
 /// input.
 ///
-/// `formats.py` imports `Decimal` but never constructs one — every return from
-/// `_to_number` is an `int` or a `float`. `Dec` exists so this enum lines up
-/// with the sibling modules during wiring.
+/// The parser returns an `Int` for a whole number and an exact `Dec` for one
+/// with a decimal part (the Python `formats.py` returned a binary `float`
+/// there, #71). `Float` is kept so this enum lines up with the sibling modules.
 #[derive(Debug, Clone, PartialEq)]
 pub enum W2nValue {
     Int(BigInt),
@@ -222,62 +222,100 @@ fn lookup_format(key: &str) -> Option<NumberFormat> {
         .map(|(_, v)| *v)
 }
 
-/// Port of `get_format`. Returns the `{thousands, decimal}` row for `lang`,
-/// with fallback.
-///
-/// ```python
-/// if lang in NUMBER_FORMAT_DEFAULTS:
-///     return NUMBER_FORMAT_DEFAULTS[lang]
-/// base = lang.split("_")[0] if lang else ""
-/// if base in NUMBER_FORMAT_DEFAULTS:
-///     return NUMBER_FORMAT_DEFAULTS[base]
-/// return NUMBER_FORMAT_DEFAULTS["_default"]
-/// ```
-///
-/// Python's `if lang else ""` guard only exists to keep `lang=None` from
-/// hitting `.split`; `"".split("_")[0]` is already `""`, so `get_format(None)`
-/// and `get_format("")` both land on `_default` — which is what `get_format("")`
-/// does here.
-pub fn get_format(lang: &str) -> NumberFormat {
+/// The `{thousands, decimal}` row for `lang`, if the table knows it: the exact
+/// key, else its base language. Both `_` and `-` separate the region, so
+/// `pt-BR` finds `pt_BR` and `es-MX` finds `es` (#54).
+pub fn locale_format(lang: &str) -> Option<NumberFormat> {
+    if lang.is_empty() || lang == "_default" {
+        return None;
+    }
     if let Some(f) = lookup_format(lang) {
-        return f;
+        return Some(f);
     }
-    let base = lang.split('_').next().unwrap_or("");
-    if let Some(f) = lookup_format(base) {
-        return f;
+    let normalized = lang.replace('-', "_");
+    if let Some(f) = lookup_format(&normalized) {
+        return Some(f);
     }
-    lookup_format("_default").expect("_default is always present")
+    let base = normalized.split('_').next().unwrap_or("");
+    lookup_format(base)
+}
+
+/// Port of `get_format`. Returns the `{thousands, decimal}` row for `lang`,
+/// falling back to `_default` for a language the table does not know.
+///
+/// The parser itself no longer applies `_default` to an unknown language: it
+/// auto-detects instead (see [`parse_number_string`]). This stays the public
+/// "which separators would a document in this locale use" answer.
+pub fn get_format(lang: &str) -> NumberFormat {
+    locale_format(lang).unwrap_or_else(|| lookup_format("_default").expect("_default is always present"))
 }
 
 // ---------------------------------------------------------------------------
 // parse_number_string
 // ---------------------------------------------------------------------------
 
-/// Port of `parse_number_string`. Parses a numeric string with configurable
-/// separators.
+/// The typographic apostrophes Swiss typography and word processors put where
+/// an ASCII `'` groups thousands: `1’234.5` (U+2019), `1ʼ234` (U+02BC) (#109).
+fn ascii_apostrophes(s: &str) -> String {
+    s.replace(['\u{2019}', '\u{02BC}'], "'")
+}
+
+/// Reject separator overrides that cannot be told apart from the number:
+/// `thousands_sep == decimal_sep` would delete the decimal point
+/// (`parse_number_string("1.5", ".", ".")` used to return 15), and a digit as a
+/// separator rewrites the digits themselves (#188). `None` and `""` both mean
+/// "not given".
+pub fn check_separators(thousands_sep: Option<&str>, decimal_sep: Option<&str>) -> Result<()> {
+    let t = thousands_sep.filter(|t| !t.is_empty());
+    let d = decimal_sep.filter(|d| !d.is_empty());
+    for sep in [t, d].into_iter().flatten() {
+        if sep.chars().any(|c| decimal_digit(c).is_some()) {
+            return Err(Words2NumError::new(format!(
+                "a digit cannot be a separator: {}",
+                py_repr(sep)
+            )));
+        }
+    }
+    if let (Some(t), Some(d)) = (t, d) {
+        if ascii_apostrophes(t) == ascii_apostrophes(d) {
+            return Err(Words2NumError::new(format!(
+                "thousands_sep and decimal_sep must differ (both {})",
+                py_repr(t)
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Parses a numeric string with configurable separators.
 ///
-/// Resolution order, straight from the docstring:
-///   1. If `thousands_sep` and/or `decimal_sep` are given, use them.
-///   2. Otherwise if `lang` matches a known locale, use its defaults.
-///   3. Otherwise auto-detect from the string itself.
+/// Resolution order:
+///   1. If `thousands_sep` and/or `decimal_sep` are given, use them (they must
+///      differ, see [`check_separators`]).
+///   2. Otherwise, if `lang` has a row in [`NUMBER_FORMAT_DEFAULTS`], read the
+///      string strictly in that locale: its thousands separator only between
+///      groups of exactly three digits, its decimal separator at most once.
+///   3. Otherwise — or when the locale reading does not fit — auto-detect from
+///      the string itself, with the locale's decimal separator as the tie-break
+///      for the one genuinely ambiguous shape (`1.234`).
 ///
-/// `Option::None` is Python's `None` and `Some("")` is Python's `""` — the two
-/// are **not** interchangeable. `parse_number_string(s, None, None, None)`
-/// auto-detects, but `parse_number_string(s, Some(""), None, None)` takes the
-/// explicit branch and then skips every rewrite (`if thousands_sep:` is falsy
-/// for `""`), so `"1.234"` → `1.234` rather than the auto-detected `1.234`.
-/// They agree there by luck; they do not in general.
+/// A dot or comma followed by 1, 2 or 4+ digits is a decimal in any locale:
+/// `"3.14"` is 3.14 in French too, `"1,5"` is 1.5 in English (#53). `"1.234"`
+/// stays a thousands group where the locale writes decimals with a comma.
 ///
-/// Python's leading `isinstance(s, str)` check — which raises
-/// `Words2NumError("expected str, got %r" % type(s).__name__)` — is unreachable
-/// behind a `&str` and is therefore not ported. A dispatcher that accepts
-/// arbitrary Python objects must keep that check on its own side.
+/// Decimals come back exact, as [`W2nValue::Dec`] (Python `Decimal`), never as
+/// a binary float: `"12345678901234567.89"` keeps every digit and a scale
+/// suffix multiplies without rounding error (#71). Whole numbers stay `Int`.
+///
+/// `Option::None` is Python's `None` and `Some("")` is Python's `""`; both mean
+/// "not given" for a separator.
 pub fn parse_number_string(
     s: &str,
     thousands_sep: Option<&str>,
     decimal_sep: Option<&str>,
     lang: Option<&str>,
 ) -> Result<W2nValue> {
+    check_separators(thousands_sep, decimal_sep)?;
     let s = py_strip(s);
     if s.is_empty() {
         return Err(Words2NumError::new("empty numeric string"));
@@ -299,27 +337,29 @@ pub fn parse_number_string(
     if s.is_empty() {
         return Err(Words2NumError::new("empty numeric string after sign"));
     }
+    let s = ascii_apostrophes(s);
 
     if thousands_sep.is_some() || decimal_sep.is_some() {
-        return Ok(apply_sign(sign, parse_with_explicit(s, thousands_sep, decimal_sep)?));
+        let t = thousands_sep.map(ascii_apostrophes);
+        let d = decimal_sep.map(ascii_apostrophes);
+        return Ok(apply_sign(sign, parse_with_explicit(&s, t.as_deref(), d.as_deref())?));
     }
 
-    if let Some(lang) = lang {
-        let fmt = get_format(lang);
-        // Python: `except Words2NumError: pass` — and `_parse_with_explicit`
-        // raises nothing else, so any Err falls through to auto-detection.
-        if let Ok(v) = parse_with_explicit(s, Some(fmt.thousands), Some(fmt.decimal)) {
-            return Ok(apply_sign(sign, v));
+    let fmt = lang.and_then(locale_format);
+    if let Some(fmt) = fmt {
+        if let Some(v) = parse_locale_strict(&s, fmt) {
+            return Ok(apply_sign(sign, v?));
         }
     }
 
-    Ok(apply_sign(sign, auto_detect_parse(s)?))
+    let hint = fmt.and_then(|f| f.decimal.chars().next());
+    Ok(apply_sign(sign, auto_detect_parse(&s, hint)?))
 }
 
 /// Python's `sign * value`, where `sign` is the int `1` or `-1`.
 ///
-/// `1 * x` is `x`. `-1 * 0.0` is `-0.0` and `-1 * 0` is `0` (ints have no
-/// negative zero) — negation reproduces both.
+/// `1 * x` is `x`. `-1 * 0` is `0` (ints have no negative zero) — negation
+/// reproduces it. A `Decimal` zero keeps no sign either (BigDecimal has none).
 fn apply_sign(sign: i32, v: W2nValue) -> W2nValue {
     if sign >= 0 {
         return v;
@@ -331,12 +371,16 @@ fn apply_sign(sign: i32, v: W2nValue) -> W2nValue {
     }
 }
 
-/// Port of `_parse_with_explicit`.
+fn is_space_like_sep(t: &str) -> bool {
+    t == " " || t == "\u{00A0}" || t == "\u{202F}" || t == "\u{2009}"
+}
+
+/// Explicit separators.
 ///
 /// ```python
 /// if thousands_sep:
 ///     if thousands_sep in (" ", NBSP, NNBSP, THIN_SPACE):
-///         s = re.sub(r"[\s\xa0  ]", "", s)
+///         s = re.sub(r"[\s\xa0  ]", "", s)
 ///     else:
 ///         s = s.replace(thousands_sep, "")
 /// if decimal_sep:
@@ -352,9 +396,6 @@ fn apply_sign(sign: i32, v: W2nValue) -> W2nValue {
 /// `.replace` branch and leaves an NBSP in place — hence
 /// `parse_number_string("1\u{a0}234", Some("\t"), None, None)` failing while
 /// `Some(" ")` succeeds.
-///
-/// The `[\s\xa0  ]` class is `\s` plus three codepoints `\s` already
-/// covers; the redundancy is harmless and preserved as a plain `is_py_space`.
 fn parse_with_explicit(
     s: &str,
     thousands_sep: Option<&str>,
@@ -364,7 +405,7 @@ fn parse_with_explicit(
 
     // `if thousands_sep:` — Python truthiness: None and "" are both falsy.
     if let Some(t) = thousands_sep.filter(|t| !t.is_empty()) {
-        if t == " " || t == "\u{00A0}" || t == "\u{202F}" || t == "\u{2009}" {
+        if is_space_like_sep(t) {
             // treat any space-like as thousands when one is configured
             cur = cur.chars().filter(|&c| !is_py_space(c)).collect();
         } else {
@@ -375,8 +416,8 @@ fn parse_with_explicit(
     if let Some(d) = decimal_sep.filter(|d| !d.is_empty()) {
         if d != "." {
             if cur.contains('.') {
-                // User explicitly gave a non-dot decimal but the string also
-                // has dots — treat dots as a stray separator and drop.
+                // The caller named a non-dot decimal, so a dot left in the
+                // string can only be a grouping mark ("1.234,5" with ",").
                 cur = cur.replace('.', "");
             }
             cur = cur.replace(d, ".");
@@ -386,14 +427,84 @@ fn parse_with_explicit(
     to_number(&cur)
 }
 
-/// Port of `_auto_detect_parse`.
-fn auto_detect_parse(s: &str) -> Result<W2nValue> {
+/// Are these the groups of a thousands-grouped integer: 1-3 digits, then
+/// groups of exactly 3? `["1", "234", "567"]` yes; `["1", "5", "2026"]`,
+/// `["1234", "567"]`, `["1", "", "234"]` no.
+fn valid_grouping(groups: &[&str]) -> bool {
+    let all_digits = |g: &str| g.chars().all(|c| decimal_digit(c).is_some());
+    let len = |g: &str| g.chars().count();
+    match groups.split_first() {
+        Some((head, rest)) => {
+            (1..=3).contains(&len(head))
+                && all_digits(head)
+                && rest.iter().all(|g| len(g) == 3 && all_digits(g))
+        }
+        None => false,
+    }
+}
+
+/// The locale reading, strict: digits, the locale's thousands separator only
+/// between valid groups, its decimal separator at most once with digits after.
+/// `None` when the string does not fit — the caller then auto-detects, so
+/// `"3.14"` in French (whose separators are space and comma) is read by the
+/// auto-detect rules rather than having its dot dropped (#53).
+fn parse_locale_strict(s: &str, fmt: NumberFormat) -> Option<Result<W2nValue>> {
+    let t = fmt.thousands;
+    let space_t = is_space_like_sep(t);
+    let d = fmt.decimal;
+    let (int_part, frac) = match s.split_once(d) {
+        Some((i, f)) => (i, Some(f)),
+        None => (s, None),
+    };
+    if let Some(f) = frac {
+        if f.is_empty() || !f.chars().all(|c| decimal_digit(c).is_some()) {
+            return None;
+        }
+    }
+    let groups: Vec<&str> = if space_t {
+        int_part.split(is_py_space).collect()
+    } else if t.is_empty() {
+        vec![int_part]
+    } else {
+        int_part.split(t).collect()
+    };
+    let ok = if groups.len() == 1 {
+        !groups[0].is_empty() && groups[0].chars().all(|c| decimal_digit(c).is_some())
+    } else {
+        valid_grouping(&groups)
+    };
+    if !ok {
+        return None;
+    }
+    let mut ascii = groups.concat();
+    if let Some(f) = frac {
+        ascii.push('.');
+        ascii.push_str(f);
+    }
+    Some(to_number(&ascii))
+}
+
+/// Auto-detection.
+///
+/// Spaces, apostrophes and underscores only ever group thousands and are
+/// dropped. Then, for dots and commas:
+/// * both present: the rightmost kind is the decimal (once), the other groups
+///   thousands — in valid groups of three;
+/// * one kind, several times: thousands, in valid groups of three, else not a
+///   number (`"1.5.2026"` is a date, not 152026) (#55);
+/// * one occurrence: a decimal, except `1-3 digits` + sep + `3 digits`, which
+///   is genuinely ambiguous (`1.234`): there `hint`, the locale's decimal
+///   separator, decides — the other separator is thousands. With no locale it
+///   stays a decimal ("preserves precision"). A leading group of 4+ digits
+///   proves the string is not grouped, so `"1234.567"` is 1234.567 (#55).
+fn auto_detect_parse(s: &str, hint: Option<char>) -> Result<W2nValue> {
     // Strip clearly-thousands-only separators first:
-    //   re.sub(r"[\s\xa0  '_]", "", s)
+    //   re.sub(r"[\s\xa0  '_]", "", s)
     let s2: String = s
         .chars()
         .filter(|&c| !(is_py_space(c) || c == '\'' || c == '_'))
         .collect();
+    let not_a_number = || Words2NumError::new(format!("not a parseable number: {}", py_repr(&s2)));
 
     let has_comma = s2.contains(',');
     let has_dot = s2.contains('.');
@@ -402,28 +513,51 @@ fn auto_detect_parse(s: &str) -> Result<W2nValue> {
         // Both present — the rightmost is decimal.
         let last_comma = last_char_index(&s2, ',').expect("has_comma");
         let last_dot = last_char_index(&s2, '.').expect("has_dot");
-        let s3 = if last_comma > last_dot {
-            s2.replace('.', "").replace(',', ".")
-        } else {
-            s2.replace(',', "")
-        };
-        return to_number(&s3);
+        let (dec, grp) = if last_comma > last_dot { (',', '.') } else { ('.', ',') };
+        let (int_part, frac) = s2.rsplit_once(dec).expect("has dec");
+        if int_part.contains(dec) {
+            return Err(not_a_number());
+        }
+        let groups: Vec<&str> = int_part.split(grp).collect();
+        if !valid_grouping(&groups) {
+            return Err(not_a_number());
+        }
+        return to_number(&format!("{}.{}", groups.concat(), frac));
     }
 
-    if has_comma {
-        return to_number(&resolve_single_sep(&s2, ','));
-    }
-    if has_dot {
-        return to_number(&resolve_single_sep(&s2, '.'));
+    for sep in [',', '.'] {
+        if !s2.contains(sep) {
+            continue;
+        }
+        let parts: Vec<&str> = s2.split(sep).collect();
+        if parts.len() > 2 {
+            // Multiple occurrences → thousands, if they group in threes.
+            if !valid_grouping(&parts) {
+                return Err(not_a_number());
+            }
+            return to_number(&parts.concat());
+        }
+        let (before, after) = (parts[0], parts[1]);
+        let before_len = before.chars().count();
+        let after_len = after.chars().count();
+        let decimal = format!("{}.{}", before, after);
+        if before.is_empty() && after_len == 3 {
+            // ",123": no leading group to be a decimal of; the separator is
+            // a stray thousands mark.
+            return to_number(after);
+        }
+        if after_len == 3 && (1..=3).contains(&before_len) {
+            return match hint {
+                Some(h) if h != sep => to_number(&format!("{}{}", before, after)),
+                _ => to_number(&decimal),
+            };
+        }
+        return to_number(&decimal);
     }
     to_number(&s2)
 }
 
 /// `str.rfind(ch)` — the **character** index of the last `ch`.
-///
-/// `rfind` byte offsets would compare identically here (both separators are
-/// ASCII, so byte order tracks char order), but the whole file indexes by
-/// `chars()` on principle.
 fn last_char_index(s: &str, target: char) -> Option<usize> {
     s.chars()
         .enumerate()
@@ -432,67 +566,19 @@ fn last_char_index(s: &str, target: char) -> Option<usize> {
         .last()
 }
 
-/// Port of `_resolve_single_sep` — decide whether `sep` is decimal or thousands
-/// when only it appears.
-///
-/// Python indexes `parts[1]` unguarded, so calling this with a `sep` absent from
-/// `s` is an `IndexError`. Both call sites test membership first, so the branch
-/// is unreachable; this is a private fn and keeps the same precondition.
-///
-/// Two quirks preserved verbatim:
-///
-/// * The `else` arms hardcode `s.replace(",", ".")` instead of using `sep`.
-///   That is only ever reached when `sep != "."`, and `sep` is only ever `,` or
-///   `.`, so it is equivalent — but it is written the way Python writes it.
-/// * The `len(after) == 3` ambiguity resolves to **decimal**, so auto-detected
-///   `"1,234"` is `1.234` and `"12.345"` is `12.345`. Reads like a bug; it is
-///   the documented intent ("Default to decimal (preserves precision)") and it
-///   is the specification either way.
-fn resolve_single_sep(s: &str, sep: char) -> String {
-    let parts: Vec<&str> = s.split(sep).collect();
-    if parts.len() > 2 {
-        // Multiple occurrences → thousands.
-        return s.replace(sep, "");
-    }
-    let after = parts[1];
-    let after_len = after.chars().count();
-    let before_len = parts[0].chars().count();
-
-    // Exactly 3 trailing digits *and* a leading group of at most 3 → ambiguous.
-    // Default to decimal unless the leading group has more than 3 digits.
-    if after_len == 3 && !parts[0].is_empty() && before_len <= 3 {
-        return if sep == '.' {
-            s.to_string() // treat as decimal
-        } else {
-            s.replace(',', ".")
-        };
-    }
-    if after_len != 3 {
-        // Not a 3-digit group → must be decimal.
-        return if sep == '.' {
-            s.to_string()
-        } else {
-            s.replace(',', ".")
-        };
-    }
-    s.replace(sep, "")
-}
-
-/// Port of `_to_number`.
+/// Port of `_to_number`, exact.
 ///
 /// ```python
 /// if not re.fullmatch(r"\d+(?:\.\d+)?", s):
 ///     raise Words2NumError("not a parseable number: %r" % s)
 /// if "." in s:
-///     return float(s)
+///     return Decimal(s)        # was float(s): binary rounding (#71)
 /// return int(s)
 /// ```
 ///
-/// `\d` is Unicode `Nd`, and CPython's `int()`/`float()` map those digits to
+/// `\d` is Unicode `Nd`, and CPython's `int()`/`Decimal()` map those digits to
 /// ASCII before parsing — so [`fullmatch_number`] returns the transliterated
-/// ASCII form and the parse runs on that. Testing `"." in s` on the original is
-/// the same as testing the transliteration: the pattern only admits an ASCII
-/// dot, and no `Nd` digit is one.
+/// ASCII form and the parse runs on that.
 fn to_number(s: &str) -> Result<W2nValue> {
     let Some(ascii) = fullmatch_number(s) else {
         return Err(Words2NumError::new(format!(
@@ -501,10 +587,9 @@ fn to_number(s: &str) -> Result<W2nValue> {
         )));
     };
     if ascii.contains('.') {
-        // Matches Python's float(): both are correctly rounded, and both
-        // saturate to inf rather than erroring ("9"*400 + ".5" → inf).
-        Ok(W2nValue::Float(
-            ascii.parse::<f64>().expect("gated by fullmatch_number"),
+        // The scale is the number of digits written: "12.50" keeps its two.
+        Ok(W2nValue::Dec(
+            ascii.parse::<BigDecimal>().expect("gated by fullmatch_number"),
         ))
     } else {
         // int() is arbitrary precision — BigInt, never a fixed-width cast.
@@ -780,8 +865,8 @@ mod tests {
     fn int(n: i64) -> W2nValue {
         W2nValue::Int(BigInt::from(n))
     }
-    fn flt(f: f64) -> W2nValue {
-        W2nValue::Float(f)
+    fn dec(s: &str) -> W2nValue {
+        W2nValue::Dec(s.parse::<BigDecimal>().unwrap())
     }
     fn p(s: &str) -> Result<W2nValue> {
         parse_number_string(s, None, None, None)
@@ -824,19 +909,25 @@ mod tests {
 
     #[test]
     fn traced_auto_detect() {
-        assert_eq!(p("1,234").unwrap(), flt(1.234)); // ambiguous → decimal
-        assert_eq!(p("1.234").unwrap(), flt(1.234));
-        assert_eq!(p("12,345").unwrap(), flt(12.345));
-        assert_eq!(p("1234.567").unwrap(), int(1234567)); // lead > 3 → thousands
+        assert_eq!(p("1,234").unwrap(), dec("1.234")); // ambiguous → decimal
+        assert_eq!(p("1.234").unwrap(), dec("1.234"));
+        assert_eq!(p("12,345").unwrap(), dec("12.345"));
+        // A leading group of 4+ digits proves the string is not grouped (#55).
+        assert_eq!(p("1234.567").unwrap(), dec("1234.567"));
+        assert_eq!(p("1234,567").unwrap(), dec("1234.567"));
         assert_eq!(p(",123").unwrap(), int(123)); // empty lead → thousands
-        assert_eq!(p("1,234.56").unwrap(), flt(1234.56)); // rightmost is decimal
-        assert_eq!(p("1.234,56").unwrap(), flt(1234.56));
+        assert_eq!(p("1,234.56").unwrap(), dec("1234.56")); // rightmost is decimal
+        assert_eq!(p("1.234,56").unwrap(), dec("1234.56"));
         assert_eq!(p("1 234 567").unwrap(), int(1234567));
-        assert_eq!(p("1'234.5").unwrap(), flt(1234.5)); // apostrophe stripped
+        assert_eq!(p("1'234.5").unwrap(), dec("1234.5")); // apostrophe stripped
         assert_eq!(p("1_000").unwrap(), int(1000)); // underscore stripped
-        assert_eq!(p("1,,234").unwrap(), int(1234)); // 3 parts → thousands
-        assert_eq!(p("12,345.67").unwrap(), flt(12345.67));
-        assert_eq!(p("1,234,567.89").unwrap(), flt(1234567.89));
+        // Several separators group thousands only in groups of three (#55).
+        assert_eq!(p("1,234,567").unwrap(), int(1234567));
+        assert_eq!(err("1,,234"), "not a parseable number: '1,,234'");
+        assert_eq!(err("1.5.2026"), "not a parseable number: '1.5.2026'");
+        assert_eq!(err("1,23.4"), "not a parseable number: '1,23.4'");
+        assert_eq!(p("12,345.67").unwrap(), dec("12345.67"));
+        assert_eq!(p("1,234,567.89").unwrap(), dec("1234567.89"));
     }
 
     /// The three space-like separators must stay distinct codepoints and all
@@ -850,9 +941,9 @@ mod tests {
         assert_eq!(THIN_SPACE as u32, 0x2009);
         assert_eq!(SPACE_LIKE.chars().count(), 5);
 
-        assert_eq!(p("1\u{202f}234,5").unwrap(), flt(1234.5)); // NNBSP
-        assert_eq!(p("1\u{a0}234,5").unwrap(), flt(1234.5)); // NBSP
-        assert_eq!(p("1\u{2009}234,5").unwrap(), flt(1234.5)); // THIN SPACE
+        assert_eq!(p("1\u{202f}234,5").unwrap(), dec("1234.5")); // NNBSP
+        assert_eq!(p("1\u{a0}234,5").unwrap(), dec("1234.5")); // NBSP
+        assert_eq!(p("1\u{2009}234,5").unwrap(), dec("1234.5")); // THIN SPACE
     }
 
     // -- traced cases: sign / strip --------------------------------------
@@ -862,15 +953,12 @@ mod tests {
         assert_eq!(p("+42").unwrap(), int(42));
         assert_eq!(p("  42  ").unwrap(), int(42));
         assert_eq!(p("- 42").unwrap(), int(-42)); // lstrip after the sign
-        assert_eq!(p("-1 234,5").unwrap(), flt(-1234.5));
+        assert_eq!(p("-1 234,5").unwrap(), dec("-1234.5"));
         assert_eq!(p("-0").unwrap(), int(0)); // ints have no -0
         assert_eq!(p("\u{a0}\u{a0}42\u{a0}").unwrap(), int(42));
         assert_eq!(p("\u{1c}42").unwrap(), int(42)); // \s covers U+001C
-        // -0.0 keeps its sign bit, exactly like Python's -1 * 0.0
-        match p("-0.0").unwrap() {
-            W2nValue::Float(f) => assert!(f == 0.0 && f.is_sign_negative()),
-            v => panic!("expected float, got {v:?}"),
-        }
+        // A decimal zero is exact; BigDecimal carries no sign on zero.
+        assert_eq!(p("-0.0").unwrap(), dec("0.0"));
         // Only ONE sign char is consumed.
         assert_eq!(err("+-42"), "not a parseable number: '-42'");
     }
@@ -880,18 +968,34 @@ mod tests {
     #[test]
     fn traced_lang_path() {
         assert_eq!(pl("1.234", "de").unwrap(), int(1234)); // dot = thousands
-        assert_eq!(pl("1.234", "en").unwrap(), flt(1.234)); // dot = decimal
-        assert_eq!(pl("1 234,5", "fr").unwrap(), flt(1234.5));
-        assert_eq!(pl("1,234.5", "en").unwrap(), flt(1234.5));
-        assert_eq!(pl("1.234,5", "de").unwrap(), flt(1234.5));
+        assert_eq!(pl("1.234", "en").unwrap(), dec("1.234")); // dot = decimal
+        assert_eq!(pl("1 234,5", "fr").unwrap(), dec("1234.5"));
+        assert_eq!(pl("1,234.5", "en").unwrap(), dec("1234.5"));
+        assert_eq!(pl("1.234,5", "de").unwrap(), dec("1234.5"));
         assert_eq!(pl("1.234.567", "de").unwrap(), int(1234567));
-        assert_eq!(pl("12.345,67", "de").unwrap(), flt(12345.67));
-        assert_eq!(pl("1.234.567,89", "de").unwrap(), flt(1234567.89));
-        assert_eq!(pl("1 234,56", "fr").unwrap(), flt(1234.56));
-        // Unknown lang → _default {",", "."}: the comma is stripped as thousands.
-        assert_eq!(pl("1,5", "zz").unwrap(), int(15));
-        // fr drops every dot then maps "," → ".": "1.2.3" collapses to 123.
-        assert_eq!(pl("1.2.3", "fr").unwrap(), int(123));
+        assert_eq!(pl("12.345,67", "de").unwrap(), dec("12345.67"));
+        assert_eq!(pl("1.234.567,89", "de").unwrap(), dec("1234567.89"));
+        assert_eq!(pl("1 234,56", "fr").unwrap(), dec("1234.56"));
+        // A dot followed by 1, 2 or 4+ digits is a decimal in any locale (#53).
+        assert_eq!(pl("3.14", "fr").unwrap(), dec("3.14"));
+        assert_eq!(pl("0.5", "es").unwrap(), dec("0.5"));
+        assert_eq!(pl("1.5", "de").unwrap(), dec("1.5"));
+        assert_eq!(pl("12.5", "ru").unwrap(), dec("12.5"));
+        assert_eq!(pl("1,5", "en").unwrap(), dec("1.5"));
+        assert_eq!(pl("1.2345", "de").unwrap(), dec("1.2345"));
+        // ...but "1.234" stays a thousands group where decimals take a comma.
+        assert_eq!(pl("1.234", "fr").unwrap(), int(1234));
+        assert_eq!(pl("1,234", "en").unwrap(), int(1234));
+        assert_eq!(pl("1,234", "de").unwrap(), dec("1.234"));
+        // Not a grouped number in any locale.
+        assert!(pl("1.2.3", "fr").is_err());
+        // Unknown lang: no locale row, auto-detect (#54).
+        assert_eq!(pl("1,5", "zz").unwrap(), dec("1.5"));
+        assert_eq!(pl("1.234,5", "id").unwrap(), dec("1234.5"));
+        assert_eq!(pl("1,5", "id").unwrap(), dec("1.5"));
+        // A hyphenated region finds its row (#54).
+        assert_eq!(pl("1.234,56", "pt-BR").unwrap(), dec("1234.56"));
+        assert_eq!(pl("1.234,56", "es-MX").unwrap(), dec("1234.56"));
     }
 
     /// The lang branch swallows Words2NumError and falls through to
@@ -912,14 +1016,14 @@ mod tests {
     fn traced_explicit_separators() {
         let ps = |s, t, d| parse_number_string(s, t, d, None);
         assert_eq!(ps("1,234", Some(","), None).unwrap(), int(1234));
-        assert_eq!(ps("1,234", None, Some(",")).unwrap(), flt(1.234));
-        assert_eq!(ps("1x234y5", Some("x"), Some("y")).unwrap(), flt(1234.5));
-        assert_eq!(ps("1.234", None, Some(".")).unwrap(), flt(1.234));
-        assert_eq!(ps("12'345.67", Some("'"), Some(".")).unwrap(), flt(12345.67));
-        assert_eq!(ps("1_234.56", Some("_"), None).unwrap(), flt(1234.56));
+        assert_eq!(ps("1,234", None, Some(",")).unwrap(), dec("1.234"));
+        assert_eq!(ps("1x234y5", Some("x"), Some("y")).unwrap(), dec("1234.5"));
+        assert_eq!(ps("1.234", None, Some(".")).unwrap(), dec("1.234"));
+        assert_eq!(ps("12'345.67", Some("'"), Some(".")).unwrap(), dec("12345.67"));
+        assert_eq!(ps("1_234.56", Some("_"), None).unwrap(), dec("1234.56"));
         // Some("") is Python's "" — falsy, so no rewrite happens at all.
-        assert_eq!(ps("1.234", Some(""), None).unwrap(), flt(1.234));
-        assert_eq!(ps("1.234", Some(""), Some("")).unwrap(), flt(1.234));
+        assert_eq!(ps("1.234", Some(""), None).unwrap(), dec("1.234"));
+        assert_eq!(ps("1.234", Some(""), Some("")).unwrap(), dec("1.234"));
         // A configured space-like strips ALL space-likes...
         assert_eq!(ps("1 234", Some(" "), None).unwrap(), int(1234));
         assert_eq!(ps("1\u{a0}234", Some(" "), None).unwrap(), int(1234));
@@ -941,17 +1045,21 @@ mod tests {
 
     #[test]
     fn traced_to_number_bigint_and_float() {
-        assert_eq!(p("0.1").unwrap(), flt(0.1));
-        assert_eq!(p("1.0000000000000000001").unwrap(), flt(1.0)); // rounds
+        assert_eq!(p("0.1").unwrap(), dec("0.1"));
+        // Exact: no binary rounding (#71).
+        assert_eq!(p("1.0000000000000000001").unwrap(), dec("1.0000000000000000001"));
+        assert_eq!(p("12345678901234567.89").unwrap(), dec("12345678901234567.89"));
+        match p("12.50").unwrap() {
+            W2nValue::Dec(d) => assert_eq!(d.to_string(), "12.50"), // scale kept
+            v => panic!("expected Decimal, got {v:?}"),
+        }
         assert_eq!(
             p(&"9".repeat(100)).unwrap(),
             W2nValue::Int("9".repeat(100).parse::<BigInt>().unwrap())
         );
-        // float() saturates rather than raising.
-        match p(&format!("{}.5", "9".repeat(400))).unwrap() {
-            W2nValue::Float(f) => assert!(f.is_infinite() && f.is_sign_positive()),
-            v => panic!("expected inf, got {v:?}"),
-        }
+        // Decimal() keeps every digit where float() saturated to inf.
+        let big = format!("{}.5", "9".repeat(400));
+        assert_eq!(p(&big).unwrap(), dec(&big));
     }
 
     /// Python's `\d` is Unicode Nd, and int()/float() accept it — mixed scripts
@@ -963,7 +1071,7 @@ mod tests {
         assert_eq!(p("1\u{0662}3").unwrap(), int(123)); // 1٢3
         assert_eq!(p("\u{FF11}\u{FF12}\u{FF13}").unwrap(), int(123)); // １２３
         assert_eq!(p("\u{0967}\u{0968}\u{0969}").unwrap(), int(123)); // १२३ Devanagari
-        assert_eq!(p("\u{0662}\u{0663}.\u{0665}").unwrap(), flt(23.5)); // ٢٣.٥
+        assert_eq!(p("\u{0662}\u{0663}.\u{0665}").unwrap(), dec("23.5")); // ٢٣.٥
 
         assert_eq!(decimal_digit('7'), Some(7));
         assert_eq!(decimal_digit('\u{0669}'), Some(9)); // ٩
@@ -998,6 +1106,32 @@ mod tests {
         assert_eq!(err("abc"), "not a parseable number: 'abc'");
         assert_eq!(err("not a number"), "not a parseable number: 'notanumber'");
         assert_eq!(err("12a"), "not a parseable number: '12a'");
+    }
+
+    /// The Swiss typographic apostrophe groups thousands like the ASCII one (#109).
+    #[test]
+    fn swiss_typographic_apostrophe() {
+        assert_eq!(pl("1\u{2019}234.5", "fr_CH").unwrap(), dec("1234.5"));
+        assert_eq!(pl("1\u{2019}234\u{2019}567", "fr_CH").unwrap(), int(1234567));
+        assert_eq!(p("1\u{2019}234.5").unwrap(), dec("1234.5"));
+        assert_eq!(p("1\u{02bc}234").unwrap(), int(1234));
+        let ps = |s, t, d| parse_number_string(s, t, d, None);
+        assert_eq!(ps("1\u{2019}234.5", Some("'"), Some(".")).unwrap(), dec("1234.5"));
+    }
+
+    /// Identical or digit separators are refused, not silently applied (#188).
+    #[test]
+    fn ambiguous_separator_overrides_are_rejected() {
+        let ps = |s, t, d| parse_number_string(s, t, d, None);
+        assert_eq!(
+            ps("1.5", Some("."), Some(".")).unwrap_err().0,
+            "thousands_sep and decimal_sep must differ (both '.')"
+        );
+        assert!(ps("1,5", Some(","), Some(",")).is_err());
+        assert!(ps("1,234.5", Some(","), Some(",")).is_err());
+        assert!(ps("1x5", Some("1"), None).is_err());
+        // An empty override is "not given", not a clash.
+        assert_eq!(ps("1.5", Some(""), Some("")).unwrap(), dec("1.5"));
     }
 
     #[test]

@@ -109,8 +109,15 @@ def auto_parse(text, lang="en", prefer=None, thousands_sep=None,
                decimal_sep=None):
     """Parse a single quantity expression, e.g. ``"$12,345.00"`` or ``"5cm"``.
 
-    Returns a :class:`Quantity`; raises ``Words2NumError`` if unparseable.
-    ``prefer`` disambiguates ambiguous unit tokens (``{"m": "mile"}``).
+    Returns a :class:`Quantity`; raises ``Words2NumError`` if unparseable or
+    if ``thousands_sep == decimal_sep``, and ``NotImplementedError`` for an
+    unsupported ``lang``. A digit-form decimal is an exact ``Decimal`` and a
+    scale suffix shifts its point (``"$4.1bn"`` -> ``4100000000``).
+
+    ``prefer`` disambiguates ambiguous unit tokens (``{"m": "mile"}``,
+    ``{"m": "minute"}``): the preferred unit replaces the whole reading
+    (``unit``, ``unit_long``, ``kind``). A target that is not a reading of the
+    token (``{"m": "kg"}``) is ignored.
     """
     return _RUST.auto_parse(text, lang, prefer, thousands_sep, decimal_sep)
 
@@ -129,8 +136,13 @@ def auto_parse_sentence(text, lang="en", prefer=None, thousands_sep=None,
 def parse_number_string(s, thousands_sep=None, decimal_sep=None, lang=None):
     """Parse a numeric string with configurable / per-locale separators.
 
-    Resolution order (all in the core): explicit separators, then the ``lang``
-    locale's defaults, then auto-detection from the string itself.
+    Resolution order (all in the core): explicit separators (which must
+    differ), then the ``lang`` locale's defaults, then auto-detection from the
+    string itself. A dot or comma followed by 1, 2 or 4+ digits is a decimal in
+    any locale (``"3.14"`` with ``lang="fr"`` is 3.14); ``"1.234"`` stays a
+    thousands group where the locale writes decimals with a comma.
+
+    Returns an ``int``, or an exact ``Decimal`` for a decimal.
     """
     return _RUST.parse_number_string(s, thousands_sep, decimal_sep, lang)
 

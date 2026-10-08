@@ -32,12 +32,6 @@
 //! * `words2num_sentence("zero point zero zero zero zero zero zero one")`
 //!   → `"1E-7"` — Python's `Decimal.__str__` flips to scientific notation
 //!   once the adjusted exponent drops below -6. See [`py_decimal_str`].
-//! * `auto_parse("$5kn")` raises **KeyError**, not `Words2NumError`: the
-//!   regex accepts `[kKmMbBtT][nN]?` but `SCALE_SUFFIXES` only holds
-//!   `k K m M b B bn t T tn`. It escapes `auto_parse_sentence` uncaught
-//!   because `_replace` only catches `Words2NumError`. See [`W2nError::Key`].
-//! * `parse_number_string("0.5", lang="fr")` → `5`. French decimal is `,`,
-//!   so the dot is dropped as a stray separator and `"05"` parses as an int.
 //! * `_try_word_unit`'s `long_name = info.long` assignment is dead — it is
 //!   unconditionally overwritten by the `next(...)` scan below it. Not ported.
 //! * `word_units["pound sterling"]` is unreachable: the key holds a space but
@@ -64,7 +58,9 @@ pub enum W2nError {
     Words2Num(String),
     /// `NotImplementedError` — raised by `_resolve_lang`.
     NotImplemented(String),
-    /// `KeyError` — `SCALE_SUFFIXES[scale_str]` misses (e.g. `"$5kn"`).
+    /// `KeyError`. No longer produced: an unknown scale suffix (`"$5kn"`) is a
+    /// `Words2Num` error, so `auto_parse_sentence` leaves the span verbatim
+    /// instead of aborting (#194). Kept so the binder's mapping stays total.
     /// Python's `KeyError` stringifies as `repr(key)`, hence the odd quoting.
     Key(String),
 }
@@ -2370,16 +2366,24 @@ fn is_currency_symbol(c: char) -> bool {
     CURRENCY_SYMBOLS.contains(&c)
 }
 
-/// `converters.auto.SCALE_SUFFIXES`. Returns the multiplier, or `None` for a
-/// `KeyError` — the regex admits combinations this table does not hold
-/// (`"kn"`, `"BN"`, `"Tn"`, `"bN"` …), and Python genuinely raises there.
-fn scale_suffix(s: &str) -> Option<BigInt> {
-    let pow = |n: u32| BigInt::from(10u8).pow(n);
-    match s {
-        "k" | "K" => Some(pow(3)),
-        "m" | "M" => Some(pow(6)),
-        "b" | "B" | "bn" => Some(pow(9)),
-        "t" | "T" | "tn" => Some(pow(12)),
+/// `converters.auto.SCALE_SUFFIXES`, as a power of ten. The regex admits
+/// `[kKmMbBtT][nN]?`; the `n` is the financial-press spelling of the large
+/// scales in any case (`$5Mn`, `$4.1bn`, `$2TN`), so it is accepted on m/b/t.
+/// `"kn"` is not an abbreviation of thousand (it is the kuna): `None`, which
+/// the caller turns into a `Words2NumError` (#194).
+fn scale_suffix(s: &str) -> Option<u32> {
+    let mut it = s.chars();
+    let head = it.next()?;
+    let n = match it.next() {
+        None => false,
+        Some('n' | 'N') if it.next().is_none() => true,
+        Some(_) => return None,
+    };
+    match head.to_ascii_lowercase() {
+        'k' if !n => Some(3),
+        'm' => Some(6),
+        'b' => Some(9),
+        't' => Some(12),
         _ => None,
     }
 }
@@ -2439,286 +2443,30 @@ impl Quantity {
 }
 
 // ===========================================================================
-// `formats.py` — DUPLICATED HERE ON PURPOSE
+// `parse_number_string` — one implementation, in `crate::w2n_formats`
 // ===========================================================================
-//
-// `auto_parse` cannot run without `parse_number_string`. These private helpers
-// are a self-contained copy that stays byte-consistent with this module's own
-// Unicode digit set ([`ND_BLOCKS`]); the canonical crate-level port lives in
-// [`crate::w2n_formats`]. Both are verified against the interpreter.
 
-/// `formats.NUMBER_FORMAT_DEFAULTS` — (lang, thousands, decimal).
-const NUMBER_FORMAT_DEFAULTS: &[(&str, &str, &str)] = &[
-    ("_default", ",", "."),
-    ("en", ",", "."),
-    ("en_GB", ",", "."),
-    ("en_IN", ",", "."),
-    ("en_NG", ",", "."),
-    ("zh", ",", "."),
-    ("zh_CN", ",", "."),
-    ("zh_HK", ",", "."),
-    ("zh_TW", ",", "."),
-    ("ja", ",", "."),
-    ("ko", ",", "."),
-    ("th", ",", "."),
-    ("vi", ".", ","),
-    ("fr", " ", ","),
-    ("fr_BE", " ", ","),
-    ("fr_DZ", " ", ","),
-    ("fr_CH", "'", "."),
-    ("de", ".", ","),
-    ("es", ".", ","),
-    ("es_CO", ".", ","),
-    ("es_CR", ".", ","),
-    ("es_GT", ".", ","),
-    ("es_NI", ".", ","),
-    ("es_VE", ".", ","),
-    ("it", ".", ","),
-    ("pt", ".", ","),
-    ("pt_BR", ".", ","),
-    ("nl", ".", ","),
-    ("ro", ".", ","),
-    ("hr", ".", ","),
-    ("sl", ".", ","),
-    ("sr", ".", ","),
-    ("tr", ".", ","),
-    ("el", ".", ","),
-    ("ru", " ", ","),
-    ("uk", " ", ","),
-    ("be", " ", ","),
-    ("bg", " ", ","),
-    ("pl", " ", ","),
-    ("cs", " ", ","),
-    ("sk", " ", ","),
-    ("hu", " ", ","),
-    ("sv", " ", ","),
-    ("no", " ", ","),
-    ("nn", " ", ","),
-    ("da", ".", ","),
-    ("fi", " ", ","),
-    ("et", " ", ","),
-    ("lt", " ", ","),
-    ("lv", " ", ","),
-    ("is", ".", ","),
-    ("fo", ".", ","),
-    ("ar", ",", "."),
-    ("fa", ",", "."),
-    ("he", ",", "."),
-];
-
-/// `formats.get_format`.
-fn get_format(lang: &str) -> (&'static str, &'static str) {
-    let find = |k: &str| {
-        NUMBER_FORMAT_DEFAULTS
-            .iter()
-            .find(|(n, _, _)| *n == k)
-            .map(|(_, t, d)| (*t, *d))
-    };
-    if let Some(f) = find(lang) {
-        return f;
-    }
-    // `lang.split("_")[0] if lang else ""` — `lang` is never None here.
-    let base = lang.split('_').next().unwrap_or("");
-    if !lang.is_empty() {
-        if let Some(f) = find(base) {
-            return f;
-        }
-    }
-    find("_default").expect("_default is always present")
-}
-
-/// `formats._to_number` — the only place an int/float distinction is made.
-fn to_number(s: &str) -> Result<W2nValue, W2nError> {
-    // re.fullmatch(r"\d+(?:\.\d+)?", s)
-    let ok = {
-        let mut it = s.chars().peekable();
-        let mut n_int = 0usize;
-        while it.peek().copied().is_some_and(is_unicode_digit) {
-            it.next();
-            n_int += 1;
-        }
-        let mut good = n_int > 0;
-        if good && it.peek() == Some(&'.') {
-            it.next();
-            let mut n_frac = 0usize;
-            while it.peek().copied().is_some_and(is_unicode_digit) {
-                it.next();
-                n_frac += 1;
-            }
-            good = n_frac > 0;
-        }
-        good && it.next().is_none()
-    };
-    if !ok {
-        return Err(W2nError::Words2Num(format!(
-            "not a parseable number: {}",
-            py_repr_str(s)
-        )));
-    }
-    // int()/float() fold Nd digits to their decimal value.
-    let ascii = to_ascii_digits(s);
-    if ascii.contains('.') {
-        Ok(W2nValue::Float(ascii.parse::<f64>().map_err(|e| {
-            W2nError::Words2Num(e.to_string())
-        })?))
-    } else {
-        Ok(W2nValue::Int(BigInt::from_str(&ascii).map_err(|e| {
-            W2nError::Words2Num(e.to_string())
-        })?))
-    }
-}
-
-/// `re.sub(r"[\s\xa0  ]", "", s)` — `\s` already covers all three
-/// named spaces, so this is `\s` plus belt-and-braces.
-fn strip_space_like(s: &str) -> String {
-    s.chars()
-        .filter(|c| !(py_is_space(*c) || matches!(c, '\u{a0}' | '\u{202f}' | '\u{2009}')))
-        .collect()
-}
-
-/// `formats._parse_with_explicit`.
-fn parse_with_explicit(
-    s: &str,
-    thousands_sep: Option<&str>,
-    decimal_sep: Option<&str>,
-) -> Result<W2nValue, W2nError> {
-    let mut s = s.to_string();
-    // `if thousands_sep:` — truthiness, so an empty separator is skipped.
-    if let Some(t) = thousands_sep.filter(|t| !t.is_empty()) {
-        if matches!(t, " " | "\u{a0}" | "\u{202f}" | "\u{2009}") {
-            s = strip_space_like(&s);
-        } else {
-            s = s.replace(t, "");
-        }
-    }
-    if let Some(d) = decimal_sep.filter(|d| !d.is_empty()) {
-        if d != "." {
-            if s.contains('.') {
-                // A non-dot decimal was configured but dots are present —
-                // Python drops them as stray separators. This is why
-                // parse_number_string("0.5", lang="fr") == 5.
-                s = s.replace('.', "");
-            }
-            s = s.replace(d, ".");
-        }
-    }
-    to_number(&s)
-}
-
-/// `formats._resolve_single_sep`.
-fn resolve_single_sep(s: &str, sep: char) -> String {
-    let parts: Vec<&str> = s.split(sep).collect();
-    if parts.len() > 2 {
-        return s.replace(sep, "");
-    }
-    let after = parts[1]; // len(parts) >= 2 — the caller only calls when sep is present
-    let n_after = after.chars().count();
-    if n_after == 3 && !parts[0].is_empty() && parts[0].chars().count() <= 3 {
-        if sep == '.' {
-            return s.to_string();
-        }
-        return s.replace(',', ".");
-    }
-    if n_after != 3 {
-        return if sep == '.' {
-            s.to_string()
-        } else {
-            s.replace(',', ".")
-        };
-    }
-    s.replace(sep, "")
-}
-
-/// `formats._auto_detect_parse`.
-fn auto_detect_parse(s: &str) -> Result<W2nValue, W2nError> {
-    // re.sub(r"[\s\xa0  '_]", "", s)
-    let s2: String = s
-        .chars()
-        .filter(|c| {
-            !(py_is_space(*c) || matches!(c, '\u{a0}' | '\u{202f}' | '\u{2009}' | '\'' | '_'))
-        })
-        .collect();
-    let has_comma = s2.contains(',');
-    let has_dot = s2.contains('.');
-
-    if has_comma && has_dot {
-        // Both present — the rightmost is the decimal.
-        let last_comma = s2.rfind(',');
-        let last_dot = s2.rfind('.');
-        let s3 = if last_comma > last_dot {
-            s2.replace('.', "").replace(',', ".")
-        } else {
-            s2.replace(',', "")
-        };
-        return to_number(&s3);
-    }
-    if has_comma {
-        return to_number(&resolve_single_sep(&s2, ','));
-    }
-    if has_dot {
-        return to_number(&resolve_single_sep(&s2, '.'));
-    }
-    to_number(&s2)
-}
-
-/// `sign * value`, where `sign` is Python's `int` 1 or -1.
-/// `int * int -> int`; `int * float -> float`.
-fn apply_sign(sign: i32, v: W2nValue) -> W2nValue {
-    if sign == 1 {
-        return v;
-    }
-    match v {
-        W2nValue::Int(i) => W2nValue::Int(-i),
-        W2nValue::Float(f) => W2nValue::Float(-f),
-        W2nValue::Dec(d) => W2nValue::Dec(-d),
-    }
-}
-
-/// `formats.parse_number_string`.
+/// [`crate::w2n_formats::parse_number_string`] in this module's value and error
+/// types. There used to be a private copy of the whole `formats.py` port here;
+/// two copies meant two places to fix every separator rule.
 fn parse_number_string(
     s: &str,
     thousands_sep: Option<&str>,
     decimal_sep: Option<&str>,
     lang: Option<&str>,
 ) -> Result<W2nValue, W2nError> {
-    let s = py_strip(s);
-    if s.is_empty() {
-        return Err(W2nError::Words2Num("empty numeric string".to_string()));
-    }
-    let mut sign = 1i32;
-    let mut rest = s;
-    let first = s.chars().next().unwrap();
-    if first == '+' || first == '-' {
-        if first == '-' {
-            sign = -1;
-        }
-        rest = py_strip_start(&s[first.len_utf8()..]);
-    }
-    if rest.is_empty() {
-        return Err(W2nError::Words2Num(
-            "empty numeric string after sign".to_string(),
-        ));
-    }
-    if thousands_sep.is_some() || decimal_sep.is_some() {
-        return Ok(apply_sign(
-            sign,
-            parse_with_explicit(rest, thousands_sep, decimal_sep)?,
-        ));
-    }
-    if let Some(l) = lang {
-        let (t, d) = get_format(l);
-        match parse_with_explicit(rest, Some(t), Some(d)) {
-            Ok(v) => return Ok(apply_sign(sign, v)),
-            Err(W2nError::Words2Num(_)) => {} // fall through to auto-detect
-            Err(e) => return Err(e),
-        }
-    }
-    Ok(apply_sign(sign, auto_detect_parse(rest)?))
+    crate::w2n_formats::parse_number_string(s, thousands_sep, decimal_sep, lang)
+        .map(formats_value)
+        .map_err(|e| W2nError::Words2Num(e.0))
 }
 
-/// Python's `str.lstrip()`.
-fn py_strip_start(s: &str) -> &str {
-    s.trim_start_matches(py_is_space)
+fn formats_value(v: crate::w2n_formats::W2nValue) -> W2nValue {
+    use crate::w2n_formats::W2nValue as F;
+    match v {
+        F::Int(i) => W2nValue::Int(i),
+        F::Float(f) => W2nValue::Float(f),
+        F::Dec(d) => W2nValue::Dec(d),
+    }
 }
 
 // ===========================================================================
@@ -2915,56 +2663,70 @@ fn quantity_currency(value: W2nValue, sym: &str, raw: &str) -> Quantity {
     }
 }
 
-/// `converters.auto._apply_scale`
-///
-/// ```python
-/// multiplier = SCALE_SUFFIXES[scale_str]   # KeyError escapes auto_parse
-/// if isinstance(value, int): return value * multiplier
-/// return float(value) * multiplier
-/// ```
+/// `converters.auto._apply_scale`, exact: the decimal point is shifted, never
+/// multiplied in binary floating point, so `$4.1bn` is 4100000000 and not
+/// 4099999999.9999995 (#71). A whole result is an `int`; `$1.2345k` stays the
+/// `Decimal` 1234.5.
 fn apply_scale(value: W2nValue, scale_str: &str) -> Result<W2nValue, W2nError> {
-    let multiplier =
-        scale_suffix(scale_str).ok_or_else(|| W2nError::Key(scale_str.to_string()))?;
+    let exp = scale_suffix(scale_str).ok_or_else(|| {
+        W2nError::Words2Num(format!("unknown scale suffix {}", py_repr_str(scale_str)))
+    })?;
+    let pow = |n: u32| BigInt::from(10u8).pow(n);
     match value {
-        W2nValue::Int(i) => Ok(W2nValue::Int(i * multiplier)),
-        // float(value) * multiplier — Python widens the int multiplier.
-        W2nValue::Float(f) => Ok(W2nValue::Float(f * bigint_to_f64(&multiplier))),
-        W2nValue::Dec(d) => Ok(W2nValue::Float(
-            bigdecimal_to_f64(&d) * bigint_to_f64(&multiplier),
-        )),
+        W2nValue::Int(i) => Ok(W2nValue::Int(i * pow(exp))),
+        // Unreachable: digit decimals parse to `Dec`. Kept total.
+        W2nValue::Float(f) => Ok(W2nValue::Float(f * 10f64.powi(exp as i32))),
+        W2nValue::Dec(d) => {
+            let (digits, scale) = d.normalized().as_bigint_and_exponent();
+            let scale = scale - i64::from(exp);
+            Ok(if scale <= 0 {
+                W2nValue::Int(digits * pow(u32::try_from(-scale).unwrap_or(0)))
+            } else {
+                W2nValue::Dec(BigDecimal::new(digits, scale))
+            })
+        }
     }
 }
 
-fn bigint_to_f64(i: &BigInt) -> f64 {
-    i.to_string().parse::<f64>().unwrap_or(f64::INFINITY)
-}
-
-fn bigdecimal_to_f64(d: &BigDecimal) -> f64 {
-    d.to_string().parse::<f64>().unwrap_or(f64::INFINITY)
+/// The other units a short token can stand for, as [`UNITS`] keys: "m" is a
+/// metre, a minute ("5m" on a timer) or a mile; a bare "°" is Celsius or
+/// Fahrenheit. Only these readings can be chosen with `prefer`.
+fn alternative_readings(token: &str) -> &'static [&'static str] {
+    match token {
+        "m" | "M" => &["min", "mi"],
+        "\u{b0}" => &["\u{b0}C", "\u{b0}F"],
+        _ => &[],
+    }
 }
 
 /// `converters.auto._resolve_unit`
 ///
-/// Returns `(info, override_long, confidence)`; `None` means the token is not
-/// a unit at all.
-fn resolve_unit(
-    unit_str: &str,
-    prefer: &HashMap<String, String>,
-) -> Option<(&'static UnitInfo, Option<&'static str>, f64)> {
+/// Returns `(info, confidence)`; `None` means the token is not a unit at all.
+///
+/// `prefer` maps a token to the unit the caller means by it
+/// (`{"m": "minute"}`, by long or short form). When that unit is a reading of
+/// the token (see [`alternative_readings`]) the whole preferred unit is
+/// returned — short form, long form and kind, so `"5m"` becomes `5 min`, a
+/// time (#203). A target that is not a reading of the token (`{"m": "kg"}`) or
+/// not a unit at all is ignored.
+fn resolve_unit(unit_str: &str, prefer: &HashMap<String, String>) -> Option<(&'static UnitInfo, f64)> {
     // Direct hit, then a lowercased retry (so "°C"/"K" keep their casing).
     let info = units_get(unit_str).or_else(|| units_get(&unit_str.to_lowercase()))?;
 
     // prefer-override is keyed on the ORIGINAL token, not the lowercased one.
     if let Some(target) = prefer.get(unit_str).filter(|t| !t.is_empty()) {
-        for (_, u) in UNITS.iter() {
-            if u.long == target || u.short == target {
-                // Keep the original short token, flip the long form, and clamp
-                // confidence to reflect the caller stepping in.
-                return Some((info, Some(u.long), info.confidence.max(0.9)));
+        let wanted = UNITS
+            .iter()
+            .find(|(_, u)| u.long == target || u.short == target);
+        if let Some((key, u)) = wanted {
+            let reading = u.short == info.short || alternative_readings(unit_str).contains(key);
+            if reading {
+                // Confidence reflects the caller stepping in.
+                return Some((u, info.confidence.max(0.9)));
             }
         }
     }
-    Some((info, None, info.confidence))
+    Some((info, info.confidence))
 }
 
 /// `converters.auto._try_digit_unit`
@@ -3016,7 +2778,7 @@ fn try_digit_unit(
     let num_str = py_strip(&num).to_string();
     let unit_str = py_strip(&unit).to_string();
 
-    let Some((info, alt_long, conf)) = resolve_unit(&unit_str, prefer) else {
+    let Some((info, conf)) = resolve_unit(&unit_str, prefer) else {
         return Ok(None);
     };
     let value = match parse_number_string(&num_str, thousands_sep, decimal_sep, Some(lang)) {
@@ -3027,7 +2789,7 @@ fn try_digit_unit(
     Ok(Some(Quantity {
         value,
         unit: Some(info.short.to_string()),
-        unit_long: Some(alt_long.unwrap_or(info.long).to_string()),
+        unit_long: Some(info.long.to_string()),
         kind: Some(info.kind.to_string()),
         confidence: conf,
         raw: String::new(),
@@ -3105,7 +2867,7 @@ fn try_word_unit(
             // ORIGINAL tail, not the lowercased/rstripped one — which is why
             // "five lbs" works (UNITS has "lbs") but "forty-two kgs" does not.
             match resolve_unit(raw_tail, prefer) {
-                Some((info, _alt, _conf)) => (info.short, info.kind),
+                Some((info, _conf)) => (info.short, info.kind),
                 None => return Ok(None),
             }
         }
@@ -3158,6 +2920,11 @@ fn try_word_unit(
 /// The `isinstance(text, str)` guard has no analogue here — `text` is `&str`.
 /// A binding that accepts `PyAny` must reproduce
 /// `Words2NumError("expected str, got %r" % type(text).__name__)` itself.
+///
+/// The language and the separator overrides are checked before anything is
+/// parsed: an unsupported `lang` raises `NotImplementedError` like
+/// `words2num` does (#204), and `thousands_sep == decimal_sep` is refused
+/// (#188). Digit decimals are exact `Decimal`s (#71).
 pub fn auto_parse(
     text: &str,
     lang: &str,
@@ -3165,6 +2932,10 @@ pub fn auto_parse(
     thousands_sep: Option<&str>,
     decimal_sep: Option<&str>,
 ) -> Result<Quantity, W2nError> {
+    let resolved = resolve_lang(lang)?;
+    crate::w2n_formats::check_separators(thousands_sep, decimal_sep)
+        .map_err(|e| W2nError::Words2Num(e.0))?;
+    let lang = resolved.as_str();
     let raw = text;
     let text = py_strip(text);
     if text.is_empty() {
@@ -3336,7 +3107,14 @@ fn match_quantity_at(chars: &[char], pos: usize) -> Option<usize> {
 /// if isinstance(value, float) and value.is_integer(): return str(int(value))
 /// return str(value)
 /// ```
+///
+/// A `Decimal` is written plainly, without trailing fraction zeros or an
+/// exponent: `12.50` → `12.5`, `12345.00` → `12345` — what the float this
+/// used to be printed.
 fn format_number(value: &W2nValue) -> String {
+    if let W2nValue::Dec(d) = value {
+        return d.normalized().to_plain_string();
+    }
     if let W2nValue::Float(f) = value {
         // float.is_integer() is False for inf/nan.
         if f.is_finite() && f.fract() == 0.0 {
@@ -3426,9 +3204,10 @@ fn format_quantity(q: &Quantity, expand: bool) -> String {
 /// Port of `converters.auto.auto_parse_sentence`.
 ///
 /// Walks free text and rewrites every quantity expression in place. A match
-/// that `auto_parse` rejects with `Words2NumError` is left verbatim — but a
-/// `KeyError` (see [`W2nError::Key`]) propagates, exactly as in Python, where
-/// `_replace` only catches `Words2NumError`.
+/// that `auto_parse` rejects with `Words2NumError` is left verbatim. The
+/// language and the separator overrides are checked once, up front, so an
+/// unsupported `lang` or `thousands_sep == decimal_sep` raises instead of
+/// leaving every span untouched (#188, #204).
 pub fn auto_parse_sentence(
     text: &str,
     lang: &str,
@@ -3437,6 +3216,9 @@ pub fn auto_parse_sentence(
     decimal_sep: Option<&str>,
     expand: bool,
 ) -> Result<String, W2nError> {
+    resolve_lang(lang)?;
+    crate::w2n_formats::check_separators(thousands_sep, decimal_sep)
+        .map_err(|e| W2nError::Words2Num(e.0))?;
     let chars: Vec<char> = text.chars().collect();
     let mut out = String::new();
     let mut i = 0usize;
@@ -3555,7 +3337,7 @@ mod tests {
     fn auto_parse_currency_and_units() {
         let prefer = HashMap::new();
         let q = auto_parse("$12.50", "en", &prefer, None, None).unwrap();
-        assert_eq!(q.value, W2nValue::Float(12.5));
+        assert_eq!(q.value, W2nValue::Dec(BigDecimal::from_str("12.50").unwrap()));
         assert_eq!(q.unit.as_deref(), Some("USD"));
         assert_eq!(q.kind.as_deref(), Some("currency"));
 
@@ -3566,11 +3348,11 @@ mod tests {
         let q = auto_parse("$5bn", "en", &prefer, None, None).unwrap();
         assert_eq!(q.value, int(5_000_000_000));
 
-        // KeyError escapes for an invalid scale suffix.
-        assert_eq!(
+        // An unknown scale suffix is a Words2NumError, not a KeyError (#194).
+        assert!(matches!(
             auto_parse("$5kn", "en", &prefer, None, None),
-            Err(W2nError::Key("kn".to_string()))
-        );
+            Err(W2nError::Words2Num(_))
+        ));
     }
 
     #[test]
@@ -3682,5 +3464,111 @@ mod digits_tests {
         );
         assert_eq!(s("una llamada", "es", "cardinal", false).unwrap(), "una llamada");
         assert_eq!(s("ciento uno", "es", "cardinal", false).unwrap(), "101");
+    }
+}
+
+/// The October 2026 audit fixes to `auto_parse` / `auto_parse_sentence`.
+#[cfg(test)]
+mod auto_parse_audit_tests {
+    use super::*;
+
+    fn q(text: &str, lang: &str) -> Result<Quantity, W2nError> {
+        auto_parse(text, lang, &HashMap::new(), None, None)
+    }
+    fn sent(text: &str) -> String {
+        auto_parse_sentence(text, "en", &HashMap::new(), None, None, false).unwrap()
+    }
+    fn dec(s: &str) -> W2nValue {
+        W2nValue::Dec(BigDecimal::from_str(s).unwrap())
+    }
+    fn int(n: i64) -> W2nValue {
+        W2nValue::Int(BigInt::from(n))
+    }
+
+    /// #71: digit decimals are exact and scale suffixes shift the point.
+    #[test]
+    fn digit_decimals_are_exact() {
+        assert_eq!(q("$4.1bn", "en").unwrap().value, int(4_100_000_000));
+        assert_eq!(q("$1.005k", "en").unwrap().value, int(1005));
+        assert_eq!(q("$1.2345k", "en").unwrap().value, dec("1234.5"));
+        assert_eq!(sent("cost $4.1bn total"), "cost 4100000000 USD total");
+        assert_eq!(sent("$12345678901234567.89"), "12345678901234567.89 USD");
+        assert_eq!(sent("Pay $12.50 now"), "Pay 12.5 USD now");
+    }
+
+    /// #194: "n" spellings of the large scales, and no KeyError.
+    #[test]
+    fn scale_suffix_spellings() {
+        assert_eq!(q("$5Mn", "en").unwrap().value, int(5_000_000));
+        assert_eq!(q("$5TN", "en").unwrap().value, int(5_000_000_000_000));
+        assert_eq!(q("$5BN", "en").unwrap().value, int(5_000_000_000));
+        assert!(matches!(q("$5kn", "en"), Err(W2nError::Words2Num(_))));
+        assert_eq!(sent("it cost $5kn today"), "it cost $5kn today");
+    }
+
+    /// #53: a dot decimal survives a comma-decimal locale.
+    #[test]
+    fn dot_decimal_in_comma_locale() {
+        assert_eq!(q("3.14 m", "fr").unwrap().value, dec("3.14"));
+        assert_eq!(q("2.5%", "fr").unwrap().value, dec("2.5"));
+    }
+
+    /// #54: a hyphenated locale uses its own separators.
+    #[test]
+    fn hyphenated_locale() {
+        let v = q("1.234,56 \u{20ac}", "pt-BR").unwrap();
+        assert_eq!(v.value, dec("1234.56"));
+        assert_eq!(v.unit.as_deref(), Some("EUR"));
+    }
+
+    /// #188: identical separator overrides raise, even in sentence mode.
+    #[test]
+    fn identical_separators_raise() {
+        let p = HashMap::new();
+        assert!(matches!(
+            auto_parse("$1,5", "en", &p, Some(","), Some(",")),
+            Err(W2nError::Words2Num(_))
+        ));
+        assert!(matches!(
+            auto_parse_sentence("pay $1,5 now", "en", &p, Some(","), Some(","), false),
+            Err(W2nError::Words2Num(_))
+        ));
+    }
+
+    /// #204: an unsupported language raises NotImplementedError up front.
+    #[test]
+    fn unknown_lang_raises() {
+        let p = HashMap::new();
+        assert!(matches!(q("$5", "xx"), Err(W2nError::NotImplemented(_))));
+        assert!(matches!(q("forty", "xx"), Err(W2nError::NotImplemented(_))));
+        assert!(matches!(
+            auto_parse_sentence("forty two kg", "xx", &p, None, None, false),
+            Err(W2nError::NotImplemented(_))
+        ));
+    }
+
+    /// #203: `prefer` swaps the whole unit, and only for a real reading.
+    #[test]
+    fn prefer_swaps_the_unit() {
+        let mut p = HashMap::new();
+        p.insert("m".to_string(), "minute".to_string());
+        let v = auto_parse("5m", "en", &p, None, None).unwrap();
+        assert_eq!(v.unit.as_deref(), Some("min"));
+        assert_eq!(v.unit_long.as_deref(), Some("minute"));
+        assert_eq!(v.kind.as_deref(), Some("time"));
+        assert_eq!(
+            auto_parse_sentence("ran 5m", "en", &p, None, None, false).unwrap(),
+            "ran 5 min"
+        );
+        p.insert("m".to_string(), "mile".to_string());
+        assert_eq!(auto_parse("5m", "en", &p, None, None).unwrap().unit.as_deref(), Some("mi"));
+        // Not a reading of "m": ignored, the metre stands.
+        for target in ["kg", "bogus"] {
+            p.insert("m".to_string(), target.to_string());
+            let v = auto_parse("5m", "en", &p, None, None).unwrap();
+            assert_eq!(v.unit.as_deref(), Some("m"));
+            assert_eq!(v.unit_long.as_deref(), Some("meter"));
+            assert_eq!(v.kind.as_deref(), Some("length"));
+        }
     }
 }
