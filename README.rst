@@ -61,8 +61,8 @@ The inverse of `num2words2 <https://github.com/gladiaio/num2words2>`_.
 
 ``words2num2`` parses spoken-form numbers — ``"forty-two"``,
 ``"trois cent quatre"``, ``"二十三"`` — and returns numeric values.
-It mirrors num2words2's locale list (**100+ languages, 120 dispatch
-entries**) and adds a free-text *auto-parse* mode that handles
+It mirrors num2words2's locale list (**100+ languages, 172 language
+keys**) and adds a free-text *auto-parse* mode that handles
 currencies, units, configurable thousands/decimal separators, and
 ASR/LLM-style mixed text.
 
@@ -155,12 +155,16 @@ conversion engine is compiled in, so you do *not* need the num2words2 package).
 Prebuilt wheels are published for:
 
 * **Linux** — x86_64 and aarch64 (manylinux2014)
-* **macOS** — Apple Silicon (arm64); Intel (x86_64) from a later release
+* **macOS** — Apple Silicon (arm64) and Intel (x86_64)
 * **Windows** — x86_64
 
-On any other platform (or an older release without a matching wheel), pip
-falls back to the source distribution and builds the extension locally — this
-needs a **stable Rust toolchain** (`rustup <https://rustup.rs>`_); nothing else.
+The wheels are CPython ``abi3`` wheels: one per platform serves every CPython
+3.10+. **PyPy** (3.11+) is supported from source only: it cannot load ``abi3``
+wheels, so pip builds the source distribution, and CI runs the full test suite
+on PyPy that way. On any other platform (or an older release without a
+matching wheel), pip also falls back to the source distribution and builds the
+extension locally — this needs a **stable Rust toolchain**
+(`rustup <https://rustup.rs>`_); nothing else.
 
 **Arch Linux / Manjaro (AUR):**
 
@@ -441,23 +445,41 @@ Command line
     42
     $ words2num2 "trois cent quatre" --lang=fr
     304
+    $ words2num2 --lang fr trois cent quatre
+    304
     $ words2num2 "twenty-third" --to=ordinal
     23
+    $ words2num2 "forty zoot"
+    words2num2: error: unrecognized token 'zoot' in 'forty zoot'
+
+An unparseable input or an unsupported ``--lang``/``--to`` prints one line on
+stderr and exits with status 1.
 
 Supported locales
 -----------------
 
-``words2num2`` mirrors num2words2's locale list — **120 dispatch
-entries** including:
+``words2num2`` accepts every language key of the embedded num2words2
+renderer — **172 keys**, as returned by ``supported_langs()``:
 
-  af, am, ar, as, az, ba, be, bg, bn, bo, br, bs, ca, ce, cs, cy, da,
-  de, el, en, en_IN, en_NG, eo, es, es_CO, es_CR, es_GT, es_NI, es_VE,
-  et, eu, fa, fi, fo, fr, fr_BE, fr_CH, fr_DZ, gl, gu, ha, haw, he, hi,
-  hr, ht, hu, hy, id, is, it, ja, jw, ka, kk, km, kn, ko, kz, la, lb,
-  ln, lo, lt, lv, mg, mi, mk, ml, mn, mr, ms, mt, my, ne, nl, nn, no,
-  oc, pa, pl, ps, pt, pt_BR, ro, ru, sa, sd, si, sk, sl, sn, so, sq,
-  sr, su, sv, sw, ta, te, tet, tg, th, tk, tl, tr, tt, uk, ur, uz, vi,
-  wo, yi, yo, zh, zh_CN, zh_HK, zh_TW
+  af, am, ar, as, az, ba, ban, be, bg, bm, bn, bo, br, bs, ca, ce, ceb,
+  ckb, cn, cnh, cs, cy, cz, da, de, dk, dv, el, en, en_AERO,
+  en_Aero_FAA, en_Aero_ICAO, en_Aero_NATO, en_Aero_USN, en_Aero_US_Army,
+  en_Aero_US_Navy, en_IN, en_NE, en_NG, en_NP, en_aero_icao,
+  en_x_aero_icao, eo, es, es_CO, es_CR, es_GT, es_HN, es_NI, es_VE, et,
+  eu, fa, ff, fi, fil, fo, fr, fr_BE, fr_CH, fr_DZ, gl, gu, ha, haw, he,
+  hi, hmn, hr, ht, hu, hy, id, is, it, ja, jp, jv, jw, ka, ki, kk, km,
+  kn, ko, kok, ksw, ku, ky, kz, la, lb, lg, lij, ln, lo, lt, lus, lv,
+  mg, mi, miz, mk, ml, mn, mr, ms, mt, my, nb, ne, nl, nn, no, oc, om,
+  or, pa, pap, pl, pli, ps, pt, pt_BR, rm, rm_puter, rm_surmiran,
+  rm_sursilv, rm_sutsilv, rm_vallader, ro, ru, rw, sa, sd, si, sk, sl,
+  sn, so, sq, sr, sr_Cyrl, sr_Latn, su, sv, sw, ta, te, tet, tg, th, ti,
+  tk, tl, tr, tt, uk, ur, uz, uz_Cyrl, uz_cyr, vi, wo, xh, yi, yo, zh,
+  zh_CN, zh_HK, zh_TW, zu
+
+Codes are case-insensitive, ``-`` and ``_`` are interchangeable, unknown
+region subtags fall back to the base language (``en-US`` → ``en``) and ISO
+639-2 codes are accepted (``eng``, ``fra``). Language names (``"swedish"``)
+are not, and raise ``NotImplementedError``.
 
 Aliases: ``jp`` → ``ja``, ``cn`` → ``zh_CN``.
 
@@ -471,28 +493,31 @@ enhancements.
 Conversion types
 ~~~~~~~~~~~~~~~~
 
-The ``to=`` parameter accepts ``cardinal``, ``ordinal``, ``ordinal_num``,
-``year``, and ``currency`` — same set as ``num2words2`` — plus ``digits``
-for a number read one digit at a time. ``digits`` returns an ``int``, so
-leading zeros are dropped (``"zero zero seven"`` → ``7``); convert the text
-with ``words2num_sentence`` to keep them (``"007"``).
+The ``to=`` parameter (``words2num`` and ``words2num_sentence``) accepts
+``cardinal``, ``ordinal``, ``ordinal_num``, ``year``, ``currency`` and
+``digits`` (listed in ``words2num2.CONVERTER_TYPES``); anything else raises
+``NotImplementedError``. ``digits`` reads a number spoken digit by digit and
+concatenates it (``"two seven five"`` → ``275``). It returns an ``int``, so
+leading zeros are dropped (``"zero seven"`` → ``7``); sentence mode keeps them
+(``words2num_sentence("zero seven")`` → ``"07"``).
 
 How it works
 ------------
 
-* English (``lang_EN``) ships a hand-written recursive-descent parser
-  that handles cardinals, ordinals, decimals, negatives, scale words to
-  *centillion*, year mode, "and" connectors, and hyphenation.
-* Every other locale uses ``Words2Num_Base``, which lazily builds a
-  ``{normalized_words: integer}`` table by calling ``num2words2`` for
-  each integer in a configurable range (defaults to ``-1..10000``).
-  This guarantees correctness for the lookup window for every locale
-  supported upstream — at the cost of out-of-range values raising
-  ``Words2NumError`` until a hand-written parser is added.
+All parsing lives in the compiled Rust core (``rust/words2num2-core``,
+also published on crates.io); the ``words2num2`` Python package is a thin
+binder over it.
 
-Hand-written grammar parsers can be added incrementally per locale by
-overriding ``to_cardinal`` / ``to_ordinal`` in the corresponding
-``words2num2/lang_XX.py`` module — same pattern as num2words2.
+* English has a hand-written recursive-descent parser that handles
+  cardinals, ordinals, decimals, negatives, scale words to *centillion*,
+  year mode, "and" connectors, and hyphenation.
+* Every other language is read through a reverse lookup table, built lazily
+  on first use by rendering ``-1..10000`` with the embedded num2words2
+  renderer (``num2words2-core``) and inverting it. Larger numbers are
+  composed from the language's scale words (thousand, million, …), derived
+  the same way.
+
+To improve a language, change the core — see ``CONTRIBUTING.md``.
 
 Public API
 ----------
@@ -505,10 +530,10 @@ Function / class                   Purpose
 ``auto_parse(text, ...)``          Parse a single quantity (number + unit).
 ``auto_parse_sentence(text, ...)`` Replace every quantity in running text.
 ``parse_number_string(text, ...)`` Digit-form parser with separators.
+``normalize(text)``                The text normalization applied before lookup.
+``supported_langs()``              The accepted language keys.
+``CONVERTER_TYPES``                The accepted ``to=`` values.
 ``Quantity``                       Dataclass returned by ``auto_parse``.
-``UNITS`` / ``CURRENCIES``         Registries of recognized units and currencies.
-``NUMBER_FORMAT_DEFAULTS``         Per-locale separator defaults.
-``CONVERTER_CLASSES``              Per-locale converter registry.
 ``Words2NumError``                 Raised when input cannot be parsed.
 ================================== =================================================
 
@@ -524,27 +549,32 @@ Development
     cd words2num2
     make install-dev
     make test          # pytest
-    make lint          # black + flake8 + isort
+    make lint          # black --check + isort --check + flake8 + mypy (what CI runs)
     make format        # apply black + isort
+
+Building from a checkout compiles the Rust core, so a stable Rust toolchain
+is needed (``make install-dev`` runs ``pip install -e .`` through maturin).
 
 Releasing
 ~~~~~~~~~
 
-Every push of a tag matching ``v*`` triggers GitHub Actions to:
+Releases are cut by bumping the version, not by hand-tagging:
 
-1. Build sdist + wheel.
-2. Run the test installation in a clean environment.
-3. Generate release notes and create a GitHub Release.
-4. Publish to PyPI via Trusted Publishing (no token in CI).
+1. Bump ``version`` in ``pyproject.toml`` **and** ``words2num2/_version.py``
+   (they must agree) and merge to ``main``.
+2. ``auto-release.yml`` sees that the version is not on PyPI, tags the commit
+   ``vX.Y.Z`` (or reuses the tag if an earlier attempt failed), and dispatches
+   ``release.yml``, ``crates.yml`` and ``aur-publish.yml`` on it.
+3. ``release.yml`` checks that the tag, ``pyproject.toml`` and ``_version.py``
+   agree, builds the wheels and the sdist, installs each native wheel and the
+   sdist in a clean environment and runs the test suite against them, and only
+   then publishes to PyPI (Trusted Publishing, no token in CI) and creates the
+   GitHub Release.
 
-To cut a release::
-
-    git tag vX.Y.Z
-    git push origin vX.Y.Z
-
-A manual fallback workflow (``Publish to PyPI (manual)``) is available
-via ``gh workflow run`` and uses ``PYPI_API_TOKEN`` /
-``TEST_PYPI_API_TOKEN`` repo secrets.
+A failed release is retried by re-running ``auto-release.yml`` (Actions →
+Auto release → Run workflow): PyPI, not the tag, decides what is released.
+Pushing a ``vX.Y.Z`` tag by hand still runs ``release.yml``, under the same
+version check.
 
 Changelog
 ---------

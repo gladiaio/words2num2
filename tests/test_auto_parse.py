@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """Tests for auto_parse, auto_parse_sentence, parse_number_string."""
+
 from decimal import Decimal
 
 import pytest
@@ -12,7 +13,6 @@ from words2num2 import (
 )
 from words2num2.base import Words2NumError
 
-
 # ---------------------------------------------------------------------------
 # Currency
 # ---------------------------------------------------------------------------
@@ -24,7 +24,12 @@ from words2num2.base import Words2NumError
         ("$12.50", Decimal("12.50"), "USD", {}),
         ("$12,345.00", Decimal("12345.00"), "USD", {}),
         ("€42", 42, "EUR", {}),
-        ("€12,50", Decimal("12.50"), "EUR", {"lang": "de"}),  # comma decimal in DE locale
+        (
+            "€12,50",
+            Decimal("12.50"),
+            "EUR",
+            {"lang": "de"},
+        ),  # comma decimal in DE locale
         ("£1,000.99", Decimal("1000.99"), "GBP", {}),
         ("¥500", 500, "JPY", {}),
         ("USD 100", 100, "USD", {}),
@@ -154,9 +159,7 @@ def test_parse_number_string_invalid():
 
 
 def test_sentence_currency_and_unit():
-    out = auto_parse_sentence(
-        "The package weighs 5kg and costs $12.50."
-    )
+    out = auto_parse_sentence("The package weighs 5kg and costs $12.50.")
     assert "5 kg" in out
     assert "12.5 USD" in out
 
@@ -201,6 +204,7 @@ def test_sentence_percent_no_space():
 )
 def test_pluralize(value, singular, expected):
     from words2num2.converters.auto import pluralize
+
     assert pluralize(singular, value) == expected
 
 

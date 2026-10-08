@@ -8,9 +8,9 @@ from decimal import Decimal
 
 import pytest
 
-num2words2 = pytest.importorskip("num2words2")
-
 from words2num2 import words2num, words2num_sentence
+
+num2words2 = pytest.importorskip("num2words2")
 
 
 @pytest.mark.parametrize(
@@ -68,9 +68,9 @@ from words2num2 import supported_langs  # noqa: E402
 # core disagree on the script, the language cannot round-trip — see #14.
 # This list may shrink; it must never grow.
 _NATIVE_SCRIPT = {
-    "ti": (0x1200, 0x137F),   # Ge'ez
-    "ky": (0x0400, 0x04FF),   # Cyrillic
-    "or": (0x0B00, 0x0B7F),   # Odia
+    "ti": (0x1200, 0x137F),  # Ge'ez
+    "ky": (0x0400, 0x04FF),  # Cyrillic
+    "or": (0x0B00, 0x0B7F),  # Odia
     "ckb": (0x0600, 0x06FF),  # Arabic
     "kok": (0x0900, 0x097F),  # Devanagari
 }
@@ -102,15 +102,17 @@ def _roundtrip_param(lang):
             marks=pytest.mark.xfail(
                 strict=True,
                 reason="gladiaio/words2num2#14 — the installed num2words2 "
-                       "and the embedded num2words2-core render this "
-                       "language in different scripts",
+                "and the embedded num2words2-core render this "
+                "language in different scripts",
             ),
         )
     return lang
 
 
 @pytest.mark.slow
-@pytest.mark.parametrize("lang", [_roundtrip_param(code) for code in sorted(supported_langs())])
+@pytest.mark.parametrize(
+    "lang", [_roundtrip_param(code) for code in sorted(supported_langs())]
+)
 def test_roundtrip_every_language(lang):
     """num2words2 -> words2num2 is the identity for every advertised language.
 
@@ -127,14 +129,14 @@ def test_roundtrip_every_language(lang):
     [
         # Each of these used to be swallowed by the two-character prefix
         # fallback and answered by an unrelated language.
-        "ban",   # was -> ba  (Bashkir)
-        "ceb",   # was -> ce  (Chechen)
-        "cnh",   # was -> cn  (Chinese)
-        "fil",   # was -> fi  (Finnish)
-        _roundtrip_param("kok"),   # was -> ko  (Korean)
-        "miz",   # was -> mi  (Maori)
-        "pap",   # was -> pa  (Punjabi)
-        "pli",   # was -> pl  (Polish)
+        "ban",  # was -> ba  (Bashkir)
+        "ceb",  # was -> ce  (Chechen)
+        "cnh",  # was -> cn  (Chinese)
+        "fil",  # was -> fi  (Finnish)
+        _roundtrip_param("kok"),  # was -> ko  (Korean)
+        "miz",  # was -> mi  (Maori)
+        "pap",  # was -> pa  (Punjabi)
+        "pli",  # was -> pl  (Polish)
         # Script variants that were collapsed onto their base language.
         "sr_Latn",
         "uz_Cyrl",

@@ -27,13 +27,33 @@ jobs:
     outputs:
       version: ${{ steps.v.outputs.version }}
     steps:
+      - uses: actions/checkout@v4
       - id: v
+        env:
+          INPUT_VERSION: ${{ github.event.inputs.version }}
         run: |
-          if [ -n "${{ github.event.inputs.version }}" ]; then
-            echo "version=${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          if [ -n "$INPUT_VERSION" ]; then
+            ver="$INPUT_VERSION"
           else
-            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+            ver="${GITHUB_REF_NAME#v}"
           fi
+          # The wheel's metadata comes from pyproject (rewritten below) but
+          # `words2num2.__version__` and `words2num2 --version` read the static
+          # _version.py, which maturin does not regenerate. Refuse to build a
+          # release whose three versions disagree instead of shipping a wheel
+          # that misreports itself.
+          py=$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')
+          pkg=$(python3 -c 'import runpy; print(runpy.run_path("words2num2/_version.py")["__version__"])')
+          if [ "$ver" != "$py" ] || [ "$ver" != "$pkg" ]; then
+            echo "::error::release $ver, but pyproject.toml says $py and words2num2/_version.py says $pkg (checked out at $GITHUB_REF_NAME): bump both and tag that commit"
+            exit 1
+          fi
+          if [ "$GITHUB_REF_TYPE" = "tag" ] && [ "$GITHUB_REF_NAME" != "v$ver" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match version $ver"
+            exit 1
+          fi
+          echo "version=$ver" >> "$GITHUB_OUTPUT"
 
   # ---------------------------------------------------------------------------
   build:
@@ -105,9 +125,85 @@ jobs:
           path: dist/*.tar.gz
 
   # ---------------------------------------------------------------------------
+  # Install each built wheel (never the source tree) and run the test suite
+  # against it before anything is published. The two cross-compiled wheels
+  # (x86_64-apple-darwin built on arm64, aarch64-linux built on x86_64) cannot
+  # be imported on these hosted runners, so they are not exercised here; every
+  # native wheel and the sdist are.
+  test-wheels:
+    name: test wheel · ${{ matrix.platform.target }} · py${{ matrix.python }}
+    needs: [version, build]
+    runs-on: ${{ matrix.platform.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - { os: macos-14,       target: aarch64-apple-darwin }
+          - { os: ubuntu-latest,  target: x86_64-unknown-linux-gnu }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc }
+        # abi3: one wheel for every CPython >= 3.10; test both ends.
+        python: ['3.10', '3.14']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          allow-prereleases: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheels-${{ matrix.platform.target }}
+          path: dist
+      - name: Install the wheel
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install pytest num2words2
+          python -m pip install --only-binary :all: --no-index --find-links dist words2num2
+      - name: Run the test suite against the installed wheel
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Run from a copy of tests/ outside the checkout: from the repo root
+          # the source words2num2/ (which has no compiled _rust) would shadow
+          # the installed wheel.
+          cp -r tests REFERENCE.md "$RUNNER_TEMP/"
+          cd "$RUNNER_TEMP"
+          python - <<'PY'
+          import words2num2
+          print("testing", words2num2.__file__, words2num2.__version__)
+          assert words2num2.__version__ == "${{ needs.version.outputs.version }}", words2num2.__version__
+          PY
+          python -m pytest tests -q
+
+  test-sdist:
+    name: test sdist (build from source)
+    needs: sdist
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/download-artifact@v4
+        with:
+          name: sdist
+          path: dist
+      - name: Build and install from the sdist, run the tests
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install pytest num2words2
+          python -m pip install dist/*.tar.gz
+          cp -r tests REFERENCE.md "$RUNNER_TEMP/"
+          cd "$RUNNER_TEMP"
+          python -m pytest tests -q
+
+  # ---------------------------------------------------------------------------
   publish-pypi:
     name: Publish wheels + sdist to PyPI
-    needs: [build, sdist]
+    needs: [build, sdist, test-wheels, test-sdist]
     runs-on: ubuntu-latest
     environment:
       name: pypi
@@ -133,7 +229,7 @@ jobs:
   # ---------------------------------------------------------------------------
   github-release:
     name: Attach all wheels to the GitHub Release
-    needs: [build, sdist]
+    needs: [build, sdist, test-wheels, test-sdist]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:

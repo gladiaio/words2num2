@@ -273,6 +273,7 @@ def test_explicit_year_mode_unchanged(text, expected):
 # Decimal('2000'), and a bare "point" returned Decimal('0').
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.parametrize(
     "text",
     [

@@ -599,24 +599,78 @@ fn is_known_lang(k: &str) -> bool {
     converter_langs().contains(&k)
 }
 
-/// Port of `words2num2._resolve_lang`.
+/// ISO 639-2 three-letter codes (bibliographic and terminological forms) of
+/// the two-letter keys, for callers that pass `"eng"`, `"fra"` or `"ger"`.
 ///
-/// ```python
-/// if lang in CONVERTER_CLASSES: return lang
-/// normalized = lang.replace("-", "_")
-/// if normalized in CONVERTER_CLASSES: return normalized
-/// parts = normalized.split("_")
-/// if len(parts) >= 2:
-///     candidate = "{}_{}".format(parts[0].lower(), parts[1].upper())
-///     if candidate in CONVERTER_CLASSES: return candidate
-///     if parts[0] in CONVERTER_CLASSES: return parts[0]
-/// if normalized[:2] in CONVERTER_CLASSES: return normalized[:2]
-/// raise NotImplementedError("language %r is not supported" % lang)
-/// ```
+/// This replaces the old "first two characters" fallback, which got `"eng"`
+/// right by accident and everything else wrong: `"swedish"` resolved to `sw`
+/// (Swahili), `"estonian"` to `es`, `"kazakh"` to `ka` (Georgian) and `"enx"`
+/// to `en`, so input in the language the caller meant raised, or a word of the
+/// accidental language was read as a number. An explicit table only answers
+/// for codes that really name the language.
+const ISO_639_2_ALIASES: &[(&str, &str)] = &[
+    ("afr", "af"), ("amh", "am"), ("ara", "ar"), ("asm", "as"), ("aze", "az"),
+    ("bak", "ba"), ("bel", "be"), ("bul", "bg"), ("bam", "bm"), ("ben", "bn"),
+    ("bod", "bo"), ("tib", "bo"), ("bre", "br"), ("bos", "bs"), ("cat", "ca"),
+    ("che", "ce"), ("ces", "cs"), ("cze", "cs"), ("cym", "cy"), ("wel", "cy"),
+    ("dan", "da"), ("deu", "de"), ("ger", "de"), ("div", "dv"), ("ell", "el"),
+    ("gre", "el"), ("eng", "en"), ("epo", "eo"), ("spa", "es"), ("est", "et"),
+    ("eus", "eu"), ("baq", "eu"), ("fas", "fa"), ("per", "fa"), ("ful", "ff"),
+    ("fin", "fi"), ("fao", "fo"), ("fra", "fr"), ("fre", "fr"), ("glg", "gl"),
+    ("guj", "gu"), ("hau", "ha"), ("heb", "he"), ("hin", "hi"), ("hrv", "hr"),
+    ("hat", "ht"), ("hun", "hu"), ("hye", "hy"), ("arm", "hy"), ("ind", "id"),
+    ("isl", "is"), ("ice", "is"), ("ita", "it"), ("jpn", "ja"), ("jav", "jv"),
+    ("kat", "ka"), ("geo", "ka"), ("kik", "ki"), ("kaz", "kk"), ("khm", "km"),
+    ("kan", "kn"), ("kor", "ko"), ("kur", "ku"), ("kir", "ky"), ("lat", "la"),
+    ("ltz", "lb"), ("lug", "lg"), ("lin", "ln"), ("lao", "lo"), ("lit", "lt"),
+    ("lav", "lv"), ("mlg", "mg"), ("mri", "mi"), ("mao", "mi"), ("mkd", "mk"),
+    ("mac", "mk"), ("mal", "ml"), ("mon", "mn"), ("mar", "mr"), ("msa", "ms"),
+    ("may", "ms"), ("mlt", "mt"), ("mya", "my"), ("bur", "my"), ("nob", "nb"),
+    ("nep", "ne"), ("nld", "nl"), ("dut", "nl"), ("nno", "nn"), ("nor", "no"),
+    ("oci", "oc"), ("orm", "om"), ("ori", "or"), ("pan", "pa"), ("pol", "pl"),
+    ("pus", "ps"), ("por", "pt"), ("roh", "rm"), ("ron", "ro"), ("rum", "ro"),
+    ("rus", "ru"), ("kin", "rw"), ("san", "sa"), ("snd", "sd"), ("sin", "si"),
+    ("slk", "sk"), ("slo", "sk"), ("slv", "sl"), ("sna", "sn"), ("som", "so"),
+    ("sqi", "sq"), ("alb", "sq"), ("srp", "sr"), ("sun", "su"), ("swe", "sv"),
+    ("swa", "sw"), ("tam", "ta"), ("tel", "te"), ("tgk", "tg"), ("tha", "th"),
+    ("tir", "ti"), ("tuk", "tk"), ("tgl", "tl"), ("tur", "tr"), ("tat", "tt"),
+    ("ukr", "uk"), ("urd", "ur"), ("uzb", "uz"), ("vie", "vi"), ("wol", "wo"),
+    ("xho", "xh"), ("yid", "yi"), ("yor", "yo"), ("zho", "zh"), ("chi", "zh"),
+    ("zul", "zu"),
+];
+
+/// The supported key `code` names, ignoring case, or its ISO 639-2 alias.
 ///
-/// `normalized[:2]` is a *character* slice and never panics on a short string
-/// — `_resolve_lang("e")` falls through to the raise, it does not blow up.
-/// That last rule is why `"eng"` resolves to `"en"` and `"en_US"` to `"en"`.
+/// Case-insensitive so `"EN"`, `"Fr"` and `"sr_latn"` resolve like `"en"`,
+/// `"fr"` and `"sr_Latn"`. Two keys differ only by case (`en_Aero_ICAO` and
+/// `en_aero_icao`); both name the same renderer, so taking the first is safe.
+fn known_lang_ci(code: &str) -> Option<&'static str> {
+    let lower = code.to_lowercase();
+    if let Some(k) = converter_langs()
+        .iter()
+        .copied()
+        .find(|k| k.to_lowercase() == lower)
+    {
+        return Some(k);
+    }
+    ISO_639_2_ALIASES
+        .iter()
+        .find(|(alias, _)| *alias == lower)
+        .and_then(|(_, key)| static_lang_key(key))
+}
+
+/// Resolve a caller's language code to a supported key.
+///
+/// 1. An exact key (`"en"`, `"sr_Latn"`, `"en_Aero_FAA"`).
+/// 2. The same with `-` read as `_` (`"pt-BR"`).
+/// 3. A key that matches ignoring case, or an ISO 639-2 code (`"EN"`,
+///    `"pt_br"`, `"eng"`, `"fra"`).
+/// 4. Unknown trailing subtags dropped one at a time, each retried as in 3:
+///    `"en-US"` -> `en`, `"EN_us"` -> `en`, `"sr-Latn-RS"` -> `sr_Latn`.
+///
+/// Anything else, including language *names* (`"swedish"`, `"german"`), is
+/// `NotImplementedError`. There is deliberately no "first two characters"
+/// guess: it turned `"swedish"` into Swahili and `"estonian"` into Spanish.
 pub fn resolve_lang(lang: &str) -> Result<String, W2nError> {
     if is_known_lang(lang) {
         return Ok(lang.to_string());
@@ -625,20 +679,14 @@ pub fn resolve_lang(lang: &str) -> Result<String, W2nError> {
     if is_known_lang(&normalized) {
         return Ok(normalized);
     }
-    // Python's str.split("_") keeps empty fields, unlike split(None).
     let parts: Vec<&str> = normalized.split('_').collect();
-    if parts.len() >= 2 {
-        let candidate = format!("{}_{}", parts[0].to_lowercase(), parts[1].to_uppercase());
-        if is_known_lang(&candidate) {
-            return Ok(candidate);
+    // Empty fields ("en__US", "_en") are not subtags: no guessing there.
+    if !parts.iter().any(|p| p.is_empty()) {
+        for n in (1..=parts.len()).rev() {
+            if let Some(k) = known_lang_ci(&parts[..n].join("_")) {
+                return Ok(k.to_string());
+            }
         }
-        if is_known_lang(parts[0]) {
-            return Ok(parts[0].to_string());
-        }
-    }
-    let two: String = normalized.chars().take(2).collect();
-    if is_known_lang(&two) {
-        return Ok(two);
     }
     Err(W2nError::NotImplemented(format!(
         "language {} is not supported",
@@ -1437,16 +1485,7 @@ pub fn words2num(
     let resolved = resolve_lang(lang)?;
     let converter = converter_for(&resolved);
 
-    // `CONVERTER_TYPES` in `words2num2/__init__.py`. An unknown `to` is a
-    // `NotImplementedError`, distinct from the reverse table declining a word.
-    const CONVERTER_TYPES: [&str; 6] =
-        ["cardinal", "ordinal", "ordinal_num", "year", "currency", "digits"];
-    if !CONVERTER_TYPES.contains(&to) {
-        return Err(W2nError::NotImplemented(format!(
-            "conversion type {} unsupported",
-            py_repr_str(to)
-        )));
-    }
+    check_converter_type(to)?;
 
     // `getattr(converter, "to_{to}")(text)`. The English grammar path returns
     // its native value directly; every other path is `int`/`float` and is
@@ -2898,6 +2937,25 @@ fn en_decade(word: Option<&str>) -> bool {
     })
 }
 
+/// The `to=` modes [`words2num`] and [`words2num_sentence`] accept.
+pub const CONVERTER_TYPES: [&str; 6] =
+    ["cardinal", "ordinal", "ordinal_num", "year", "currency", "digits"];
+
+/// An unknown `to` is a `NotImplementedError`, distinct from the reverse table
+/// declining a word. Shared by the single-token and the sentence entry points
+/// so a typo (`to="cardnal"`) raises in both, rather than the sentence walker
+/// treating every run as "not a number" and handing the text back unchanged.
+fn check_converter_type(to: &str) -> Result<(), W2nError> {
+    if CONVERTER_TYPES.contains(&to) {
+        Ok(())
+    } else {
+        Err(W2nError::NotImplemented(format!(
+            "conversion type {} unsupported",
+            py_repr_str(to)
+        )))
+    }
+}
+
 /// Port of `words2num2.words2num_sentence` → `SentenceConverter.convert`.
 ///
 /// Walks the sentence and, at each position that opens with a real number
@@ -2926,6 +2984,10 @@ pub fn words2num_sentence_opts(
     has_kwargs: bool,
     currency: bool,
 ) -> Result<String, W2nError> {
+    // Validate up front (#201): the walk swallows every per-run error, so an
+    // unsupported `lang` or `to` would otherwise come back as the input text.
+    resolve_lang(lang)?;
+    check_converter_type(to)?;
     if currency {
         let resolved = resolve_lang(lang)?;
         // Walked piece by piece: fr "trente-quatre cents" after "dollars et"
@@ -4402,6 +4464,76 @@ mod tests {
 
     fn int(n: i64) -> W2nValue {
         W2nValue::Int(BigInt::from(n))
+    }
+
+    /// #192: codes are case-insensitive, with `-` or `_`, and unknown
+    /// region subtags fall back to the base language.
+    #[test]
+    fn resolve_lang_ignores_case_issue_192() {
+        for (code, key) in [
+            ("EN", "en"),
+            ("FR", "fr"),
+            ("En", "en"),
+            ("EN-US", "en"),
+            ("en_us", "en"),
+            ("en-us", "en"),
+            ("PT-BR", "pt_BR"),
+            ("pt_br", "pt_BR"),
+            ("SR_LATN", "sr_Latn"),
+            ("sr-Latn-RS", "sr_Latn"),
+            ("ZH-tw", "zh_TW"),
+            ("en_Aero_FAA", "en_Aero_FAA"),
+            ("en_aero_icao", "en_aero_icao"),
+        ] {
+            assert_eq!(resolve_lang(code).unwrap(), key, "{code}");
+        }
+        assert_eq!(
+            words2num("one", "EN", "cardinal").unwrap(),
+            crate::w2n_lang_en::W2nValue::Int(1.into())
+        );
+    }
+
+    /// #197: no "first two characters" guess. Language names and unknown
+    /// three-letter codes are rejected, not read as a different language.
+    #[test]
+    fn resolve_lang_rejects_names_and_prefixes_issue_197() {
+        for code in [
+            "swedish", "estonian", "kazakh", "kannada", "slovak", "latvian", "enx", "english",
+            "e", "", "_en", "en__US",
+        ] {
+            assert!(
+                matches!(resolve_lang(code), Err(W2nError::NotImplemented(_))),
+                "{code} must be rejected, got {:?}",
+                resolve_lang(code)
+            );
+        }
+        // Real ISO 639-2 codes still resolve, terminological and bibliographic.
+        for (code, key) in [("eng", "en"), ("fra", "fr"), ("fre", "fr"), ("deu", "de"),
+                            ("ger", "de"), ("swe", "sv"), ("est", "et"), ("ENG-US", "en")] {
+            assert_eq!(resolve_lang(code).unwrap(), key, "{code}");
+        }
+        // Every alias names a supported key and never shadows one.
+        for (alias, key) in ISO_639_2_ALIASES {
+            assert!(is_known_lang(key), "{alias} -> {key} is not a supported key");
+            assert!(!is_known_lang(alias), "{alias} is itself a key");
+        }
+    }
+
+    /// #201: an unknown `to` raises in sentence mode like in `words2num`.
+    #[test]
+    fn sentence_rejects_unknown_to_issue_201() {
+        for (text, lang, to) in [("twenty five", "en", "bogus"), ("vingt cinq", "fr", "cardnal")] {
+            assert!(
+                matches!(
+                    words2num_sentence(text, lang, to, false),
+                    Err(W2nError::NotImplemented(ref m)) if m.contains("unsupported")
+                ),
+                "{to}"
+            );
+        }
+        for to in CONVERTER_TYPES {
+            assert!(words2num_sentence("twenty five", "en", to, false).is_ok(), "{to}");
+        }
     }
 
     #[test]

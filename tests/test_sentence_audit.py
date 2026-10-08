@@ -72,8 +72,14 @@ def test_79_oh_is_an_interjection(text, expected):
 # #186: long runs of number words are linear, not cubic.
 @pytest.mark.parametrize(
     "lang,word",
-    [("de", "zweitausend"), ("it", "duemila"), ("fr", "deux mille"), ("es", "mil"),
-     ("en", "twenty first"), ("en", "nineteen ninety")],
+    [
+        ("de", "zweitausend"),
+        ("it", "duemila"),
+        ("fr", "deux mille"),
+        ("es", "mil"),
+        ("en", "twenty first"),
+        ("en", "nineteen ninety"),
+    ],
 )
 def test_186_long_number_runs_finish_fast(lang, word):
     text = " ".join([word] * 2000)
@@ -140,10 +146,17 @@ def test_69_punctuation_is_kept(lang, text, expected):
         ("sq", "dyzet e dy", "42"),
         ("bg", "четиридесет и два лева", "42 лева"),
         ("ha", "qqx ɗari biyar hamsin da biyar zzx", "qqx 555 zzx"),
-        ("ha", "qqx miliyan dubu ɗari biyu talatin da huɗu ɗari biyar sittin da bakwai zzx",
-         "qqx 1234567 zzx"),
-        ("lus", "qqx pakhat nuai pahnih za leh sawmthum leh pali sang panga za leh sawmruk "
-                "leh pasarih zzx", "qqx 1234567 zzx"),
+        (
+            "ha",
+            "qqx miliyan dubu ɗari biyu talatin da huɗu ɗari biyar sittin da bakwai zzx",
+            "qqx 1234567 zzx",
+        ),
+        (
+            "lus",
+            "qqx pakhat nuai pahnih za leh sawmthum leh pali sang panga za leh sawmruk "
+            "leh pasarih zzx",
+            "qqx 1234567 zzx",
+        ),
         ("vi", "hai nghìn lẻ bốn", "2004"),
         ("ro", "douăzeci de lei", "20 de lei"),
         ("ro", "douăzeci de mii de lei", "20000 de lei"),
@@ -162,9 +175,16 @@ def test_65_renderer_connectors(lang, text, expected):
 @pytest.mark.parametrize(
     "lang,text,expected",
     [
-        ("en", "hello twelve thousand, three hundred and forty-five world", "hello 12345 world"),
-        ("en", "one million, two hundred and thirty-four thousand, five hundred and sixty-seven",
-         "1234567"),
+        (
+            "en",
+            "hello twelve thousand, three hundred and forty-five world",
+            "hello 12345 world",
+        ),
+        (
+            "en",
+            "one million, two hundred and thirty-four thousand, five hundred and sixty-seven",
+            "1234567",
+        ),
         ("pt_BR", "doze mil, trezentos e quarenta e cinco", "12345"),
         ("en", "two thousand, three hundred people", "2300 people"),
         # Not a lower group after the comma: two numbers.
@@ -261,7 +281,11 @@ def test_183_article_before_scale(lang, text, expected):
 @pytest.mark.parametrize(
     "lang,text,expected",
     [
-        ("ru", "Со скоростью сто двадцати километров в час.", "Со скоростью 120 километров в час."),
+        (
+            "ru",
+            "Со скоростью сто двадцати километров в час.",
+            "Со скоростью 120 километров в час.",
+        ),
         ("ru", "Около трёх тысяч человек.", "Около 3000 человек."),
         ("ru", "двадцати трёх тысяч", "23000"),
         ("uk", "близько трьох тисяч людей", "близько 3000 людей"),
@@ -326,8 +350,12 @@ def test_78_spelling_variants(lang, text, expected):
 # #179: cs inverted unit-a-tens.
 @pytest.mark.parametrize(
     "text,expected",
-    [("pětadvacet korun", "25 korun"), ("dvaadvacet", "22"), ("jednadvacet", "21"),
-     ("dvacet pět korun", "25 korun")],
+    [
+        ("pětadvacet korun", "25 korun"),
+        ("dvaadvacet", "22"),
+        ("jednadvacet", "21"),
+        ("dvacet pět korun", "25 korun"),
+    ],
 )
 def test_179_cs_inverted(text, expected):
     assert s(text, "cs") == expected
@@ -336,8 +364,13 @@ def test_179_cs_inverted(text, expected):
 # #180: ro contracted teens.
 @pytest.mark.parametrize(
     "text,expected",
-    [("șaișpe", "16"), ("paișpe", "14"), ("doișpe lei", "12 lei"), ("unșpe", "11"),
-     ("cinșpe", "15")],
+    [
+        ("șaișpe", "16"),
+        ("paișpe", "14"),
+        ("doișpe lei", "12 lei"),
+        ("unșpe", "11"),
+        ("cinșpe", "15"),
+    ],
 )
 def test_180_ro_contracted_teens(text, expected):
     assert s(text, "ro") == expected

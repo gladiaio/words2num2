@@ -4,13 +4,18 @@ name: Auto release
 # (0.3.4 sat unreleased on main while PyPI still served 0.3.3).
 #
 # On every push to main that touches the version (pyproject.toml or
-# words2num2/_version.py): when pyproject's version has no `v<version>` tag
-# yet and is not on PyPI, it checks that _version.py agrees, tags HEAD
-# `v<version>`, and dispatches release.yml (PyPI + GitHub Release) and
-# crates.yml on that tag. A tag pushed with GITHUB_TOKEN does not trigger the
-# tag workflows itself, so each runs exactly once, from the dispatch.
-# Nothing happens when the version is already tagged or published: merges
-# that do not bump the version are no-ops.
+# words2num2/_version.py), and on a manual run: when the version main declares
+# is not on PyPI, it checks that _version.py agrees, tags HEAD `v<version>`
+# (unless that tag already exists) and dispatches release.yml (PyPI + GitHub
+# Release), crates.yml and aur-publish.yml on that tag. A tag pushed with
+# GITHUB_TOKEN does not trigger the tag workflows itself, so each runs exactly
+# once, from the dispatch.
+#
+# PyPI is the source of truth for "released", not the tag: a release that
+# fails after tagging (0.3.4: two wheel jobs never got a runner) left the tag
+# behind and was never retried. Now a tagged-but-unpublished version is
+# re-dispatched on its existing tag, by the next version-touching push or a
+# manual "Run workflow". Merges that do not bump the version are no-ops.
 
 on:
   push:
@@ -23,7 +28,7 @@ on:
 
 permissions:
   contents: write   # push the tag
-  actions: write    # dispatch release.yml and crates.yml
+  actions: write    # dispatch release.yml, crates.yml and aur-publish.yml
 
 concurrency:
   group: auto-release
@@ -49,21 +54,29 @@ jobs:
             exit 1
           fi
           echo "version=$ver" >> "$GITHUB_OUTPUT"
-          if git rev-parse -q --verify "refs/tags/v$ver" >/dev/null; then
-            echo "v$ver is already tagged: nothing to release."
-            echo "release=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
           code=$(curl -s -o /dev/null -w '%{http_code}' "https://pypi.org/pypi/words2num2/$ver/json")
           if [ "$code" = "200" ]; then
             echo "$ver is already on PyPI: nothing to release."
             echo "release=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+          if [ "$code" != "404" ]; then
+            # A PyPI outage must not be read as "unpublished" (that would
+            # re-dispatch a release) nor as "published" (that would skip one).
+            echo "::error::PyPI answered HTTP $code for $ver: cannot tell whether it is released"
+            exit 1
+          fi
           echo "release=true" >> "$GITHUB_OUTPUT"
+          if git rev-parse -q --verify "refs/tags/v$ver" >/dev/null; then
+            tagged=$(git rev-list -n 1 "v$ver")
+            echo "v$ver is tagged ($tagged) but $ver is not on PyPI: re-dispatching the release on the existing tag."
+            echo "tagged=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "tagged=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Tag v${{ steps.v.outputs.version }}
-        if: steps.v.outputs.release == 'true'
+        if: steps.v.outputs.release == 'true' && steps.v.outputs.tagged != 'true'
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
@@ -78,6 +91,15 @@ jobs:
           VER: ${{ steps.v.outputs.version }}
         run: |
           set -euo pipefail
+          # On a retry, do not stack a second release on one still running.
+          busy=$(gh run list --workflow release.yml --branch "v$VER" --limit 20 \
+            --json status --jq '[.[] | select(.status != "completed")] | length')
+          if [ "$busy" != "0" ]; then
+            echo "A release.yml run for v$VER is still in progress: not dispatching another."
+            exit 0
+          fi
           gh workflow run release.yml --ref "v$VER" -f version="$VER"
           gh workflow run crates.yml --ref "v$VER"
+          # aur-publish waits for the PyPI sdist itself, so it can start now.
+          gh workflow run aur-publish.yml --ref "v$VER" -f version="$VER"
           echo "Release of $VER dispatched: https://github.com/${{ github.repository }}/actions/workflows/release.yml"

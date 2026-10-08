@@ -8,7 +8,7 @@ help:
 	@echo "  install-dev   Install with dev dependencies"
 	@echo "  test          Run the test suite"
 	@echo "  test-verbose  Run tests with -v"
-	@echo "  lint          Run flake8"
+	@echo "  lint          Run black/isort checks, flake8, mypy (as CI)"
 	@echo "  format        Run black + isort"
 	@echo "  clean         Remove build artifacts"
 	@echo "  build         Build sdist + wheel"
@@ -18,9 +18,12 @@ help:
 install:
 	pip install -e .
 
+# Linter versions are pinned to the ones the Lint workflow installs.
+LINTERS = black==26.10.0 isort==9.0.2 flake8==7.4.1 mypy==2.4.0
+
 install-dev:
-	pip install -e ".[dev]" || pip install -e .
-	pip install pytest pytest-cov flake8 black isort build twine
+	pip install -e .
+	pip install pytest pytest-cov num2words2 build twine $(LINTERS)
 
 test:
 	pytest tests/
@@ -29,7 +32,10 @@ test-verbose:
 	pytest tests/ -v
 
 lint:
+	black --check words2num2 tests
+	isort --check-only words2num2 tests
 	flake8 words2num2 tests
+	mypy words2num2
 
 format:
 	isort words2num2 tests
