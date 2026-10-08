@@ -431,8 +431,23 @@ fn py_rstrip_char(s: &str, ch: char) -> &str {
 }
 
 /// `re.sub(r"[\.,;:!\?\"']+$", "", s)` — drop the trailing punctuation run.
+///
+/// Also the script-native marks and closing brackets/quotes `normalize` folds
+/// to a space (#121): "पाँच।" reads 5 and keeps its danda, "five)" its bracket.
 fn rstrip_punct(s: &str) -> &str {
-    s.trim_end_matches(['.', ',', ';', ':', '!', '?', '"', '\''])
+    s.trim_end_matches(|c: char| {
+        matches!(c, '.' | ',' | ';' | ':' | '!' | '?' | '"' | '\'' | '\u{2019}')
+            || crate::is_clause_punctuation(c)
+    })
+}
+
+/// The piece opens with a bracket, quote or other mark `normalize` drops
+/// ("(five)", "«six»", "‘seven’"). Re-emitting the value would lose it, so the
+/// walker leaves such a piece as written.
+fn opens_with_punct(s: &str) -> bool {
+    s.chars().next().is_some_and(|c| {
+        crate::is_clause_punctuation(c) || matches!(c, '\u{2018}' | '\u{201B}' | '`')
+    })
 }
 
 /// `re.search(r"[\.,;:!\?\"']+$", s)` → `m.group()`, or `""`.
@@ -826,6 +841,40 @@ fn base_convert(lang: &str, text: &str, ordinal: bool) -> Result<W2nValue, W2nEr
     // Normalized once here; every reading below works on `norm`.
     let norm = crate::normalize(text);
     let supported = crate::is_supported_lang(lang);
+    // The sign is stripped once, here, and applied to the whole value every
+    // reading composes: "moins un million mille" is -(1001000), not
+    // -1 × 10^6 + 1000, and "minus zwölftausend…" reaches the scale composer
+    // (#61). A glued prefix (th "ติดลบเจ็ด", tr "eksiyedi", #124) yields to an
+    // unsigned reading of the whole token, should one exist.
+    if supported {
+        if let Some((rest, glued)) = crate::strip_sign(lang, &norm) {
+            if glued {
+                if let Ok(v) = base_convert_unsigned(lang, &norm, ordinal) {
+                    return Ok(v);
+                }
+            }
+            if let Some(v) = base_convert_unsigned(lang, rest, ordinal).ok().and_then(negate) {
+                return Ok(v);
+            }
+        }
+    }
+    base_convert_unsigned(lang, &norm, ordinal)
+}
+
+/// `-v` for an int or float reading. The table path never yields a decimal;
+/// should one appear it is declined rather than returned unsigned.
+fn negate(v: W2nValue) -> Option<W2nValue> {
+    match v {
+        W2nValue::Int(i) => Some(W2nValue::Int(-i)),
+        W2nValue::Float(f) => Some(W2nValue::Float(-f)),
+        W2nValue::Dec(_) => None,
+    }
+}
+
+/// [`base_convert`] on normalized text with any sign already stripped.
+fn base_convert_unsigned(lang: &str, norm: &str, ordinal: bool) -> Result<W2nValue, W2nError> {
+    let norm = norm.to_string();
+    let supported = crate::is_supported_lang(lang);
     if !ordinal && supported {
         if let Some(canon) = canonical_apocopes_norm(lang, &norm) {
             if let Ok(v) = base_convert(lang, &canon, false) {
@@ -836,7 +885,7 @@ fn base_convert(lang: &str, text: &str, ordinal: bool) -> Result<W2nValue, W2nEr
     // `_rust_lookup`: guarded on `LANG in _RUST_LANGS`, and any error from the
     // core is swallowed to `None` (`except Exception: return None`).
     if supported {
-        if let Ok(Some(v)) = crate::lookup_norm(lang, &norm, ordinal, &BASE_NEGATIVE_WORDS) {
+        if let Ok(Some(v)) = crate::lookup_norm(lang, &norm, ordinal, &[]) {
             return Ok(W2nValue::Int(BigInt::from(v)));
         }
         // Composition multi-échelle pour les valeurs hors table (> 10001) :
@@ -859,7 +908,7 @@ fn base_convert(lang: &str, text: &str, ordinal: bool) -> Result<W2nValue, W2nEr
             if norm.contains(' ') {
                 let despaced: String = norm.split_whitespace().collect();
                 if let Ok(Some(v)) =
-                    crate::lookup_norm(lang, &despaced, false, &BASE_NEGATIVE_WORDS)
+                    crate::lookup_norm(lang, &despaced, false, &[])
                 {
                     return Ok(W2nValue::Int(BigInt::from(v)));
                 }
@@ -1982,6 +2031,11 @@ fn words2num_sentence_walk(
             i += 1;
             continue;
         }
+        if opens_with_punct(piece) {
+            out.push_str(piece);
+            i += 1;
+            continue;
+        }
         let head = rstrip_punct(piece).to_lowercase();
         // Most words of a transcript are not numbers: decide that with one cheap
         // check before anything that looks at the neighbours or the ordinal table.
@@ -2083,7 +2137,7 @@ fn words2num_sentence_walk(
                 continue;
             }
             let clean = rstrip_punct(tok).to_lowercase();
-            if clean.is_empty() {
+            if clean.is_empty() || opens_with_punct(tok) {
                 break; // a lone punctuation part ("quarante-deux ?") never extends a run
             }
             // A token that is not a number word on its own may still complete
