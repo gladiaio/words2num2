@@ -436,7 +436,10 @@ Conversion types
 ~~~~~~~~~~~~~~~~
 
 The ``to=`` parameter accepts ``cardinal``, ``ordinal``, ``ordinal_num``,
-``year``, and ``currency`` — same set as ``num2words2``.
+``year``, and ``currency`` — same set as ``num2words2`` — plus ``digits``
+for a number read one digit at a time. ``digits`` returns an ``int``, so
+leading zeros are dropped (``"zero zero seven"`` → ``7``); convert the text
+with ``words2num_sentence`` to keep them (``"007"``).
 
 How it works
 ------------

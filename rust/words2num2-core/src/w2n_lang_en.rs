@@ -9,7 +9,7 @@
 //! # Fidelity notes — read before "fixing" anything here
 //!
 //! Python is the specification, bugs included. Four of its behaviours look
-//! like mistakes and are reproduced deliberately:
+//! like mistakes; all but the year fallback are reproduced deliberately:
 //!
 //! * **`_parse` rewrites a trailing ordinal regardless of the `ordinal`
 //!   flag.** `to_cardinal("twenty first")` is 21, and `to_ordinal("forty
@@ -19,9 +19,11 @@
 //!   Every loop branch sets `seen_any = True` or raises, and the empty list
 //!   is rejected up front, so `seen_any` can never be false at the check.
 //!   Ported anyway — it costs nothing and keeps the port line-for-line.
-//! * **`_year_value` falls back to plain addition.** `to_year("nine
-//!   eleven")` is 20, not 911: `high = 9` fails the `10 <= high` test, no
-//!   split matches, and the fallback `_cardinal_value` adds 9 + 11.
+//! * **`_year_value` falls back to plain addition.** In Python,
+//!   `to_year("nine eleven")` is 20, not 911. No longer reproduced: the port
+//!   reads every year shape num2words2's `to_year` renders ("nine eleven",
+//!   "nineteen oh-five", "forty-four BC"), and stacked scales multiply ("a
+//!   thousand million"); see `year_value` and `cardinal_value`.
 //! * **`_looks_like_year` never checks that the halves are pair-shaped**
 //!   despite its docstring; it only bounds the token count and rejects
 //!   "hundred"/"thousand".
@@ -246,9 +248,9 @@ const PREC: i64 = 28;
 /// `PREC` significant digits, matching the default context.
 ///
 /// The context's `Emax`/`Emin`/`clamp` machinery is *not* ported because this
-/// grammar cannot reach it: the largest scale word is `centillion` (10^303)
-/// and `_cardinal_value` **adds** scales rather than multiplying them, so a
-/// coefficient of ~10^999972 (what `Etop` would require) is unreachable, and
+/// grammar cannot reach it: the largest scale word is `centillion` (10^303),
+/// and even stacked scales ("centillion centillion") stay far below a
+/// coefficient of ~10^999972 (what `Etop` would require), and
 /// a pure fraction always lands at `exp_min == -PREC`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PyDec {
@@ -651,19 +653,25 @@ pub(crate) fn tens_value(word: &str) -> Option<i64> {
 /// dollars" is 100 dollars) and keeps one that follows a decimal as a word
 /// ("two point five million" reads better than 2500000).
 pub(crate) fn is_scale_word(word: &str) -> bool {
-    SCALES.iter().any(|(w, _)| *w == word)
+    scale_table().iter().any(|(w, _)| *w == word)
 }
 
 /// The cardinal an ordinal word stands for (`_ORDINAL_TO_CARDINAL`):
-/// "fifteenth" -> "fifteen". `None` for any other word.
+/// "fifteenth" -> "fifteen". Any scale word takes "-th" the same way, so
+/// "undecillionth" and "centillionth" are read from the scale table rather
+/// than listed (#113). `None` for any other word.
 pub(crate) fn ordinal_cardinal(word: &str) -> Option<&'static str> {
-    ORDINAL_TO_CARDINAL
-        .iter()
-        .find(|(o, _)| *o == word)
-        .map(|&(_, c)| c)
+    if let Some(&(_, c)) = ORDINAL_TO_CARDINAL.iter().find(|(o, _)| *o == word) {
+        return Some(c);
+    }
+    let stem = word.strip_suffix("th")?;
+    scale_table().iter().find(|(w, _)| *w == stem).map(|&(w, _)| w)
 }
 
-/// `_SCALES`, as (word, power-of-ten). "hundred" is 100 = 10^2.
+/// `_SCALES` as Python lists it, as (word, power-of-ten). "hundred" is 100 =
+/// 10^2. Python stops at vigintillion and jumps to centillion; the full table
+/// the grammar uses is [`scale_table`], which also holds every -illion
+/// num2words2 spells in between.
 ///
 /// Note "hundred" is a member here *and* is special-cased ahead of the
 /// `elif tok in _SCALES` branch in `_cardinal_value`, so it never reaches the
@@ -694,9 +702,33 @@ const SCALES: [(&str, u32); 23] = [
     ("centillion", 303),
 ];
 
-/// `_ORDINAL_TO_CARDINAL`. Stops at "decillionth" even though `_SCALES` runs
-/// to "centillion", so "vigintillionth" is an unrecognized token — Python's
-/// gap, preserved.
+/// Every scale word the grammar reads: [`SCALES`] plus each -illion
+/// num2words2 renders up to centillion (10^303), "unvigintillion" (10^66) to
+/// "novenonagintillion" (10^300) included (#113). Read off the renderer --
+/// "one unvigintillion" is how it spells 10^66 -- so the two libraries agree
+/// on the Latin prefixes and their elisions without a second copy of them.
+fn scale_table() -> &'static [(&'static str, u32)] {
+    static T: std::sync::OnceLock<Vec<(&'static str, u32)>> = std::sync::OnceLock::new();
+    T.get_or_init(|| {
+        let mut out: Vec<(&'static str, u32)> = SCALES.to_vec();
+        if let Some(r) = num2words2_core::get_lang_by_key("en") {
+            for p in (6u32..=303).step_by(3) {
+                let Ok(words) = r.to_cardinal(&BigInt::from(10).pow(p)) else { continue };
+                // "one unvigintillion": the scale is the last word.
+                let Some(w) = words.split_whitespace().last() else { continue };
+                if w.ends_with("illion") && !out.iter().any(|(o, _)| *o == w) {
+                    // Built once per process; the leak is bounded (~90 short words).
+                    out.push((Box::leak(w.to_string().into_boxed_str()), p));
+                }
+            }
+        }
+        out
+    })
+}
+
+/// `_ORDINAL_TO_CARDINAL`. Python stops at "decillionth" even though
+/// `_SCALES` runs to "centillion"; [`ordinal_cardinal`] reads every other
+/// scale ordinal ("vigintillionth") off the scale table instead (#113).
 const ORDINAL_TO_CARDINAL: [(&str, &str); 40] = [
     ("zeroth", "zero"),
     ("first", "one"),
@@ -760,7 +792,6 @@ pub struct W2nLangEn {
     units: HashMap<&'static str, i64>,
     tens: HashMap<&'static str, i64>,
     scales: HashMap<&'static str, BigInt>,
-    ordinal_to_cardinal: HashMap<&'static str, &'static str>,
     decimal_words: HashSet<&'static str>,
     negative_words: HashSet<&'static str>,
     and_words: HashSet<&'static str>,
@@ -784,11 +815,10 @@ impl W2nLangEn {
         W2nLangEn {
             units: UNITS.iter().copied().collect(),
             tens: TENS.iter().copied().collect(),
-            scales: SCALES
+            scales: scale_table()
                 .iter()
                 .map(|&(w, p)| (w, BigInt::from(10).pow(p)))
                 .collect(),
-            ordinal_to_cardinal: ORDINAL_TO_CARDINAL.iter().copied().collect(),
             decimal_words: DECIMAL_WORDS.iter().copied().collect(),
             negative_words: NEGATIVE_WORDS.iter().copied().collect(),
             and_words: AND_WORDS.iter().copied().collect(),
@@ -844,9 +874,28 @@ impl W2nLangEn {
 
         let mut toks: Vec<&str> = norm.split_whitespace().collect();
 
+        // Year era: "forty-four BC" is -44, "1776 AD" is 1776 (#112). Only in
+        // year mode, and never together with "minus".
+        let mut era_sign = 1i32;
+        if year_mode {
+            if let Some((s, rest)) = split_era(&toks) {
+                if self.negative_words.contains(rest[0]) {
+                    return Err(W2nError::new(format!("conflicting signs in {}", py_repr(&norm))));
+                }
+                // "1776 AD", "44 BC": a figure with an era word.
+                if rest.len() == 1 && is_digits(rest[0]) {
+                    return BigInt::from_str(&nd_to_ascii(rest[0]))
+                        .map(|v| W2nValue::Int(v * s))
+                        .map_err(|e| W2nError::new(e.to_string()));
+                }
+                era_sign = s;
+                toks = rest;
+            }
+        }
+
         // Negative. Checked before filler removal, so "and minus forty two"
         // keeps its "minus" and later dies in `_cardinal_value`.
-        let mut sign = 1i32;
+        let mut sign = era_sign;
         if let Some(first) = toks.first() {
             if self.negative_words.contains(*first) {
                 sign = -1;
@@ -874,10 +923,11 @@ impl W2nLangEn {
         // whether or not `ordinal` was requested, which is why
         // `to_cardinal("twenty first")` is 21.
         let last = *toks.last().unwrap_or(&"");
-        let was_ordinal = self.ordinal_to_cardinal.contains_key(last);
-        if was_ordinal {
+        let ordinal_stem = ordinal_cardinal(last);
+        let was_ordinal = ordinal_stem.is_some();
+        if let Some(stem) = ordinal_stem {
             let n = toks.len();
-            toks[n - 1] = self.ordinal_to_cardinal[last];
+            toks[n - 1] = stem;
         }
         if ordinal && !was_ordinal {
             // Python: a bare `pass`. The caller asked for an ordinal but the
@@ -959,6 +1009,24 @@ impl W2nLangEn {
             Full,
         }
         let mut slot = Slot::Empty;
+        // Scale bookkeeping (#57, #58). Scales must fall left to right
+        // ("two million three thousand"), except that a scale word directly
+        // after another multiplies it: "a thousand million" is the British
+        // 10^9 and "one million million" 10^12, not 1001000 and 2000000.
+        //
+        // * `last_scale` -- the effective scale of the group last folded into
+        //   `total` (10^9 after "thousand million");
+        // * `outer_scale` -- the scale of the group before that one, which a
+        //   stacked scale must stay below ("one million two thousand million"
+        //   is two numbers);
+        // * `last_group` -- what that last group added to `total`, so a
+        //   stacked scale can multiply it in place;
+        // * `prev_scale` -- the scale word just read, when the previous token
+        //   was one (`None` as soon as a number word comes in between).
+        let mut last_scale: Option<BigInt> = None;
+        let mut outer_scale: Option<BigInt> = None;
+        let mut last_group = BigInt::from(0);
+        let mut prev_scale: Option<BigInt> = None;
         let cannot_follow = |tok: &str| {
             W2nError::new(format!(
                 "{} cannot follow a smaller number in {}",
@@ -967,6 +1035,7 @@ impl W2nLangEn {
             ))
         };
         for tok in toks {
+            let mut this_scale: Option<BigInt> = None;
             if let Some(&v) = self.units.get(*tok) {
                 if slot == Slot::Full || (slot == Slot::Tens && v >= 10) {
                     return Err(cannot_follow(tok));
@@ -982,6 +1051,12 @@ impl W2nLangEn {
                 seen_any = true;
                 slot = Slot::Tens;
             } else if *tok == "hundred" {
+                // "five hundred twenty hundred", "one hundred one hundred":
+                // a hundred never multiplies a chunk that already has one --
+                // that is two numbers side by side (#58).
+                if current >= BigInt::from(100) {
+                    return Err(cannot_follow(tok));
+                }
                 if current.sign() == Sign::NoSign {
                     current = BigInt::from(1);
                 }
@@ -989,20 +1064,58 @@ impl W2nLangEn {
                 seen_any = true;
                 slot = Slot::Empty;
             } else if let Some(scale) = self.scales.get(*tok) {
-                if current.sign() == Sign::NoSign {
-                    current = BigInt::from(1);
+                match prev_scale.take() {
+                    // Stacked: "thousand million". Never a smaller scale after
+                    // a larger one ("million thousand"), and the product must
+                    // stay below the group before it.
+                    Some(prev) if current.sign() == Sign::NoSign => {
+                        let effective = last_scale.clone().unwrap_or_else(|| BigInt::from(1)) * scale;
+                        if *scale < prev || outer_scale.as_ref().is_some_and(|o| effective >= *o) {
+                            return Err(cannot_follow(tok));
+                        }
+                        total -= &last_group;
+                        last_group *= scale;
+                        total += &last_group;
+                        last_scale = Some(effective);
+                    }
+                    _ => {
+                        // "one thousand one million": a scale may only follow
+                        // a smaller one when it stacks on it directly.
+                        if last_scale.as_ref().is_some_and(|l| scale >= l) {
+                            return Err(cannot_follow(tok));
+                        }
+                        if current.sign() == Sign::NoSign {
+                            current = BigInt::from(1);
+                        }
+                        last_group = &current * scale;
+                        total += &last_group;
+                        outer_scale = last_scale.take();
+                        last_scale = Some(scale.clone());
+                    }
                 }
-                total += &current * scale;
+                this_scale = Some(scale.clone());
                 current = BigInt::from(0);
                 seen_any = true;
                 slot = Slot::Empty;
             } else if is_digits(tok) {
-                // Allow embedded digit groups, e.g. "two thousand 24".
-                match BigInt::from_str(&nd_to_ascii(tok)) {
-                    Ok(v) => current += v,
+                // Allow embedded digit groups, e.g. "two thousand 24". A digit
+                // group fills the chunk like a unit does, so "12 34" and
+                // "twelve 34" are two numbers, not 46 (#58), and it must fit
+                // below the last scale ("two thousand 3000" is not 5000).
+                let v = match BigInt::from_str(&nd_to_ascii(tok)) {
+                    Ok(v) => v,
                     Err(e) => return Err(W2nError::new(e.to_string())),
+                };
+                if slot == Slot::Full
+                    || (slot == Slot::Tens && v >= BigInt::from(10))
+                    || (v >= BigInt::from(100) && current.sign() != Sign::NoSign)
+                    || last_scale.as_ref().is_some_and(|l| v >= *l)
+                {
+                    return Err(cannot_follow(tok));
                 }
+                current += v;
                 seen_any = true;
+                slot = Slot::Full;
             } else {
                 return Err(W2nError::new(format!(
                     "unrecognized token {} in {}",
@@ -1010,6 +1123,7 @@ impl W2nLangEn {
                     py_repr(&toks.join(" "))
                 )));
             }
+            prev_scale = this_scale;
         }
         if !seen_any {
             // Dead code in Python too: every branch above either sets the
@@ -1034,6 +1148,8 @@ impl W2nLangEn {
         for tok in toks {
             match self.units.get(*tok) {
                 Some(&v) if v < 10 => digits.push_str(&v.to_string()),
+                // "three point o five": the letter "o" read as zero (#110).
+                None if *tok == "o" => digits.push('0'),
                 _ if is_single_digit(tok) => digits.push_str(&nd_to_ascii(tok)),
                 _ => {
                     return Err(W2nError::new(format!(
@@ -1063,30 +1179,66 @@ impl W2nLangEn {
     /// 19 * 100 + 99.
     ///
     /// Tries every split point and takes the first where the high half is a
-    /// 2-digit number and the low half is at most 99. When nothing matches it
-    /// falls back to the plain cardinal reading — which, since a unit may
-    /// not follow a unit, now rejects "nine eleven" rather than summing it
-    /// to 20.
+    /// number 1..=99 and the low half is the second pair of digits. This is
+    /// the shape num2words2's `to_year` spells: "nineteen ninety-nine",
+    /// "nineteen oh-five" (1905), "ten oh-six" (1006), "nine eleven" (911),
+    /// "one twenty-seven" (127). The low half must be a real pair -- 10..=99,
+    /// or "oh"/"o" plus a digit -- so "twenty-two" stays 22 rather than
+    /// 20 * 100 + 2 (#56, #110, #111). When nothing matches it falls back to
+    /// the plain cardinal reading, which rejects "nine five" rather than
+    /// summing it.
     fn year_value(&self, toks: &[&str]) -> W2nResult<BigInt> {
         if toks.len() < 2 {
             return self.cardinal_value(toks);
         }
         for split in 1..toks.len() {
-            let (high, low) = match (
-                self.cardinal_value(&toks[..split]),
-                self.cardinal_value(&toks[split..]),
-            ) {
-                (Ok(h), Ok(l)) => (h, l),
-                _ => continue, // Python swallows Words2NumError and moves on
+            let Ok(high) = self.cardinal_value(&toks[..split]) else {
+                continue; // Python swallows Words2NumError and moves on
             };
-            let in_high = high >= BigInt::from(10) && high <= BigInt::from(99);
-            let in_low = low >= BigInt::from(0) && low <= BigInt::from(99);
-            if in_high && in_low {
+            let low = match &toks[split..] {
+                // "oh-five", "o five": the zero-padded second pair 01..09.
+                [z, d] if matches!(*z, "oh" | "o") => match self.units.get(*d) {
+                    Some(&v) if (1..=9).contains(&v) => BigInt::from(v),
+                    _ => continue,
+                },
+                low_toks => match self.cardinal_value(low_toks) {
+                    Ok(l) if l >= BigInt::from(10) && l <= BigInt::from(99) => l,
+                    _ => continue,
+                },
+            };
+            if high >= BigInt::from(1) && high <= BigInt::from(99) {
                 return Ok(high * 100 + low);
             }
         }
         self.cardinal_value(toks)
     }
+}
+
+/// Split an era word off a year: "five hundred BC" -> (-1, "five hundred"),
+/// "AD seventeen seventy six" -> (1, ...). num2words2 writes a negative year
+/// as "<year> BC" (#112). "AD"/"CE" are accepted on either side, "BC"/"BCE"
+/// after the year; `None` when there is no era word.
+fn split_era<'a>(toks: &[&'a str]) -> Option<(i32, Vec<&'a str>)> {
+    let n = toks.len();
+    let ends = |tail: &[&str]| n > tail.len() && toks[n - tail.len()..] == *tail;
+    for (tail, sign) in [
+        (&["bc"][..], -1),
+        (&["bce"][..], -1),
+        (&["b", "c"][..], -1),
+        (&["b", "c", "e"][..], -1),
+        (&["ad"][..], 1),
+        (&["ce"][..], 1),
+        (&["a", "d"][..], 1),
+        (&["c", "e"][..], 1),
+    ] {
+        if ends(tail) {
+            return Some((sign, toks[..n - tail.len()].to_vec()));
+        }
+    }
+    if n > 1 && toks[0] == "ad" {
+        return Some((1, toks[1..].to_vec()));
+    }
+    None
 }
 
 // ---------------------------------------------------------------------------
@@ -1102,4 +1254,119 @@ impl W2nLangEn {
 /// "fórty" -> "forty".
 fn normalize(text: &str) -> String {
     crate::normalize(text)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn int(v: W2nResult<W2nValue>) -> Option<BigInt> {
+        match v {
+            Ok(W2nValue::Int(n)) => Some(n),
+            _ => None,
+        }
+    }
+
+    fn pow10(p: u32) -> BigInt {
+        BigInt::from(10).pow(p)
+    }
+
+    #[test]
+    fn year_tens_plus_unit_is_not_a_pair() {
+        // #56: "twenty-two" is the year 22, not 2002.
+        let g = W2nLangEn::new();
+        for (text, y) in [("twenty-two", 22), ("forty-two", 42), ("ninety-nine", 99), ("twenty first", 21)] {
+            assert_eq!(int(g.to_year(text)), Some(BigInt::from(y)), "{text}");
+        }
+        assert_eq!(int(g.to_year("nineteen ninety nine")), Some(BigInt::from(1999)));
+        assert_eq!(int(g.to_year("twenty twenty")), Some(BigInt::from(2020)));
+    }
+
+    #[test]
+    fn year_oh_pairs_and_three_digit_years() {
+        // #110: "oh"/"o" + digit is the second pair 01..09.
+        // #111: a single-digit first half, as num2words2 renders 100..999.
+        let g = W2nLangEn::new();
+        for (text, y) in [
+            ("nineteen oh-five", 1905),
+            ("ten oh six", 1006),
+            ("twenty-one oh-one", 2101),
+            ("nineteen o five", 1905),
+            ("eleven oh-one", 1101),
+            ("nine eleven", 911),
+            ("one twenty-seven", 127),
+            ("one oh-five", 105),
+        ] {
+            assert_eq!(int(g.to_year(text)), Some(BigInt::from(y)), "{text}");
+        }
+        assert!(g.to_year("nineteen five").is_err());
+        // "o" is a zero in a fraction too.
+        assert_eq!(g.to_cardinal("three point o five").unwrap(), g.to_cardinal("three point oh five").unwrap());
+    }
+
+    #[test]
+    fn year_era_words() {
+        // #112: num2words2 writes a negative year "<year> BC".
+        let g = W2nLangEn::new();
+        for (text, y) in [
+            ("five hundred BC", -500),
+            ("forty-four BC", -44),
+            ("seventeen seventy-six AD", 1776),
+            ("AD 1066", 1066),
+            ("44 BC", -44),
+        ] {
+            assert_eq!(int(g.to_year(text)), Some(BigInt::from(y)), "{text}");
+        }
+        assert!(g.to_year("minus forty-four BC").is_err());
+        assert!(g.to_cardinal("forty-four BC").is_err()); // year mode only
+    }
+
+    #[test]
+    fn stacked_scales_multiply() {
+        // #57: "a thousand million" is the British billion.
+        let g = W2nLangEn::new();
+        assert_eq!(int(g.to_cardinal("a thousand million")), Some(pow10(9)));
+        assert_eq!(int(g.to_cardinal("one million million")), Some(pow10(12)));
+        assert_eq!(int(g.to_cardinal("one thousand billion")), Some(pow10(12)));
+        assert_eq!(int(g.to_cardinal("thousand thousand")), Some(pow10(6)));
+        assert_eq!(int(g.to_cardinal("two hundred thousand million")), Some(BigInt::from(200_000_000_000i64)));
+        assert_eq!(int(g.to_cardinal("two million three thousand four")), Some(BigInt::from(2_003_004)));
+    }
+
+    #[test]
+    fn juxtaposed_numbers_are_rejected() {
+        // #58: two numbers side by side are not summed.
+        let g = W2nLangEn::new();
+        for text in [
+            "one hundred one hundred",
+            "five hundred twenty hundred",
+            "one thousand one million",
+            "one million thousand",
+            "one million two thousand million",
+            "12 34",
+            "twelve 34",
+            "two thousand 3000",
+        ] {
+            assert!(g.to_cardinal(text).is_err(), "{text}");
+        }
+        assert_eq!(int(g.to_cardinal("two thousand 24")), Some(BigInt::from(2024)));
+        assert_eq!(int(g.to_cardinal("twenty 5")), Some(BigInt::from(25)));
+    }
+
+    #[test]
+    fn every_rendered_scale_word_reads() {
+        // #113: unvigintillion (10^66) .. novenonagintillion (10^300), and
+        // the ordinal of every scale word.
+        let g = W2nLangEn::new();
+        assert_eq!(int(g.to_cardinal("one unvigintillion")), Some(pow10(66)));
+        assert_eq!(int(g.to_cardinal("one novenonagintillion")), Some(pow10(300)));
+        assert_eq!(int(g.to_ordinal("one undecillionth")), Some(pow10(36)));
+        assert_eq!(int(g.to_ordinal("one vigintillionth")), Some(pow10(63)));
+        assert_eq!(int(g.to_ordinal("one centillionth")), Some(pow10(303)));
+        let r = num2words2_core::get_lang_by_key("en").unwrap();
+        for p in (3..=303).step_by(3) {
+            let w = r.to_cardinal(&pow10(p)).unwrap();
+            assert_eq!(int(g.to_cardinal(&w)), Some(pow10(p)), "{w}");
+        }
+    }
 }

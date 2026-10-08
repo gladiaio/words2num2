@@ -1225,17 +1225,36 @@ fn hundred_word(lang: &str) -> Option<String> {
             }
             forms.push(s);
         }
-        let mut suf = forms[0].clone();
-        for f in &forms[1..] {
-            suf = common_suffix(&suf, f);
-        }
-        // Keep only the trailing alphabetic run (drop any leading unit letters).
-        let tail: String = {
+        let common = |skip: Option<usize>| -> String {
+            let mut it = forms.iter().enumerate().filter(|(k, _)| Some(*k) != skip).map(|(_, f)| f);
+            let mut suf = it.next().cloned().unwrap_or_default();
+            for f in it {
+                suf = common_suffix(&suf, f);
+            }
+            // Keep only the trailing alphabetic run (drop any leading unit letters).
             let mut rev: Vec<char> = suf.chars().rev().take_while(|c| c.is_alphabetic()).collect();
             rev.reverse();
             rev.into_iter().collect()
         };
-        (tail.chars().count() >= 3).then_some(tail)
+        let tail = common(None);
+        if tail.chars().count() >= 3 {
+            return Some(tail);
+        }
+        // A syllabic script spells the morpheme in two letters (am "መቶ", #135),
+        // and one hundred may be suppletive (dv 200 "ދުއިސައްތަ" next to 300-900
+        // "...ސަތޭކަ", #136). Either way the morpheme is still the word for 100
+        // itself, which is the evidence asked for before taking a shorter
+        // suffix, or one shared by all hundreds but one.
+        let hundred: String = normalize(&l.to_cardinal(&BigInt::from(100)).ok()?)
+            .split_whitespace()
+            .last()?
+            .to_string();
+        std::iter::once(None)
+            .chain((0..forms.len()).map(Some))
+            .map(common)
+            // dv 300-900 share "...އްސަތޭކަ": the unit's last letters ride along.
+            .find(|t| t.ends_with(&hundred))
+            .map(|_| hundred)
     })();
     hundred_cache()
         .write()
@@ -1323,11 +1342,19 @@ pub fn parse_year_norm(lang: &str, norm: &str) -> Option<i64> {
     }
     let hw = hundred_word(lang);
 
+    // nb/no "nitten hundre og fem" (#134): the Nordic "og" joins the hundred
+    // to the rest, on top of the language's own connectors.
+    let base = lang.split(&['_', '-'][..]).next().unwrap_or(lang);
+    let mut conns: Vec<&str> = connector_words(lang).to_vec();
+    if matches!(base, "no" | "nb" | "nn" | "da" | "dk") {
+        conns.push("og");
+    }
+
     // (B) explicit hundred token: LEFT <hundred> RIGHT -> LEFT*100 + RIGHT.
     if let Some(ref h) = hw {
         if let Some(pos) = toks.iter().position(|t| *t == h.as_str()) {
-            let left = toks[..pos].join(" ");
-            let right = toks[pos + 1..].join(" ");
+            let left = trim_connectors(&toks[..pos].join(" "), &conns);
+            let right = trim_connectors(&toks[pos + 1..].join(" "), &conns);
             let high = if left.is_empty() { Some(1) } else { lookup_plain(lang, &left) };
             let low = if right.is_empty() { Some(0) } else { lookup_plain(lang, &right) };
             if let (Some(h100), Some(l)) = (high, low) {
@@ -1359,16 +1386,229 @@ pub fn parse_year_norm(lang: &str, norm: &str) -> Option<i64> {
     // (A) two spoken 2-digit groups ("nineteen ninety-nine") -> a*100 + b. A Germanic
     // habit (nl "negentien negenennegentig", da "nitten nitti"): Romance languages say
     // the thousand ("mil novecientos"), and es "catorce treinta" is a time of day.
-    let base = lang.split(&['_', '-'][..]).next().unwrap_or(lang);
+    // Either group may span several tokens: af spells 21-99 "vier-en-twintig",
+    // which normalizes to three tokens ("twintig vier en twintig" = 2024, #133).
     let pairs = matches!(base, "de" | "nl" | "af" | "da" | "sv" | "no" | "nb" | "nn" | "is");
-    if pairs && toks.len() == 2 {
-        if let (Some(a), Some(b)) = (lookup_plain(lang, toks[0]), lookup_plain(lang, toks[1])) {
-            if (10..=99).contains(&a) && (0..=99).contains(&b) {
-                return Some(a * 100 + b);
+    if pairs {
+        for k in 1..toks.len() {
+            let (left, right) = (toks[..k].join(" "), toks[k..].join(" "));
+            if let (Some(a), Some(b)) = (lookup_plain(lang, &left), lookup_plain(lang, &right)) {
+                if (10..=99).contains(&a) && (0..=99).contains(&b) {
+                    return Some(a * 100 + b);
+                }
             }
         }
     }
     None
+}
+
+// ---------------------------------------------------------------------------
+// Year mode (`to="year"`) for the reverse-table languages
+// ---------------------------------------------------------------------------
+//
+// Many renderers spell a year differently from the cardinal: a year word
+// around it (bn "... সাল", vi "năm ...", zh/ja "...年", hy "... թվական"), a
+// digit-by-digit reading (zh "一九零五年"), an imperial era (ja "明治三十八年"),
+// a combining form (ta "ஆயிரத்து"), glued words (fi "tuhatyhdeksänsataaviisi"),
+// a stray suffix (lij ". urtea", #247). None of those is in the cardinal table,
+// so `to="year"` raised on every year they render (#128-#132). The data comes
+// from the renderer itself: a reverse table of `to_year`, the year word its
+// renderings share, and whether it reads the digits one by one.
+
+/// Highest year the reverse `to_year` table holds.
+const YEAR_MAX: i64 = 3000;
+
+/// What the renderer's `to_year` tells about a language.
+struct YearData {
+    /// normalize(to_year(n)) -> n, for 1..=YEAR_MAX; a spelling two years
+    /// share is dropped (a raise beats a wrong year).
+    table: HashMap<String, i64>,
+    /// The year word every rendering opens / closes with and the cardinal does
+    /// not: vi "nam " / bn " sal", zh "年". Empty when there is none.
+    prefix: String,
+    suffix: String,
+    /// The year is read one digit at a time (zh "一九零五").
+    digitwise: bool,
+}
+
+fn year_cache() -> &'static RwLock<HashMap<String, Arc<YearData>>> {
+    static Y: OnceLock<RwLock<HashMap<String, Arc<YearData>>>> = OnceLock::new();
+    Y.get_or_init(|| RwLock::new(HashMap::new()))
+}
+
+fn year_data(lang: &str) -> Arc<YearData> {
+    if let Some(d) = year_cache().read().unwrap().get(lang) {
+        return d.clone();
+    }
+    let d = Arc::new(build_year_data(lang));
+    year_cache().write().unwrap().insert(lang.to_string(), d.clone());
+    d
+}
+
+/// Longest common prefix, by `char`.
+fn common_prefix(a: &str, b: &str) -> String {
+    a.chars().zip(b.chars()).take_while(|(x, y)| x == y).map(|(x, _)| x).collect()
+}
+
+fn build_year_data(lang: &str) -> YearData {
+    let mut data = YearData {
+        table: HashMap::new(),
+        prefix: String::new(),
+        suffix: String::new(),
+        digitwise: false,
+    };
+    let Some(l) = num2words2_core::get_lang_by_key(lang) else { return data };
+    let mut ambiguous: Vec<String> = Vec::new();
+    let mut years: Vec<String> = Vec::new();
+    let mut cards: Vec<String> = Vec::new();
+    for n in 1..=YEAR_MAX {
+        let b = BigInt::from(n);
+        // ja has no era before 645 and declines; those years are not in the table.
+        let Ok(w) = l.to_year(&b) else { continue };
+        let key = normalize(&w);
+        if key.is_empty() || key.chars().all(|c| c.is_ascii_digit() || c == '-' || c == ' ') {
+            continue; // the renderer fell back to figures
+        }
+        match data.table.get(&key) {
+            Some(&m) if m != n => ambiguous.push(key.clone()),
+            Some(_) => {}
+            None => {
+                data.table.insert(key.clone(), n);
+            }
+        }
+        if let Ok(c) = l.to_cardinal(&b) {
+            cards.push(normalize(&c));
+        }
+        years.push(key);
+    }
+    for k in ambiguous {
+        data.table.remove(&k);
+    }
+    if years.is_empty() {
+        return data;
+    }
+    let fold = |v: &[String], f: fn(&str, &str) -> String| -> String {
+        let mut acc = v[0].clone();
+        for s in &v[1..] {
+            acc = f(&acc, s);
+        }
+        acc
+    };
+    let rev = |s: &str| s.chars().rev().collect::<String>();
+    let mut prefix = fold(&years, common_prefix);
+    let mut suffix = rev(&fold(
+        &years.iter().map(|s| rev(s)).collect::<Vec<_>>(),
+        common_prefix,
+    ));
+    // In a spaced language the year word is whole tokens: never half a word.
+    if years.iter().filter(|y| y.contains(' ')).count() * 2 > years.len() {
+        prefix = prefix.rfind(' ').map(|i| prefix[..=i].to_string()).unwrap_or_default();
+        suffix = suffix.find(' ').map(|i| suffix[i..].to_string()).unwrap_or_default();
+    }
+    // An affix every cardinal shares too is part of the number, not a year word.
+    if !cards.is_empty() {
+        if !prefix.is_empty() && cards.iter().all(|c| c.starts_with(&prefix)) {
+            prefix.clear();
+        }
+        if !suffix.is_empty() && cards.iter().all(|c| c.ends_with(&suffix)) {
+            suffix.clear();
+        }
+    }
+    data.prefix = prefix;
+    data.suffix = suffix;
+    // zh renders 1905 as "一九零五年": the digits' own words, one after another.
+    data.digitwise = (|| {
+        let y = normalize(&l.to_year(&BigInt::from(1905)).ok()?);
+        let body = strip_affixes(&y, &data.prefix, &data.suffix)?;
+        let mut digits = String::new();
+        for d in [1, 9, 0, 5] {
+            digits.push_str(&normalize(&l.to_cardinal(&BigInt::from(d)).ok()?));
+        }
+        Some(body.replace(' ', "") == digits)
+    })()
+    .unwrap_or(false);
+    data
+}
+
+/// `norm` without the year word, trimmed; `None` when it is absent or nothing
+/// is left after it.
+fn strip_affixes(norm: &str, prefix: &str, suffix: &str) -> Option<String> {
+    let mut body = norm;
+    let mut stripped = false;
+    if !prefix.is_empty() {
+        if let Some(r) = body.strip_prefix(prefix) {
+            body = r;
+            stripped = true;
+        }
+    }
+    if !suffix.is_empty() {
+        if let Some(r) = body.strip_suffix(suffix) {
+            body = r;
+            stripped = true;
+        }
+    }
+    let body = body.trim();
+    (stripped && !body.is_empty()).then(|| body.to_string())
+}
+
+/// The year `norm` spells exactly as num2words2's `to_year` renders it: bn
+/// "এক হাজার ছিষট্টি সাল" (1066), ja "明治三十八年" (1905), fi
+/// "tuhatyhdeksänsataaviisi". Looked up in the reverse `to_year` table.
+pub fn lookup_year_norm(lang: &str, norm: &str) -> Option<i64> {
+    if !is_supported_lang(lang) {
+        return None;
+    }
+    year_data(lang).table.get(norm).copied()
+}
+
+/// Spoken variants of a year that are not the renderer's exact spelling, for
+/// the caller to read as a cardinal: the year word dropped (ja "千九百五年" ->
+/// "千九百五", vi "năm một nghìn chín trăm lẻ năm" -> "một nghìn ..."), and ta's
+/// combining "ஆயிரத்து" read as the thousand "ஆயிரம்" (#131).
+pub fn year_variants_norm(lang: &str, norm: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    if !is_supported_lang(lang) {
+        return out;
+    }
+    let yd = year_data(lang);
+    let bare = strip_affixes(norm, &yd.prefix, &yd.suffix);
+    for v in std::iter::once(norm.to_string()).chain(bare) {
+        if lang == "ta" {
+            let (comb, thousand) = (normalize("ஆயிரத்து"), normalize("ஆயிரம்"));
+            if v.split_whitespace().any(|t| t == comb) {
+                let alias: Vec<&str> = v
+                    .split_whitespace()
+                    .map(|t| if t == comb { thousand.as_str() } else { t })
+                    .collect();
+                out.push(alias.join(" "));
+            }
+        }
+        if v != norm {
+            out.push(v);
+        }
+    }
+    out
+}
+
+/// A year read one digit at a time, in a language whose renderer reads years
+/// that way (zh "一九零五", "一九〇五", #129): two to four digit words, `〇`
+/// being zero too. The year word, if any, must already be stripped.
+pub fn year_digit_string_norm(lang: &str, norm: &str) -> Option<i64> {
+    if !is_supported_lang(lang) || !year_data(lang).digitwise {
+        return None;
+    }
+    let mut digits = String::new();
+    for c in norm.chars().filter(|c| !c.is_whitespace()) {
+        let d = if c == '〇' { 0 } else { lookup_plain(lang, &c.to_string())? };
+        if !(0..=9).contains(&d) {
+            return None;
+        }
+        digits.push(char::from(b'0' + d as u8));
+    }
+    if !(2..=4).contains(&digits.len()) {
+        return None;
+    }
+    digits.parse().ok()
 }
 
 // ---------------------------------------------------------------------------
@@ -1730,5 +1970,108 @@ mod tests {
             assert_eq!(w2n("ÅTTE", lang, "cardinal"), Some(8));
         }
         assert_eq!(w2n("tva", "sv", "cardinal"), Some(2));
+    }
+}
+
+#[cfg(test)]
+mod year_mode_tests {
+    use crate::w2n_lang_en::W2nValue;
+    use crate::w2n_sentence::words2num;
+    use num_bigint::BigInt;
+
+    fn year(text: &str, lang: &str) -> Option<i64> {
+        match words2num(text, lang, "year") {
+            Ok(W2nValue::Int(n)) => i64::try_from(n).ok(),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn year_words_are_stripped() {
+        // #128: the year word num2words2's to_year wraps the number in.
+        for (lang, text, y) in [
+            ("bn", "এক হাজার ছিষট্টি সাল", 1066),
+            ("ba", "бер мең туғыҙ йөҙ биш йыл", 1905),
+            ("vi", "năm một nghìn chín trăm lẻ năm", 1905),
+            ("hy", "հազար ինը հարյուր հինգ թվական", 1905),
+            ("km", "ឆ្នាំ មួយពាន់ ប្រាំបួនរយ ប្រាំ", 1905),
+            ("ja", "千九百五年", 1905),
+            ("zh", "一千九百零五年", 1905),
+            ("mn", "нэг мянга есөн зуун таван он", 1905),
+            ("eu", "mila bederatziehun eta bost. urtea", 1905),
+        ] {
+            assert_eq!(year(text, lang), Some(y), "{lang} {text}");
+        }
+        // vi "năm" is also 5: a lone one is the number.
+        assert_eq!(year("năm", "vi"), Some(5));
+    }
+
+    #[test]
+    fn zh_digit_by_digit_years() {
+        // #129
+        for text in ["一九零五年", "一九零五", "一九〇五年"] {
+            assert_eq!(year(text, "zh"), Some(1905), "{text}");
+        }
+        assert_eq!(year("二零二四", "zh_TW"), Some(2024));
+    }
+
+    #[test]
+    fn ja_imperial_eras() {
+        // #130: era + year of the era, 元年 being the first.
+        assert_eq!(year("明治三十八年", "ja"), Some(1905));
+        assert_eq!(year("治暦二年", "ja"), Some(1066));
+        assert_eq!(year("令和元年", "jp"), Some(2019));
+    }
+
+    #[test]
+    fn spoken_year_spellings() {
+        assert_eq!(year("ஆயிரத்து அறுபது ஆறு", "ta"), Some(1066)); // #131
+        assert_eq!(year("இரண்டு ஆயிரத்து இருபது நான்கு", "ta"), Some(2024));
+        assert_eq!(year("tuhatyhdeksänsataaviisi", "fi"), Some(1905)); // #132
+        assert_eq!(year("tuhatkuusikymmentäkuusi", "fi"), Some(1066));
+        assert_eq!(year("negentien nege-en-negentig", "af"), Some(1999)); // #133
+        assert_eq!(year("twintig vier-en-twintig", "af"), Some(2024));
+        assert_eq!(year("nitten hundre og fem", "nb"), Some(1905)); // #134
+        assert_eq!(year("nitten hundre og nittini", "no"), Some(1999));
+        assert_eq!(year("አሥራ ዘጠኝ መቶ አምስት", "am"), Some(1905)); // #135
+        assert_eq!(year("አሥራ ዘጠኝ መቶ", "am"), Some(1900));
+        assert_eq!(year("ނަވާރަ ސަތޭކަ ފަހެއް", "dv"), Some(1905)); // #136
+        assert_eq!(year("ނަވާރަ ސަތޭކަ", "dv"), Some(1900));
+        assert_eq!(year("milleneuveçentoçinque. urtea", "lij"), Some(1905)); // #247
+        assert_eq!(year("mille. urtea", "lij"), Some(1000));
+        assert_eq!(super::hundred_word("am").as_deref(), Some("መቶ"));
+    }
+
+    #[test]
+    fn every_rendered_year_round_trips() {
+        // #128-#136, #247: to_year of every table language, 1000..=2100.
+        for lang in ["as", "ba", "bn", "bo", "eu", "gu", "hy", "km", "lo", "mn", "mr", "my", "vi",
+                     "zh", "ja", "ta", "fi", "af", "nb", "am", "dv", "lij"] {
+            let r = num2words2_core::get_lang_by_key(lang).unwrap();
+            for y in (1000..=2100).step_by(7) {
+                let w = r.to_year(&BigInt::from(y)).unwrap();
+                assert_eq!(year(&w, lang), Some(y), "{lang} {w}");
+            }
+        }
+    }
+
+    #[test]
+    fn regional_english_uses_the_grammar() {
+        // #193: decimals, year pairs, "a hundred" -- and the lakh reading stays.
+        let dec = |t: &str, l: &str| words2num(t, l, "cardinal").map(|v| match v {
+            W2nValue::Dec(d) => d.to_string(),
+            other => format!("{other:?}"),
+        });
+        assert_eq!(dec("three point one four", "en_IN").unwrap(), "3.14");
+        assert_eq!(year("nineteen ninety nine", "en_NG"), Some(1999));
+        assert_eq!(year("twenty twenty", "en_IN"), Some(2020));
+        let card = |t: &str, l: &str| match words2num(t, l, "cardinal") {
+            Ok(W2nValue::Int(n)) => i64::try_from(n).ok(),
+            _ => None,
+        };
+        assert_eq!(card("a hundred", "en_NP"), Some(100));
+        assert_eq!(card("one million", "en_IN"), Some(1_000_000));
+        assert_eq!(card("one lakh", "en_IN"), Some(100_000));
+        assert_eq!(card("twelve lakh", "en_IN"), Some(1_200_000));
     }
 }
