@@ -48,6 +48,8 @@
 //! * The `°[CF]?` alternative appears **twice** in `_try_digit_unit`'s regex.
 //!   Harmless; the second is dead. Kept in the comment, folded in the code.
 
+mod tokens;
+
 use bigdecimal::num_traits::FromPrimitive;
 use bigdecimal::BigDecimal;
 use num_bigint::BigInt;
@@ -2067,7 +2069,7 @@ fn words2num_sentence_walk(
 
     let percent = percent_phrase(&resolved);
 
-    let parts = tokenize(sentence);
+    let (parts, _glue) = tokens::split_parts(sentence);
     let n = parts.len();
     let mut out = String::new();
     let mut i = 0usize;
@@ -2189,8 +2191,10 @@ fn words2num_sentence_walk(
                 continue;
             }
             let clean = rstrip_punct(tok).to_lowercase();
-            if clean.is_empty() {
-                break; // a lone punctuation part ("quarante-deux ?") never extends a run
+            if clean.is_empty() || tokens::is_punct_part(&clean) {
+                // a lone punctuation part ("quarante-deux ?", the ")" of
+                // "two)") never extends a run
+                break;
             }
             // A token in figures is a literal: "nineteen 90" is not 109, "fifty
             // 50" not 100 (#68). The parse would accept it through the literal

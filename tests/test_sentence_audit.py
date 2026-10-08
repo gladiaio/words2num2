@@ -87,3 +87,24 @@ def test_186_long_number_runs_finish_fast(lang, word):
 def test_202_positional_notation():
     assert s("zero point zero zero zero zero zero zero one") == "0.0000001"
     assert auto_parse_sentence("0.0000001 kg") == "0.0000001 kg"
+
+
+# #69: punctuation around a number is kept and never blocks it.
+@pytest.mark.parametrize(
+    "lang,text,expected",
+    [
+        ("en", "forty two)", "42)"),
+        ("en", "(forty two", "(42"),
+        ("en", "(forty two)", "(42)"),
+        ("en", 'he said "forty" twice', 'he said "40" twice'),
+        ("en", '"forty-two"', '"42"'),
+        ("en", "forty…", "40…"),
+        ("fr", "quarante…", "40…"),
+        ("en", "“forty two”", "“42”"),
+        ("fr", "«vingt-deux»", "«22»"),
+        ("es", "¿veinte?", "¿20?"),
+        ("en", "(see above)", "(see above)"),
+    ],
+)
+def test_69_punctuation_is_kept(lang, text, expected):
+    assert s(text, lang) == expected
