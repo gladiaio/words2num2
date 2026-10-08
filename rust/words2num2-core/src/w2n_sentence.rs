@@ -27,11 +27,14 @@
 //!   is not a run head. Same for `"a hundred and one dogs"` → `"a 101 dogs"`.
 //! * `words2num_sentence("point five")` → `"0.5"`. `to_cardinal("point")`
 //!   returns `Decimal(0)` rather than raising, so "point" *is* a valid head.
-//! * `words2num_sentence("\"forty-two\"")` → `"42\""`. Only *trailing*
-//!   punctuation is stripped, and the trailing quote is re-appended.
+//! * `words2num_sentence("\"forty-two\"")` used to be `"42\""`: only
+//!   *trailing* punctuation was stripped. Leading punctuation is now split off
+//!   and kept (`"\"42\""`, #69).
 //! * `words2num_sentence("zero point zero zero zero zero zero zero one")`
-//!   → `"1E-7"` — Python's `Decimal.__str__` flips to scientific notation
-//!   once the adjusted exponent drops below -6. See [`py_decimal_str`].
+//!   used to be `"1E-7"` — Python's `Decimal.__str__` flips to scientific
+//!   notation once the adjusted exponent drops below -6. Text output is now
+//!   positional (`"0.0000001"`, #202, [`W2nValue::text_str`]); the *value*
+//!   keeps Python's `str()` ([`py_decimal_str`]).
 //! * `auto_parse("$5kn")` raises **KeyError**, not `Words2NumError`: the
 //!   regex accepts `[kKmMbBtT][nN]?` but `SCALE_SUFFIXES` only holds
 //!   `k K m M b B bn t T tn`. It escapes `auto_parse_sentence` uncaught
@@ -110,6 +113,31 @@ impl W2nValue {
             W2nValue::Dec(d) => {
                 let (digits, scale) = d.as_bigint_and_exponent();
                 py_decimal_str(&digits, scale)
+            }
+        }
+    }
+
+    /// The value as it is written into running text: positional notation,
+    /// never an exponent (#202). `py_str` copies Python's `str()`, which turns
+    /// `Decimal("0.0000001")` into `"1E-7"` and `1e-07` for a float; a text
+    /// normaliser must write `0.0000001`. The value itself (`py_repr`) is
+    /// untouched.
+    pub fn text_str(&self) -> String {
+        match self {
+            W2nValue::Int(i) => i.to_string(),
+            W2nValue::Float(f) => {
+                let r = py_float_repr(*f);
+                if r.contains('e') {
+                    // Rust's `Display` is the shortest round-trip digits in
+                    // positional form (1e-7 -> "0.0000001").
+                    format!("{}", f)
+                } else {
+                    r
+                }
+            }
+            W2nValue::Dec(d) => {
+                let (digits, scale) = d.as_bigint_and_exponent();
+                decimal_positional_str(&digits, scale)
             }
         }
     }
@@ -310,6 +338,27 @@ pub fn py_decimal_str(digits: &BigInt, scale: i64) -> String {
         fracpart,
         expo
     )
+}
+
+/// `format(Decimal, "f")`: the coefficient with the point placed by the
+/// exponent, never in scientific notation. Keeps the unnormalised scale, so
+/// `Decimal("2.50")` stays `"2.50"`.
+pub fn decimal_positional_str(digits: &BigInt, scale: i64) -> String {
+    let neg = digits.sign() == num_bigint::Sign::Minus;
+    let int_str = digits.magnitude().to_string();
+    let body = if scale <= 0 {
+        format!("{}{}", int_str, "0".repeat((-scale) as usize))
+    } else {
+        let scale = scale as usize;
+        let padded = if int_str.len() <= scale {
+            format!("{}{}", "0".repeat(scale + 1 - int_str.len()), int_str)
+        } else {
+            int_str
+        };
+        let cut = padded.len() - scale;
+        format!("{}.{}", &padded[..cut], &padded[cut..])
+    };
+    format!("{}{}", if neg { "-" } else { "" }, body)
 }
 
 // ===========================================================================
@@ -1161,7 +1210,9 @@ fn en_number_words(parts: &[String], i: usize) -> Vec<EnWord> {
     use crate::w2n_lang_en::{tens_value, unit_value};
     let mut words = Vec::new();
     let mut j = i;
-    while j < parts.len() {
+    // Called at every run start: without a bound, a text made of number words
+    // is rescanned to its end from each position (#186).
+    while j < parts.len() && words.len() < MAX_DIGIT_RUN_WORDS {
         let tok = &parts[j];
         if py_str_isspace(tok) {
             j += 1;
@@ -1196,14 +1247,18 @@ fn en_number_words(parts: &[String], i: usize) -> Vec<EnWord> {
 
 /// A digit string read one digit at a time — an account number, ZIP code or
 /// phone number: "four five six seven" -> "4567", "zero six one two" ->
-/// "0612". Two or more consecutive single-digit words (zero, one..nine), no
-/// tens or scale word among them; "oh"/"o" count as 0 only *inside* such a
-/// run, never as its first word; "double"/"triple" repeat the digit after
-/// them ("double zero seven" -> "007"). A lone digit word ("press one") is
-/// left to the cardinal grammar, as is "twenty five". The digits are
-/// concatenated, never summed, and a leading zero is kept — which is why
-/// this returns the string rather than a value. Also returns the last part
-/// index covered.
+/// "0612". Consecutive single-digit words (zero, one..nine), no tens or scale
+/// word among them; "double"/"triple" repeat the digit after them ("double
+/// zero seven" -> "007"). A lone digit word ("press one") is left to the
+/// cardinal grammar, as is "twenty five". The digits are concatenated, never
+/// summed, and a leading zero is kept — which is why this returns the string
+/// rather than a value. Also returns the last part index covered.
+///
+/// Three digits at least, or two with a leading zero ("zero six", "oh
+/// seven"): two digit words are how a speaker gives a range, "two three
+/// minutes" is 2 or 3 minutes, never 23 (#51). "oh"/"o" is 0 only next to
+/// another digit word ("room oh seven" -> "room 07"); on its own it is the
+/// interjection (#79), which the walker leaves alone.
 fn en_digit_run(parts: &[String], i: usize) -> Option<(String, usize)> {
     use crate::w2n_lang_en::unit_value;
     let mut digits = String::new();
@@ -1211,8 +1266,8 @@ fn en_digit_run(parts: &[String], i: usize) -> Option<(String, usize)> {
     let mut repeat = 1usize;
     for (k, w) in en_number_words(parts, i).iter().enumerate() {
         let d = match w.word.as_str() {
-            "oh" | "o" if k > 0 => 0,
-            "oh" | "o" | "nought" | "naught" => break,
+            "oh" | "o" => 0,
+            "nought" | "naught" if k == 0 => break,
             "double" | "triple" => {
                 if repeat > 1 {
                     break;
@@ -1234,12 +1289,37 @@ fn en_digit_run(parts: &[String], i: usize) -> Option<(String, usize)> {
         }
     }
     let (len, part) = end?;
-    if len < 2 {
+    digits.truncate(len);
+    if !is_digit_string(&digits) {
         return None;
     }
-    digits.truncate(len);
     Some((digits, part))
 }
+
+/// Is a string of concatenated digit words a dictated digit string? Three
+/// digits or more, or two with a leading zero ("06"). Two digit words without
+/// one are a range ("deux trois minutes", "two three minutes"): 2 or 3, not
+/// 23 (#51).
+fn is_digit_string(digits: &str) -> bool {
+    digits.len() >= 3 || (digits.len() == 2 && digits.starts_with('0'))
+}
+
+/// A run never grows past this many words. No real cardinal comes close
+/// ("one million, two hundred and thirty-four thousand, five hundred and
+/// sixty-seven" is 13); without the bound, a text made of number words that do
+/// not combine ("zweitausend zweitausend ...") re-parsed an ever-longer run from
+/// every start, cubic in its length (#186).
+const MAX_RUN_WORDS: usize = 40;
+
+/// A run stops growing after this many consecutive words that did not make
+/// the run parse: a connector or a "cents"-type word needs one or two, never
+/// eight (#186).
+const MAX_FAILED_EXTENSIONS: usize = 3;
+
+/// The longest digit dictation read at once (an IBAN is 34 characters). A
+/// longer one is cut into consecutive strings rather than rescanned from
+/// every position (#186).
+const MAX_DIGIT_RUN_WORDS: usize = 64;
 
 /// The digit-string reading for a reverse-table language: fr "sept cinq
 /// zéro un zéro" -> "75010", es "seis uno nueve ocho cero" -> "61980", fr
@@ -1258,14 +1338,15 @@ fn table_digit_run(
     let mut end: Option<(usize, usize)> = None;
     let mut j = i;
     let mut article_head = false;
-    while j < parts.len() {
+    while j < parts.len() && digits.len() < MAX_DIGIT_RUN_WORDS {
         let tok = &parts[j];
         if py_str_isspace(tok) {
             j += 1;
             continue;
         }
         let clean = rstrip_punct(tok).to_lowercase();
-        if clean.contains('-') {
+        // "cinq 5": a token in figures is a literal, not a digit word (#68).
+        if clean.contains('-') || holds_digit(&clean) {
             break;
         }
         let article = is_article_word(resolved, &clean);
@@ -1286,11 +1367,30 @@ fn table_digit_run(
         j += 1;
     }
     let (len, part) = end?;
-    if len < 2 || (article_head && len < 3) {
+    digits.truncate(len);
+    if !is_digit_string(&digits) || (article_head && len < 3) {
         return None;
     }
-    digits.truncate(len);
     Some((digits, part))
+}
+
+/// Is `run` exactly two words, each a single digit (0-9) on its own, without a
+/// leading zero? Then it is a range ("deux trois minutes"), and the run must
+/// not read it as one number (#51).
+fn two_digit_words(converter: &Converter, run: &[String]) -> bool {
+    let words: Vec<String> = run
+        .iter()
+        .filter(|t| !py_str_isspace(t))
+        .map(|t| rstrip_punct(t).to_lowercase())
+        .collect();
+    if words.len() != 2 {
+        return false;
+    }
+    let digit = |w: &str| match converter.to_cardinal(w) {
+        Ok(W2nValue::Int(v)) if v >= BigInt::from(0) && v <= BigInt::from(9) => v.to_string().parse::<u8>().ok(),
+        _ => None,
+    };
+    matches!((digit(&words[0]), digit(&words[1])), (Some(a), Some(_)) if a != 0)
 }
 
 /// A spoken year that is not one English cardinal: "nineteen" or "twenty"
@@ -1985,7 +2085,11 @@ fn words2num_sentence_walk(
         let head = rstrip_punct(piece).to_lowercase();
         // Most words of a transcript are not numbers: decide that with one cheap
         // check before anything that looks at the neighbours or the ordinal table.
-        let head_is_number = starts_run(&converter, &head, decimal_heads);
+        // en "oh" / "o": the interjection, a number only next to another digit
+        // word ("room oh seven"), which the digit run reads (#79).
+        let head_is_oh = matches!(converter, Converter::En) && matches!(head.as_str(), "oh" | "o");
+        let head_is_number = starts_run(&converter, &head, decimal_heads)
+            && !(head_is_oh && !(en_cardinal && en_digit_run(&parts, i).is_some()));
         let article_number = plain && is_article_word(&resolved, &head);
         let head_is_apocope = converter.apocope(&head).is_some();
         let head_is_article = en_cardinal && matches!(head.as_str(), "a" | "an");
@@ -2076,6 +2180,8 @@ fn words2num_sentence_walk(
         // The spoken decimal separator of a table-language decimal run.
         let mut best_sep: Option<char> = None;
         let mut j = i;
+        let mut words = 0usize;
+        let mut failed = 0usize;
         while j < n {
             let tok = &parts[j];
             if py_str_isspace(tok) {
@@ -2085,6 +2191,16 @@ fn words2num_sentence_walk(
             let clean = rstrip_punct(tok).to_lowercase();
             if clean.is_empty() {
                 break; // a lone punctuation part ("quarante-deux ?") never extends a run
+            }
+            // A token in figures is a literal: "nineteen 90" is not 109, "fifty
+            // 50" not 100 (#68). The parse would accept it through the literal
+            // tail, so this cannot be left to the parse.
+            if holds_digit(&clean) {
+                break;
+            }
+            words += 1;
+            if words > MAX_RUN_WORDS || failed >= MAX_FAILED_EXTENSIONS {
+                break; // #186
             }
             // A token that is not a number word on its own may still complete
             // the run: fr "cents" / "vingts" only exist inside "deux cents" /
@@ -2121,6 +2237,9 @@ fn words2num_sentence_walk(
                 Err(_) if plain => converter.to_ordinal(&stripped).ok().map(|v| (v, true)),
                 Err(_) => None,
             };
+            // "deux trois", "two three": two digit words are a range, not one
+            // number (#51). A dictated string goes through the digit run.
+            let hit = hit.filter(|_| !two_digit_words(&converter, &parts[i..=j]));
             match hit {
                 // A run never ends on a connector: "one and a half" is "1 and
                 // a half", not "1 half"; "five point" keeps its "point".
@@ -2128,10 +2247,11 @@ fn words2num_sentence_walk(
                     best_value = Some(v);
                     best_end = j;
                     best_ordinal = ordinal;
+                    failed = 0;
                 }
-                Some(_) => {}
+                Some(_) => failed += 1,
                 None if !candidate => break,
-                None => {}
+                None => failed += 1,
             }
             // A token ending in terminal punctuation closes the run.
             if ends_with_terminal_punct(tok) {
@@ -2181,9 +2301,9 @@ fn words2num_sentence_walk(
                 // "the nineteen nineties".
                 None
             } else if let (W2nValue::Dec(_), Some(sep)) = (&v, best_sep) {
-                Some(v.py_str().replacen('.', &sep.to_string(), 1))
+                Some(v.text_str().replacen('.', &sep.to_string(), 1))
             } else {
-                Some(v.py_str())
+                Some(v.text_str())
             };
             match rendered {
                 Some(text) => {
@@ -3336,6 +3456,9 @@ fn match_quantity_at(chars: &[char], pos: usize) -> Option<usize> {
 /// if isinstance(value, float) and value.is_integer(): return str(int(value))
 /// return str(value)
 /// ```
+///
+/// Except the exponent: Python's `str()` writes `1e-07` / `1E-7`, which has no
+/// place in rewritten text, so the value is written positionally (#202).
 fn format_number(value: &W2nValue) -> String {
     if let W2nValue::Float(f) = value {
         // float.is_integer() is False for inf/nan.
@@ -3348,7 +3471,7 @@ fn format_number(value: &W2nValue) -> String {
             }
         }
     }
-    value.py_str()
+    value.text_str()
 }
 
 /// `converters.auto._IRREGULAR_PLURALS`
@@ -3682,5 +3805,64 @@ mod digits_tests {
         );
         assert_eq!(s("una llamada", "es", "cardinal", false).unwrap(), "una llamada");
         assert_eq!(s("ciento uno", "es", "cardinal", false).unwrap(), "101");
+    }
+}
+
+/// Sentence walker fixes from the October 2026 audit, one test per issue.
+#[cfg(test)]
+mod audit_tests {
+    use super::words2num_sentence as s;
+
+    fn c(text: &str, lang: &str) -> String {
+        s(text, lang, "cardinal", false).unwrap()
+    }
+
+    #[test]
+    fn issue_51_two_digit_words_are_a_range() {
+        assert_eq!(c("two three minutes", "en"), "2 3 minutes");
+        assert_eq!(c("deux trois minutes", "fr"), "2 3 minutes");
+        assert_eq!(c("zero six", "en"), "06");
+        assert_eq!(c("four five six", "en"), "456");
+    }
+
+    #[test]
+    fn issue_68_digit_tokens_never_join_a_run() {
+        assert_eq!(c("nineteen 90", "en"), "19 90");
+        assert_eq!(c("born twenty 1990", "en"), "born 20 1990");
+        assert_eq!(c("cinq 5", "fr"), "5 5");
+    }
+
+    #[test]
+    fn issue_79_oh_alone_is_a_word() {
+        assert_eq!(c("oh no", "en"), "oh no");
+        assert_eq!(c("I said oh", "en"), "I said oh");
+        assert_eq!(c("room oh seven", "en"), "room 07");
+    }
+
+    /// 2000 number tokens that never merge: each start used to re-parse a run
+    /// growing to the end of the text, O(n^3).
+    #[test]
+    fn issue_186_long_runs_are_linear() {
+        for (lang, word) in [("de", "zweitausend"), ("it", "duemila"), ("es", "mil"), ("en", "nineteen ninety")] {
+            let text = vec![word; 2000].join(" ");
+            let start = std::time::Instant::now();
+            let out = c(&text, lang);
+            assert!(!out.is_empty());
+            assert!(
+                start.elapsed().as_secs_f64() < 20.0,
+                "{lang}: 2000 tokens took {:?}",
+                start.elapsed()
+            );
+        }
+    }
+
+    #[test]
+    fn issue_202_no_exponent_in_text() {
+        assert_eq!(c("zero point zero zero zero zero zero zero one", "en"), "0.0000001");
+        let prefer = std::collections::HashMap::new();
+        assert_eq!(
+            super::auto_parse_sentence("0.0000001 kg", "en", &prefer, None, None, false).unwrap(),
+            "0.0000001 kg"
+        );
     }
 }
