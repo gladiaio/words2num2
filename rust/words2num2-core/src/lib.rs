@@ -18,6 +18,8 @@ use num_bigint::BigInt;
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock, RwLock};
 
+mod ord_compose;
+mod ord_forms;
 pub mod w2n_currency;
 pub mod w2n_formats;
 pub mod w2n_lang_en;
@@ -148,11 +150,21 @@ fn tables() -> &'static TableCache {
 /// does `table.setdefault(key, n)` — **first write wins**, so the canonical
 /// short form takes precedence over later spellings. That ordering is
 /// load-bearing; do not switch to insert-overwrite.
+///
+/// The ordinal table starts at 0: there is no "minus first", and what the
+/// renderers return for to_ordinal(-1) is garbage that shadowed real ordinals
+/// (et "üheksas" = 9th and ms "kesepuluh" = 10th both came back as -1, #62).
+/// It also holds the ordinal of every power of ten above the range (es
+/// "millonésimo", fr "cent millième"), the scale ordinals a composed ordinal
+/// ends on (#125).
 fn build_table(lang: &str, ordinal: bool) -> Result<HashMap<String, i64>, LookupError> {
     let l = num2words2_core::get_lang_by_key(lang)
         .ok_or_else(|| LookupError::NotImplemented(lang.to_string()))?;
     let mut table = HashMap::new();
-    for n in LOOKUP_LO..LOOKUP_HI {
+    let lo = if ordinal { 0 } else { LOOKUP_LO };
+    let scales = (5..=18).map(|k| 10i64.pow(k));
+    let extra: Vec<i64> = if ordinal { scales.collect() } else { Vec::new() };
+    for n in (lo..LOOKUP_HI).chain(extra) {
         let v = BigInt::from(n);
         let words = if ordinal { l.to_ordinal(&v) } else { l.to_cardinal(&v) };
         let Ok(words) = words else { continue }; // Python swallows every raise
@@ -205,40 +217,51 @@ pub fn lookup_norm(
     }
 
     let key = (lang.to_string(), ordinal);
-    {
+    let cached = {
         let t = tables().read().unwrap();
-        if let Some(tab) = t.get(&key) {
-            return Ok(table_get(tab, lang, normalized, ordinal).map(|v| sign * v));
+        match t.get(&key) {
+            Some(tab) => match tab.get(normalized) {
+                Some(v) => return Ok(Some(sign * v)),
+                None => true,
+            },
+            None => false,
+        }
+    };
+    if !cached {
+        let built = build_table(lang, ordinal)?;
+        let direct = built.get(normalized).copied();
+        tables().write().unwrap().entry(key.clone()).or_insert(built);
+        if let Some(v) = direct {
+            return Ok(Some(sign * v));
         }
     }
-    let built = build_table(lang, ordinal)?;
-    let got = table_get(&built, lang, normalized, ordinal).map(|v| sign * v);
-    tables().write().unwrap().insert(key, built);
-    Ok(got)
+    // The spoken variants are worked out with no lock held: a language's
+    // ordinal forms may consult another table (hy reads a glued cardinal).
+    let variants = spoken_variants(lang, normalized, ordinal);
+    if variants.is_empty() {
+        return Ok(None);
+    }
+    let t = tables().read().unwrap();
+    Ok(t.get(&key)
+        .and_then(|tab| variants.iter().find_map(|v| tab.get(v)))
+        .map(|v| sign * v))
 }
 
-/// A table hit for `normalized`, or for one of its spoken variants: the fr
+/// The spoken variants of `normalized` worth a second table probe: the fr
 /// plural -s on a cardinal, the gender / declension / apocope of an ordinal.
-fn table_get(
-    tab: &HashMap<String, i64>,
-    lang: &str,
-    normalized: &str,
-    ordinal: bool,
-) -> Option<i64> {
-    if let Some(v) = tab.get(normalized) {
-        return Some(*v);
+fn spoken_variants(lang: &str, normalized: &str, ordinal: bool) -> Vec<String> {
+    if !ordinal {
+        return fr_plural_variants(lang, normalized);
     }
-    let variants = if ordinal {
-        ordinal_variants(lang, normalized)
-    } else {
-        fr_plural_variants(lang, normalized)
-    };
-    for variant in variants {
-        if let Some(v) = tab.get(&variant) {
-            return Some(*v);
-        }
-    }
-    None
+    let mut out = ordinal_variants(lang, normalized);
+    out.extend(ord_forms::variants(lang, normalized));
+    out
+}
+
+/// Does the normalized ordinal `norm` spell `rendered` (a normalized
+/// `to_ordinal` rendering), as is or through one of its spoken variants?
+fn spells_ordinal(lang: &str, norm: &str, rendered: &str) -> bool {
+    norm == rendered || spoken_variants(lang, norm, true).iter().any(|v| v == rendered)
 }
 
 /// num2words renders one ordinal form per number (fr "premier", es "primero",
