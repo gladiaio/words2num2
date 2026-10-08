@@ -725,6 +725,23 @@ fn digit_run(lang: &str, toks: &[&str]) -> Option<i64> {
     })
 }
 
+/// hu "egymillio" -> ["egy", "millio"]: a token that is a multiplier (1..999)
+/// glued to a scale word, split in two. Any other token is returned as is.
+fn unglue<'a>(lang: &str, tok: &'a str, scales: &[(String, i64)]) -> Vec<&'a str> {
+    if lookup_plain(lang, tok).is_some() || scales.iter().any(|(w, _)| w == tok) {
+        return vec![tok];
+    }
+    for (w, _) in scales {
+        if tok.len() > w.len() && tok.ends_with(w.as_str()) {
+            let pre = &tok[..tok.len() - w.len()];
+            if lookup_plain(lang, pre).is_some_and(|m| (1..1000).contains(&m)) {
+                return vec![pre, &tok[pre.len()..]];
+            }
+        }
+    }
+    vec![tok]
+}
+
 /// km "មួយម៉ឺន ពីរពាន់ បីរយ សែសិបប្រាំ" = 10000 + 2000 + 300 + 45: each token a
 /// group, strictly decreasing in place value so "two three" never sums.
 fn additive_groups(lang: &str, toks: &[&str], scales: &[(String, i64)]) -> Option<i64> {
@@ -758,6 +775,13 @@ fn parse_scaled_inner(lang: &str, text: &str, sc: &Scales, conns: &[&str]) -> Op
         }
     }
     let toks: Vec<&str> = text.split_whitespace().collect();
+    // hu "egymillió-egy": a scale glued to its multiplier inside a longer number.
+    if toks.len() > 1 {
+        let unglued: Vec<&str> = toks.iter().flat_map(|t| unglue(lang, t, scales)).collect();
+        if unglued.len() != toks.len() {
+            return parse_scaled_inner(lang, &unglued.join(" "), sc, conns);
+        }
+    }
     if sc.digit_by_digit {
         if let Some(v) = digit_run(lang, &toks) {
             return Some(v);
@@ -790,11 +814,15 @@ fn parse_scaled_inner(lang: &str, text: &str, sc: &Scales, conns: &[&str]) -> Op
                     }
                 }
                 // ha "dubu sha biyu ɗari uku ..." : the longest multiplier that
-                // leaves a remainder below the scale.
+                // leaves a remainder below the scale. A multiplier of 1000 or more
+                // only ends the number: tet "miliaun rihun ida" = 10^6 · 1000.
                 if sc.postfix.contains(word) {
                     for j in (1..=after.len()).rev() {
                         let m = trim_connectors(&after[..j].join(" "), conns);
-                        let Some(m) = lookup_plain(lang, &m).filter(|m| (1..1000).contains(m)) else {
+                        let ends = j == after.len();
+                        let Some(m) = lookup_plain(lang, &m)
+                            .filter(|&m| (1..1000).contains(&m) || (ends && (1..*mag).contains(&m)))
+                        else {
                             continue;
                         };
                         if let Some(r) = rest(&after[j..], *mag) {
@@ -804,13 +832,18 @@ fn parse_scaled_inner(lang: &str, text: &str, sc: &Scales, conns: &[&str]) -> Op
                 }
             }
             // « mille » nu (pas de multiplicateur à gauche) = 1×mille ; de « eine Million ».
+            // A left part as big as the scale is no multiplier: ko "십만 천" is
+            // 100000 + 1000, not 100000 × 1000 — the additive split below reads it.
             let l = if left_trim.is_empty()
                 || article_one(lang, &left_trim)
                 || sc.one_forms.contains(&left_trim)
             {
                 1
             } else {
-                parse_scaled_inner(lang, &left, sc, conns)?
+                match parse_scaled_inner(lang, &left, sc, conns) {
+                    Some(l) if l < *mag => l,
+                    _ => break,
+                }
             };
             let r = if trim_connectors(right.trim(), conns).is_empty() {
                 0
@@ -1215,6 +1248,14 @@ mod tests {
         // en_AERO reads digits one at a time.
         assert_eq!(parse_scaled("en_AERO", "wun zero zero zero zero zero"), Some(100_000));
         assert_eq!(parse_scaled("en_AERO", "wun too tree fower fife"), Some(12_345));
+        // A postfix multiplier of 1000 or more ends the number.
+        assert_eq!(parse_scaled("tet", "miliaun rihun ida"), Some(1_000_000_000));
+        assert_eq!(parse_scaled("tet", "miliaun ida rihun ida"), Some(1_001_000));
+        // A left part as big as the scale is a group, not a multiplier.
+        assert_eq!(parse_scaled("ko", "십만 천"), Some(101_000));
+        assert_eq!(parse_scaled("ko", "백만 천"), Some(1_001_000));
+        // A scale glued to its multiplier inside a longer number.
+        assert_eq!(parse_scaled("hu", "egymillió-egy"), Some(1_000_001));
         // Prefix languages never take a postfix multiplier or sum bare groups.
         assert_eq!(parse_scaled("fr", "mille deux cents"), Some(1_200));
         assert_eq!(parse_scaled("es", "mil doscientos"), Some(1_200));
