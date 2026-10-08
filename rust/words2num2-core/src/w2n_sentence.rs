@@ -1627,6 +1627,10 @@ fn percent_phrase(resolved: &str) -> Option<(&'static str, &'static str)> {
         "it" => Some(("per", "cento")),
         "en" => Some(("per", "cent")),
         "ca" => Some(("per", "cent")),
+        // el "τοις εκατό", vi "phần trăm": the everyday words for percent (#82).
+        // Normalised, as the walker compares them.
+        "el" => Some(("τοις", "εκατο")),
+        "vi" => Some(("phan", "tram")),
         _ => None,
     }
 }
@@ -1918,14 +1922,68 @@ fn article_words(resolved: &str) -> &'static str {
         "pt" => "um uma",
         "nl" => "een",
         "de" => "ein eine einen einem einer eines",
+        // The indefinite article is the word for one (#83): tr "bir gün", hu
+        // "egy nap", sv "ett par", da/no "en dag", el "ένα παιδί"; fa / hi /
+        // bn / vi use the numeral as the indefinite determiner ("یک روز",
+        // "एक दिन", "một người"). ro "un" / "o" (#183). Normalised.
+        "tr" => "bir",
+        "hu" => "egy",
+        "sv" => "en ett",
+        "da" | "dk" => "en et",
+        "no" | "nb" | "nn" => "en ei et ett",
+        "el" => "ενας ενα μια μιας ενος εναν",
+        "fa" => "یک",
+        "hi" => "एक",
+        "bn" => "এক",
+        "vi" => "mot",
+        "ro" => "un o",
         _ => "",
     }
 }
 
 fn is_article_word(resolved: &str, word: &str) -> bool {
+    let norm = crate::normalize(word);
     article_words(resolved)
         .split_whitespace()
-        .any(|w| w == word)
+        .any(|w| w == word || w == norm)
+}
+
+/// Number words that are also a common word of the language, and whose
+/// number reading needs another number word next to them (the maintainer's
+/// policy, #80): it "sei" (you are), fr "neuf" (new), nl "acht" (attention,
+/// "acht geven"), ca "nou" (new), ro "nouă" (new), tr "yedi" (ate) and "yüz"
+/// (face). "dix neuf", "sei e trenta" still convert; "tu sei bravo",
+/// "quoi de neuf" stay words. Normalised.
+fn homograph_words(resolved: &str) -> &'static str {
+    let base = resolved.split(&['_', '-'][..]).next().unwrap_or(resolved);
+    match base {
+        "it" => "sei",
+        "fr" => "neuf",
+        "nl" | "af" => "acht",
+        "ca" => "nou",
+        "ro" => "noua",
+        "tr" => "yedi yuz",
+        _ => "",
+    }
+}
+
+/// Is the word at `i` (as written, `piece`) a homograph of a number word? de
+/// "Acht" capitalised is the noun ("in Acht nehmen", "Acht geben"), the
+/// number is lower case.
+fn is_homograph(resolved: &str, parts: &[String], i: usize, piece: &str) -> bool {
+    let base = resolved.split(&['_', '-'][..]).next().unwrap_or(resolved);
+    let word = rstrip_punct(piece);
+    if base == "de" {
+        let sentence_start = prev_word(parts, i).is_none()
+            || parts[..i]
+                .iter()
+                .rev()
+                .find(|t| !py_str_isspace(t))
+                .is_some_and(|t| matches!(t.chars().last(), Some('.' | '!' | '?' | ':')));
+        return word == "Acht" && !sentence_start;
+    }
+    let norm = crate::normalize(word);
+    homograph_words(resolved).split_whitespace().any(|w| w == norm)
 }
 
 /// Units, currencies and time words a lone article-number counts: "one
@@ -1971,6 +2029,40 @@ fn unit_words(resolved: &str) -> &'static str {
              monat monate jahr jahre kilo kilometer meter gramm liter grad"
         }
         "ca" => "euro euros dolar dolars centim centims hora hores minut minuts dia dies setmana setmanes mes mesos any anys",
+        // #83. No "day" word: "bir gün", "egy nap", "एक दिन" are "one day"
+        // the article way ("once upon a time").
+        "tr" => {
+            "lira liralik kurus dolar euro avro sterlin saat dakika hafta yil sene kilo \
+             kilogram gram metre kilometre litre derece yuzde"
+        }
+        "hu" => {
+            "forint euro dollar ora perc ev honap kilo kilogramm gramm meter kilometer liter \
+             fok szazalek"
+        }
+        "sv" => {
+            "krona kronor ore euro dollar timme timmar minut minuter vecka veckor manad \
+             manader ar kilo kilometer meter gram liter grad grader procent"
+        }
+        "da" | "dk" => {
+            "krone kroner ore euro dollar time timer minut minutter uge uger maned maneder ar \
+             kilo kilometer meter gram liter grad grader procent"
+        }
+        "no" | "nb" | "nn" => {
+            "krone kroner ore euro dollar time timer minutt minutter uke uker maned maneder ar \
+             kilo kilometer meter gram liter grad grader prosent"
+        }
+        "el" => {
+            "ευρω δολαριο δολαρια λεπτο λεπτα ωρα ωρες εβδομαδα μηνα μηνας χρονο χρονια ετος \
+             κιλο κιλα μετρο χιλιομετρο λιτρο βαθμο τοις"
+        }
+        "fa" => "تومان ریال دلار یورو ساعت دقیقه هفته ماه سال کیلو متر کیلومتر لیتر درصد گرم",
+        "hi" => {
+            "रुपये रुपया रुपए डॉलर यूरो घंटा घंटे मिनट हफ्ता हफ़्ता महीना साल किलो मीटर किलोमीटर \
+             लीटर प्रतिशत ग्राम"
+        }
+        "bn" => "টাকা ডলার ইউরো ঘণ্টা মিনিট সপ্তাহ মাস বছর কিলো মিটার কিলোমিটার লিটার শতাংশ গ্রাম",
+        "vi" => "dong do euro gio phut tuan thang nam ky kilo can met km lit phan",
+        "ro" => "leu lei ban bani euro dolar ora ore minut minute saptamana luna an ani kilogram metru litru grad procent",
         _ => "",
     }
 }
@@ -2039,7 +2131,10 @@ fn article_is_count(resolved: &str, parts: &[String], i: usize, next_is_number: 
         return true;
     }
     if let Some(n) = next.as_deref() {
-        if unit_words(resolved).split_whitespace().any(|u| u == n) {
+        if unit_words(resolved)
+            .split_whitespace()
+            .any(|u| u == n || crate::normalize(u) == n)
+        {
             return true;
         }
         if percent_phrase(resolved)
@@ -2192,7 +2287,7 @@ fn words2num_sentence_walk(
         let head_is_article = en_cardinal && matches!(head.as_str(), "a" | "an");
         let head_is_repeat = en_cardinal && matches!(head.as_str(), "double" | "triple");
         let head_is_scale = after_decimal && is_scale_word(&converter, &head, 1_000);
-        let head_is_percent = percent.is_some_and(|(_, word)| head == word);
+        let head_is_percent = percent.is_some_and(|(_, word)| crate::normalize(&head) == word);
         let ordinal_head = plain && !head_is_number && converter.is_ordinal_word(&head);
         after_decimal = false;
         if !head_is_number
@@ -2220,16 +2315,25 @@ fn words2num_sentence_walk(
         // ("un" in es "un mil") followed by one, or — in English — with
         // "a"/"an" in front of a scale word ("a hundred dollars").
         let apocope_head = head_is_apocope && next_starts_run;
-        let article_head = head_is_article
+        let article_head = (head_is_article
             && !ends_with_terminal_punct(piece)
             && next
                 .as_deref()
                 .is_some_and(crate::w2n_lang_en::is_scale_word)
             // "half a million", "a quarter of a million": a quantity, kept in words.
-            && !matches!(prev_word(&parts, i).as_deref(), Some("half" | "quarter"));
+            && !matches!(prev_word(&parts, i).as_deref(), Some("half" | "quarter")))
+            // The article-one in front of a scale word is the number: sv "en
+            // miljon", no "ett tusen", ro "o mie", "un milion" (#183).
+            || (article_number
+                && !head_is_apocope
+                && !matches!(converter, Converter::En)
+                && !ends_with_terminal_punct(piece)
+                && next.as_deref().is_some_and(|t| is_scale_word(&converter, t, 100)));
         // "vingt pour cent": "cent" after "pour" is the percent sign, not 100.
         let percent_tail = head_is_percent
-            && percent.is_some_and(|(prep, _)| prev_word(&parts, i).as_deref() == Some(prep));
+            && percent.is_some_and(|(prep, _)| {
+                prev_word(&parts, i).is_some_and(|p| crate::normalize(&p) == prep)
+            });
         // "two point five million", "deux virgule cinq millions": the scale word stays a word.
         let decimal_scale = head_is_scale && !next_starts_run;
         // en "double zero seven".
@@ -2306,7 +2410,9 @@ fn words2num_sentence_walk(
             // A token that is not a number word on its own may still complete
             // the run: fr "cents" / "vingts" only exist inside "deux cents" /
             // "quatre vingts". So the run is tried *with* it before giving up.
-            let candidate = is_candidate(&converter, &clean, includable);
+            // The head was already accepted (an article in front of a scale
+            // word is not a number word on its own: sv "en miljon").
+            let candidate = j == i || is_candidate(&converter, &clean, includable);
             let run = parts[i..=j].concat();
             let stripped = rstrip_punct(py_strip(&run)).to_string();
             // The standard converters never return `None`, so a successful
@@ -2402,6 +2508,17 @@ fn words2num_sentence_walk(
                 && !article_is_count(&resolved, &parts, i, next_is_number)
             {
                 // A lone "one" / "un" / "um" is an article or a pronoun.
+                None
+            } else if plain
+                && best_end == i
+                && is_homograph(&resolved, &parts, i, piece)
+                && !next_is_number
+                // "sei e trenta": a connector, then a number.
+                && !(next.as_deref().is_some_and(|t| is_includable(t, includable))
+                    && next_word2(&parts, i).is_some_and(|t| starts_run(&converter, &t, decimal_heads)))
+                && !prev_word(&parts, i).is_some_and(|p| starts_run(&converter, &p, decimal_heads))
+            {
+                // "tu sei bravo", "quoi de neuf": a lone homograph is the word (#80).
                 None
             } else if plain && best_end == i && lone_scale_word(&converter, &head) {
                 // "a couple of thousand", "des millions": a quantity, not a number.

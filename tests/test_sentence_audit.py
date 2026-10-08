@@ -156,3 +156,80 @@ def test_65_renderer_connectors(lang, text, expected):
 )
 def test_67_comma_inside_a_cardinal(lang, text, expected):
     assert s(text, lang) == expected
+
+
+# #80: a lone homograph of a number word stays a word (maintainer policy: it
+# converts only next to another number word). de "Acht" capitalised is the noun.
+@pytest.mark.parametrize(
+    "lang,text,expected",
+    [
+        ("it", "tu sei bravo", "tu sei bravo"),
+        ("fr", "quoi de neuf ?", "quoi de neuf ?"),
+        ("fr", "c'est tout neuf", "c'est tout neuf"),
+        ("de", "in Acht nehmen", "in Acht nehmen"),
+        ("nl", "acht geven", "acht geven"),
+        ("fr", "neuf euros", "neuf euros"),
+        # Next to another number word it is the number.
+        ("it", "sei e trenta", "6 e 30"),
+        ("fr", "dix neuf", "19"),
+        ("fr", "neuf cents", "900"),
+        ("de", "um acht Uhr", "um 8 Uhr"),
+        ("de", "Acht Leute kamen.", "8 Leute kamen."),
+    ],
+)
+def test_80_homographs(lang, text, expected):
+    assert s(text, lang) == expected
+
+
+# #82: the percent idiom holding the hundred word stays words.
+@pytest.mark.parametrize(
+    "lang,text,expected",
+    [
+        ("el", "πενήντα τοις εκατό", "50 τοις εκατό"),
+        ("el", "εκατό τοις εκατό", "100 τοις εκατό"),
+        ("vi", "hai mươi phần trăm", "20 phần trăm"),
+        ("fr", "cinquante pour cent", "50 pour cent"),
+    ],
+)
+def test_82_percent_idiom(lang, text, expected):
+    assert s(text, lang) == expected
+
+
+# #83: the indefinite article that is the word for one stays a word, unless a
+# unit follows.
+@pytest.mark.parametrize(
+    "lang,text,expected",
+    [
+        ("tr", "Bir gün bir adam geldi.", "Bir gün bir adam geldi."),
+        ("tr", "bir şey değil", "bir şey değil"),
+        ("hu", "Egy nap egy ember jött.", "Egy nap egy ember jött."),
+        ("sv", "ett par dagar", "ett par dagar"),
+        ("no", "En dag kom en mann med et barn.", "En dag kom en mann med et barn."),
+        ("da", "En dag kom en mand med et barn.", "En dag kom en mand med et barn."),
+        ("el", "και ένα παιδί", "και ένα παιδί"),
+        ("fa", "یک روز یک مرد آمد.", "یک روز یک مرد آمد."),
+        ("hi", "एक दिन एक आदमी आया।", "एक दिन एक आदमी आया।"),
+        ("vi", "có một người đàn ông đến", "có một người đàn ông đến"),
+        ("tr", "bir lira", "1 lira"),
+        ("hu", "egy óra", "1 óra"),
+        ("tr", "bir iki üç", "123"),
+    ],
+)
+def test_83_article_one(lang, text, expected):
+    assert s(text, lang) == expected
+
+
+# #183: the article-one in front of a scale word opens the number.
+@pytest.mark.parametrize(
+    "lang,text,expected",
+    [
+        ("no", "ett tusen kroner", "1000 kroner"),
+        ("sv", "en miljon kronor", "1000000 kronor"),
+        ("ro", "o mie de lei", "1000 de lei"),
+        ("ro", "un milion de lei", "1000000 de lei"),
+        ("sv", "en bok", "en bok"),
+        ("ro", "o carte", "o carte"),
+    ],
+)
+def test_183_article_before_scale(lang, text, expected):
+    assert s(text, lang) == expected
