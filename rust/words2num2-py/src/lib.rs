@@ -233,7 +233,9 @@ fn words2num(
     kwargs: Option<Bound<'_, PyDict>>,
 ) -> PyResult<Py<PyAny>> {
     reject_kwargs("words2num", kwargs.as_ref())?;
-    match words2num2_core::words2num(text, lang, to) {
+    let (text, lang, to) = (text.to_owned(), lang.to_owned(), to.to_owned());
+    // Pure Rust from here: other Python threads run meanwhile (#186).
+    match py.detach(move || words2num2_core::words2num(&text, &lang, &to)) {
         Ok(v) => en_value_to_py(py, v),
         Err(e) => Err(w2n_error_to_pyerr(py, e)),
     }
@@ -253,7 +255,9 @@ fn words2num_sentence(
     // A stray keyword used to make every conversion fail silently, handing the
     // sentence back unchanged (#201); it is a TypeError like in `words2num`.
     reject_kwargs("words2num_sentence", kwargs.as_ref())?;
-    w2n_sentence::words2num_sentence_opts(sentence, lang, to, false, currency)
+    let (sentence, lang, to) = (sentence.to_owned(), lang.to_owned(), to.to_owned());
+    // A long transcript takes a while: release the GIL for the walk (#186).
+    py.detach(move || w2n_sentence::words2num_sentence_opts(&sentence, &lang, &to, false, currency))
         .map_err(|e| w2n_error_to_pyerr(py, e))
 }
 
@@ -277,7 +281,12 @@ fn auto_parse(
     decimal_sep: Option<&str>,
 ) -> PyResult<Py<PyAny>> {
     let prefer = prefer.unwrap_or_default();
-    match w2n_sentence::auto_parse(text, lang, &prefer, thousands_sep, decimal_sep) {
+    let (text, lang) = (text.to_owned(), lang.to_owned());
+    let (ts, ds) = (thousands_sep.map(str::to_owned), decimal_sep.map(str::to_owned));
+    let parsed = py.detach(move || {
+        w2n_sentence::auto_parse(&text, &lang, &prefer, ts.as_deref(), ds.as_deref())
+    });
+    match parsed {
         Ok(q) => quantity_to_py(py, q),
         Err(e) => Err(w2n_error_to_pyerr(py, e)),
     }
@@ -297,8 +306,12 @@ fn auto_parse_sentence(
     expand: bool,
 ) -> PyResult<String> {
     let prefer = prefer.unwrap_or_default();
-    w2n_sentence::auto_parse_sentence(text, lang, &prefer, thousands_sep, decimal_sep, expand)
-        .map_err(|e| w2n_error_to_pyerr(py, e))
+    let (text, lang) = (text.to_owned(), lang.to_owned());
+    let (ts, ds) = (thousands_sep.map(str::to_owned), decimal_sep.map(str::to_owned));
+    py.detach(move || {
+        w2n_sentence::auto_parse_sentence(&text, &lang, &prefer, ts.as_deref(), ds.as_deref(), expand)
+    })
+    .map_err(|e| w2n_error_to_pyerr(py, e))
 }
 
 #[pymodule]
