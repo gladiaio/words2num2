@@ -1326,7 +1326,36 @@ pub fn parse_amount(
     let base = lang.split(&['_', '-'][..]).next().unwrap_or(lang);
     let lex = amount_lexicon(lang);
     let norm = crate::normalize(text);
-    let toks: Vec<&str> = norm.split_whitespace().collect();
+    // The renderer's own separator word: fr " et", ca " amb" (en's "," is gone
+    // after normalize).
+    let sep = num2words2_core::get_lang_by_key(lang)
+        .map(|r| crate::normalize(r.default_separator()))
+        .unwrap_or_default();
+    // he writes its "and" glued: num2words puts it on the unit ("דולריםו",
+    // #264), the language on the subunit amount ("ושלושים"). Both are split
+    // off a currency name / the word after one.
+    let mut owned: Vec<String> = Vec::new();
+    let mut after_unit = false;
+    for t in norm.split_whitespace() {
+        // A one-letter conjunction (he "ו") is the only kind written glued.
+        let glued = sep.chars().count() == 1;
+        if glued && after_unit && t.len() > sep.len() && t.starts_with(sep.as_str()) {
+            owned.push(sep.clone());
+            owned.push(t[sep.len()..].to_string());
+            after_unit = false;
+            continue;
+        }
+        let named = |w: &str| lex.iter().any(|(n, x)| n == w && !x.sub);
+        if let Some(stem) = t.strip_suffix(sep.as_str()).filter(|s| glued && !s.is_empty() && named(s)) {
+            owned.push(stem.to_string());
+            owned.push(sep.clone());
+            after_unit = false;
+            continue;
+        }
+        after_unit = named(t);
+        owned.push(t.to_string());
+    }
+    let toks: Vec<&str> = owned.iter().map(String::as_str).collect();
     // The first currency name that is not a number word: fr "cent" is both
     // the US cent and 100 ("cent dollars").
     let first = (0..toks.len()).find_map(|i| {
@@ -1374,11 +1403,6 @@ pub fn parse_amount(
     if rest.is_empty() {
         return Some(Ok(head));
     }
-    // The renderer's own separator word: fr " et", ca " amb" (en's "," is gone
-    // after normalize).
-    let sep = num2words2_core::get_lang_by_key(lang)
-        .map(|r| crate::normalize(r.default_separator()))
-        .unwrap_or_default();
     let conns = connectors(base);
     let rest = match rest.first() {
         Some(c) if conns.contains(c) || (!sep.is_empty() && *c == sep) => &rest[1..],
@@ -1533,6 +1557,9 @@ mod tests {
         assert_eq!(amount("двенадцать рублей тридцать четыре копейки", "ru"), "12.34");
         // pt feminine numerals (#266).
         assert_eq!(amount("duas libras", "pt"), "2");
+        // he: num2words glues "and" to the unit (#264); speech to the amount.
+        assert_eq!(amount("שתים עשרה דולריםו שלושים וארבע סנטים", "he"), "12.34");
+        assert_eq!(amount("שתים עשרה דולרים ושלושים וארבע סנטים", "he"), "12.34");
         // No currency word: the plain cardinal.
         assert_eq!(amount("forty two", "en"), "int 42");
         // A currency word that is not an amount raises.
