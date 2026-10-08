@@ -785,11 +785,16 @@ fn derive_scales(lang: &str) -> Scales {
             mags.iter().enumerate().any(|(i, m)| mags[..i].contains(m))
         }
     });
-    sc.zero = render(0).filter(|z| !z.contains(' ') && lookup_plain(lang, z) == Some(0));
     sc.digit_by_digit = match (render(10), render(1), render(0)) {
         (Some(ten), Some(one), Some(zero)) => ten == format!("{one} {zero}"),
         _ => false,
     };
+    // zh writes 10001 "一万零一" but 11000 "一万一千": its zero fills skipped
+    // places (ja "一万一" does not; ksw "lah" only sits inside "klah").
+    sc.zero = render(0)
+        .filter(|z| !z.contains(' ') && lookup_plain(lang, z) == Some(0) && !sc.digit_by_digit)
+        .filter(|z| render(10_001).is_some_and(|t| t.contains(z.as_str())))
+        .filter(|z| render(11_000).is_some_and(|t| !t.contains(z.as_str())));
     // Groups summed with no scale word between them: km "មួយម៉ឺន ពីរពាន់" (12000),
     // dv "އެއްމިލިޔަން އެއްހާސް" (1001000).
     let sums_groups = |v: i64| {
@@ -1094,6 +1099,11 @@ fn glued_at(lang: &str, tok: &str, pos: usize, len: usize, mag: i64, sc: &Scales
         if filled.is_some() && low >= mag / 10 {
             return None;
         }
+        // Without 零 a lone digit is the spoken abbreviation: zh "一万五" is
+        // 15000 to a reader, and the renderer writes 10005 "一万零五".
+        if sc.zero.is_some() && filled.is_none() && low < 10 && mag >= 1000 {
+            return None;
+        }
         low
     };
     if !(0..mag).contains(&low) {
@@ -1170,13 +1180,15 @@ fn unglue(lang: &str, tok: &str, sc: &Scales) -> Vec<String> {
 }
 
 /// km "មួយម៉ឺន ពីរពាន់ បីរយ សែសិបប្រាំ" = 10000 + 2000 + 300 + 45: each token a
-/// group, strictly decreasing in place value so "two three" never sums.
+/// group, strictly decreasing in place value so "two three" never sums. The
+/// first group holds a scale: below one, the table spells the number whole, and
+/// hu "húsz három" stays 20 and 3.
 fn additive_groups(lang: &str, toks: &[&str], sc: &Scales) -> Option<i64> {
     let mut total = 0i64;
     let mut cap = i64::MAX;
     for t in toks {
         let v = lookup_plain(lang, t).or_else(|| split_glued_scale(lang, t, sc))?;
-        if v <= 0 || v >= cap {
+        if v <= 0 || v >= cap || (cap == i64::MAX && v < 1000) {
             return None;
         }
         total = total.checked_add(v)?;
@@ -1314,7 +1326,12 @@ fn parse_scaled_inner(lang: &str, text: &str, sc: &Scales, conns: &[&str]) -> Op
             } else {
                 parse_scaled_inner(lang, &right, sc, conns).filter(|&r| r < mag)
             };
-            let v = r.and_then(|r| compose(l, r));
+            // zh "一千 七": as in the glued "一千七", a lone digit needs 零.
+            let zero_gap = |r: i64| {
+                let filled = sc.zero.as_deref().is_some_and(|z| after.first() == Some(&z));
+                sc.zero.is_none() || filled || r >= 10 || r == 0
+            };
+            let v = r.filter(|&r| zero_gap(r)).and_then(|r| compose(l, r));
             // A bare postfix scale whose multiplier could not be read is "one" only
             // when the renderer says so: tet "miliaun rihun atus sia rihun ida" is
             // no 1 × 10^6 + 901001.
@@ -1328,26 +1345,30 @@ fn parse_scaled_inner(lang: &str, text: &str, sc: &Scales, conns: &[&str]) -> Op
         }
         // eu "bat mila milioi hamar milioi bat" = 10^9 + 10 000 001: adjacent
         // scale words multiply into one unit ("mila milioi" = 10^9), and the
-        // remainder after the largest unit stays below it.
-        let mut runs: Vec<(usize, usize, i64)> = Vec::new();
+        // remainder after the largest unit stays below it. The same word twice
+        // ("mila mila") only where the renderer stacks: fr "deux mille mille"
+        // is no number.
+        let mut runs: Vec<(usize, usize, i64, bool)> = Vec::new();
         let mut i = 0;
         while i < toks.len() {
             let Some(first) = mags[i] else {
                 i += 1;
                 continue;
             };
-            let (start, mut prod, mut prev) = (i, Some(first), first);
+            let (start, mut prod, mut prev, mut stacked) = (i, Some(first), first, false);
             i += 1;
-            while let Some(m) = mags.get(i).copied().flatten().filter(|&m| m >= prev) {
+            let grows = |m: i64, prev: i64| m > prev || (m == prev && sc.stacks);
+            while let Some(m) = mags.get(i).copied().flatten().filter(|&m| grows(m, prev)) {
                 prod = prod.and_then(|p| p.checked_mul(m));
+                stacked |= m == prev;
                 prev = m;
                 i += 1;
             }
             if let Some(p) = prod.filter(|_| i - start > 1) {
-                runs.push((start, i, p));
+                runs.push((start, i, p, stacked));
             }
         }
-        if let Some(&(a, b, unit)) = runs.iter().max_by_key(|(a, _, u)| (*u, *a)) {
+        if let Some(&(a, b, unit, stacked)) = runs.iter().max_by_key(|(a, _, u, _)| (*u, *a)) {
             let left = toks[..a].join(" ");
             let right = toks[b..].join(" ");
             let l = if trim_connectors(&left, conns).is_empty() {
@@ -1360,7 +1381,8 @@ fn parse_scaled_inner(lang: &str, text: &str, sc: &Scales, conns: &[&str]) -> Op
             } else {
                 parse_scaled_inner(lang, &right, sc, conns).filter(|&r| r < unit)
             };
-            if let Some(v) = l.zip(r).and_then(|(l, r)| l.checked_mul(unit)?.checked_add(r)) {
+            let v = l.zip(r).and_then(|(l, r)| l.checked_mul(unit)?.checked_add(r));
+            if let Some(v) = v.filter(|&v| !stacked || renders_as(lang, v, text)) {
                 return Some(v);
             }
         }
@@ -1815,6 +1837,8 @@ mod tests {
         // A language that never stacks reads no stack; the remainder stays below
         // the scale.
         assert_eq!(parse_scaled("fr", "deux mille deux mille"), None);
+        assert_eq!(parse_scaled("fr", "deux mille mille"), None);
+        assert_eq!(parse_scaled("hu", "húsz három"), None);
         assert_eq!(parse_scaled("es", "un millón mil"), Some(1_001_000));
         assert_eq!(parse_scaled("es", "dos mil millones"), Some(2_000_000_000));
     }
@@ -1913,6 +1937,10 @@ mod tests {
         assert_eq!(parse_scaled("zh", "一万零一十"), Some(10_010));
         assert_eq!(parse_scaled("zh_TW", "一萬零一"), Some(10_001));
         assert_eq!(parse_scaled("zh", "一万零五千"), None); // no place skipped
+        // Without 零 a short tail is the spoken abbreviation (一万五 = 15000).
+        assert_eq!(parse_scaled("zh", "一万五"), None);
+        assert_eq!(parse_scaled("zh", "一万 五"), None);
+        assert_eq!(parse_scaled("ja", "一万五"), Some(10_005)); // ja writes 10005 so
         // sv elides the t that "ett" shares with "tusen".
         assert_eq!(parse_scaled("sv", "tjugoettusen"), Some(21_000));
         assert_eq!(parse_scaled("sv", "tjugoettusen niohundrasextiofyra"), Some(21_964));
