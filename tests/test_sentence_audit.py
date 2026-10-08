@@ -395,3 +395,76 @@ def test_76_proclitics(lang, text, expected):
 )
 def test_184_elided_clitic(lang, text, expected):
     assert s(text, lang) == expected
+
+
+# #177: numbers inside unspaced zh / ja / th text convert in place; words that
+# merely contain a numeral character stay.
+@pytest.mark.parametrize(
+    "lang,text,expected",
+    [
+        ("ja", "りんごを三個買いました。", "りんごを3個買いました。"),
+        ("ja", "家は三百万円です。", "家は3000000円です。"),
+        ("zh", "他住在一百一十二号。", "他住在112号。"),
+        ("zh", "我买了三个苹果。", "我买了3个苹果。"),
+        ("th", "ฉันจ่ายยี่สิบสามบาท", "ฉันจ่าย23บาท"),
+        ("zh", "我买了 三 个苹果", "我买了 3 个苹果"),
+        ("zh", "两个苹果", "2个苹果"),
+        ("zh", "十二月", "12月"),
+        ("zh", "十分钟", "10分钟"),
+        # Ordinary words.
+        ("zh", "我们一起去", "我们一起去"),
+        ("zh", "十分好", "十分好"),
+        ("zh", "千万不要", "千万不要"),
+        ("zh", "万一下雨", "万一下雨"),
+        ("zh", "我有一个问题", "我有一个问题"),
+        ("zh", "四川菜", "四川菜"),
+        ("ja", "九州に行く", "九州に行く"),
+        ("th", "สามารถ", "สามารถ"),
+        ("th", "สามีของฉัน", "สามีของฉัน"),
+        ("th", "เก้าอี้", "เก้าอี้"),
+        ("th", "แสนดี", "แสนดี"),
+        ("th", "สองสามวัน", "สองสามวัน"),
+    ],
+)
+def test_177_unspaced_scripts(lang, text, expected):
+    assert s(text, lang) == expected
+
+
+# #178: native Korean numerals; the attributive forms need a counter.
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("사과 세 개를 샀어요.", "사과 3 개를 샀어요."),
+        ("세 시에 만나요.", "3 시에 만나요."),
+        ("그녀는 서른다섯 살이에요.", "그녀는 35 살이에요."),
+        ("열두 개", "12 개"),
+        ("하나 둘 셋", "1 2 3"),
+        ("스무 살", "20 살"),
+        ("삼십오 세", "35 세"),
+        ("네, 알겠습니다", "네, 알겠습니다"),
+        ("한 번 해 보세요", "한 번 해 보세요"),
+        ("열이 나요", "열이 나요"),
+        ("세상", "세상"),
+    ],
+)
+def test_178_ko_native_numerals(text, expected):
+    assert s(text, "ko") == expected
+
+
+# #73 (ko): a Sino number glued to its counter.
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("집은 삼만원이에요", "집은 30000원이에요"),
+        ("오십만원", "500000원"),
+        ("일월", "1월"),
+        ("이번 주", "이번 주"),
+        ("만일", "만일"),
+        ("천만에요", "천만에요"),
+        ("구원", "구원"),
+        ("사명", "사명"),
+        ("일부", "일부"),
+    ],
+)
+def test_73_ko_glued_counter(text, expected):
+    assert s(text, "ko") == expected

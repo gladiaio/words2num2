@@ -123,7 +123,10 @@ pub(super) fn split_parts(
                 glue.push(Glue::Free);
                 continue;
             }
-            let pieces = peel(converter, resolved, piece, prev_number);
+            let pieces = match segment(converter, resolved, piece) {
+                Some(segs) => segs,
+                None => peel(converter, resolved, piece, prev_number),
+            };
             prev_number = pieces.iter().any(|(p, g)| *g == Glue::Free && number_like(converter, resolved, p));
             for (p, g) in pieces {
                 parts.push(p.to_string());
@@ -155,6 +158,213 @@ fn number_like(converter: &super::Converter, resolved: &str, word: &str) -> bool
 
 fn base(resolved: &str) -> &str {
     resolved.split(&['_', '-'][..]).next().unwrap_or(resolved)
+}
+
+// ---------------------------------------------------------------------------
+// Scripts written without spaces (#177) and Korean glued counters (#73)
+// ---------------------------------------------------------------------------
+
+/// zh / ja numeral characters: digits, scales, the zero forms and 两 (two,
+/// before a measure word).
+fn is_cjk_numeral(c: char) -> bool {
+    matches!(
+        c,
+        '零' | '〇' | '一' | '二' | '三' | '四' | '五' | '六' | '七' | '八' | '九' | '十' | '百'
+            | '千' | '万' | '萬' | '亿' | '億' | '兆' | '两' | '兩'
+    )
+}
+
+/// Measure words and units that make a lone numeral character a count: 三个,
+/// 三個, 十二月, 五元, 三人, 三つ. Compared on the first characters of what
+/// follows the numeral.
+const CJK_COUNTERS: &[&str] = &[
+    "个", "個", "只", "隻", "本", "张", "張", "件", "位", "名", "人", "岁", "歲", "歳", "才", "年",
+    "月", "日", "号", "號", "点", "點", "時", "时", "分", "秒", "元", "块", "塊", "角", "円", "圆",
+    "米", "公里", "公斤", "斤", "克", "升", "次", "回", "倍", "天", "小时", "小時", "周", "週", "层",
+    "層", "楼", "樓", "階", "条", "條", "头", "頭", "双", "雙", "种", "種", "家", "间", "間", "部",
+    "支", "辆", "輛", "台", "臺", "杯", "瓶", "碗", "份", "页", "頁", "章", "节", "節", "度", "%",
+    "％", "枚", "匹", "冊", "册", "番", "つ", "ヶ", "ケ", "か月", "カ月", "キロ", "メートル",
+    "グラム", "ドル", "ユーロ", "美元", "欧元", "歩", "着", "軒", "足", "粒", "通", "曲", "話", "行",
+    "課", "课",
+];
+
+/// Numeral strings that are ordinary words: 十分 (very, enough), 千万 (by all means),
+/// 万一 (in case), 一一 (one by one); and 一 before 个 / 個 / つ / 天 / 点, the
+/// indefinite "a" (一个问题, "a question"; 一点, "a bit"), like the
+/// article-one of #83. They are read only before another counter (千万元).
+fn cjk_idiom(seg: &str, after: &str) -> bool {
+    match seg {
+        "十分" | "千万" | "千萬" | "万一" | "萬一" | "一一" | "万万" | "萬萬" => {
+            !CJK_COUNTERS.iter().any(|c| after.starts_with(c))
+        }
+        "一" => ["个", "個", "つ", "天", "点", "點", "下"].iter().any(|c| after.starts_with(c)),
+        // 十分 is "very" (zh) / "enough" (ja); 十分钟 is ten minutes.
+        "十" => after.starts_with('分') && !["分钟", "分鐘"].iter().any(|c| after.starts_with(c)),
+        _ => false,
+    }
+}
+
+/// Thai numeral morphemes, as written: the digits, ten, the "ยี่" of twenty,
+/// the "เอ็ด" of x1, and the scales.
+const TH_MORPHEMES: &[&str] = &[
+    "ศูนย์", "หนึ่ง", "สอง", "สาม", "สี่", "ห้า", "หก", "เจ็ด", "แปด", "เก้า", "สิบ", "ยี่", "เอ็ด",
+    "ร้อย", "พัน", "หมื่น", "แสน", "ล้าน",
+];
+
+/// Thai classifiers and units after a single numeral morpheme: สามบาท,
+/// ห้าคน.
+const TH_CLASSIFIERS: &[&str] = &[
+    "บาท", "คน", "ตัว", "อัน", "ชิ้น", "ปี", "เดือน", "วัน", "ชั่วโมง", "นาที", "วินาที", "ครั้ง",
+    "กิโล", "เมตร", "ขวด", "แก้ว", "ใบ", "เล่ม", "คัน", "หลัง", "ข้อ", "เท่า", "โมง", "ทุ่ม", "ห้อง",
+    "ชั้น", "จาน", "ถ้วย", "ดอลลาร์", "เปอร์เซ็นต์", "สัปดาห์", "ลูก", "แผ่น", "ที่",
+];
+
+/// A Thai mark or vowel that belongs to the syllable before it: a numeral
+/// morpheme followed by one is part of a longer word (สาม + ารถ is สามารถ,
+/// "can"; สาม + ี is สามี, "husband").
+fn th_attached(c: char) -> bool {
+    matches!(c as u32, 0x0E30..=0x0E3A | 0x0E45 | 0x0E47..=0x0E4E)
+}
+
+/// The Thai leading vowels: a consonant after one belongs to its syllable.
+fn th_leading_vowel(c: char) -> bool {
+    matches!(c as u32, 0x0E40..=0x0E44)
+}
+
+/// Korean Sino numeral syllables, glued to a counter in the same word:
+/// 삼만원이에요 (it is 30000 won).
+fn is_ko_sino(c: char) -> bool {
+    matches!(
+        c,
+        '영' | '공' | '일' | '이' | '삼' | '사' | '오' | '육' | '칠' | '팔' | '구' | '십' | '백'
+            | '천' | '만' | '억' | '조'
+    )
+}
+
+/// Counters a glued Sino number may carry. A one-syllable number only before
+/// the unambiguous ones: 구원 is "salvation", 사명 "mission", 일부 "part".
+const KO_COUNTERS: &[&str] = &[
+    "원", "개월", "개", "명", "년", "월", "일", "시간", "시", "분", "초", "번", "층", "세", "달러",
+    "퍼센트", "킬로", "미터", "권", "대", "회", "호", "장", "마리", "병", "잔", "주", "배", "등",
+    "점", "인분", "그램", "리터", "센티", "유로", "엔",
+];
+const KO_COUNTERS_AFTER_ONE_SYLLABLE: &[&str] = &["월", "년", "개", "층", "달러", "퍼센트", "유로"];
+
+/// Cut the numeral substrings out of a zh / ja / th word, or the glued Sino
+/// number off a ko word. `None` for other languages, or when nothing is cut.
+fn segment<'a>(
+    converter: &super::Converter,
+    resolved: &str,
+    piece: &'a str,
+) -> Option<Vec<(&'a str, Glue)>> {
+    let lang = base(resolved);
+    let parses = |seg: &str| converter.is_number_word(seg);
+    match lang {
+        "zh" | "cn" | "ja" | "jp" => {
+            let chars: Vec<(usize, char)> = piece.char_indices().collect();
+            let mut cuts: Vec<(usize, usize)> = Vec::new();
+            let mut k = 0;
+            while k < chars.len() {
+                if !is_cjk_numeral(chars[k].1) {
+                    k += 1;
+                    continue;
+                }
+                let start = k;
+                while k < chars.len() && is_cjk_numeral(chars[k].1) {
+                    k += 1;
+                }
+                let (b0, b1) = (chars[start].0, chars.get(k).map_or(piece.len(), |c| c.0));
+                if b0 == 0 && b1 == piece.len() {
+                    return None; // the whole word: the walker reads it as is
+                }
+                let seg = &piece[b0..b1];
+                let after = &piece[b1..];
+                let counted = CJK_COUNTERS.iter().any(|c| after.starts_with(c));
+                let ordinal = piece[..b0].ends_with('第');
+                let ok = !cjk_idiom(seg, after)
+                    && (if k - start >= 2 { true } else { counted || ordinal })
+                    && parses(seg);
+                if ok {
+                    cuts.push((b0, b1));
+                }
+            }
+            cut_into(piece, &cuts)
+        }
+        "th" => {
+            let mut cuts: Vec<(usize, usize)> = Vec::new();
+            let mut p = 0;
+            while p < piece.len() {
+                let mut q = p;
+                let mut morphemes = 0;
+                while let Some(m) = TH_MORPHEMES
+                    .iter()
+                    .filter(|m| piece[q..].starts_with(*m))
+                    .max_by_key(|m| m.len())
+                {
+                    q += m.len();
+                    morphemes += 1;
+                }
+                if morphemes == 0 {
+                    p += piece[p..].chars().next().map_or(1, char::len_utf8);
+                    continue;
+                }
+                let seg = &piece[p..q];
+                let after = &piece[q..];
+                let glued_before = piece[..p].chars().last().is_some_and(th_leading_vowel);
+                let glued_after = after.chars().next().is_some_and(th_attached);
+                let counted = TH_CLASSIFIERS.iter().any(|c| after.starts_with(c));
+                let whole = p == 0 && q == piece.len();
+                let ok = !whole
+                    && !glued_before
+                    && !glued_after
+                    && (morphemes >= 2 || counted)
+                    && parses(seg);
+                if ok {
+                    cuts.push((p, q));
+                }
+                p = q;
+            }
+            cut_into(piece, &cuts)
+        }
+        // 삼만원이에요: the number, then the counter and the particles, cut
+        // as a suffix so it is re-emitted unchanged (#73).
+        "ko" => {
+            let chars: Vec<(usize, char)> = piece.char_indices().collect();
+            let n = chars.iter().take_while(|(_, c)| is_ko_sino(*c)).count();
+            if n == 0 || n == chars.len() {
+                return None;
+            }
+            let b = chars[n].0;
+            let (num, rest) = piece.split_at(b);
+            let counters = if n >= 2 { KO_COUNTERS } else { KO_COUNTERS_AFTER_ONE_SYLLABLE };
+            // 이 alone is "this" (이번, 이분, 이년): never a glued number.
+            let ok = !(n == 1 && num == "이")
+                && counters.iter().any(|c| rest.starts_with(c))
+                && parses(num);
+            ok.then(|| vec![(num, Glue::Free), (rest, Glue::Suffix(""))])
+        }
+        _ => None,
+    }
+}
+
+/// `piece` cut at the byte ranges `cuts` (sorted, disjoint), every part free.
+fn cut_into<'a>(piece: &'a str, cuts: &[(usize, usize)]) -> Option<Vec<(&'a str, Glue)>> {
+    if cuts.is_empty() {
+        return None;
+    }
+    let mut out = Vec::new();
+    let mut at = 0;
+    for &(b0, b1) in cuts {
+        if b0 > at {
+            out.push((&piece[at..b0], Glue::Free));
+        }
+        out.push((&piece[b0..b1], Glue::Free));
+        at = b1;
+    }
+    if at < piece.len() {
+        out.push((&piece[at..], Glue::Free));
+    }
+    Some(out)
 }
 
 /// Cut a proclitic or a case ending off `piece` when what remains is a number

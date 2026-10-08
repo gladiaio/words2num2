@@ -335,6 +335,11 @@ const SUBSTRING_VARIANTS: &[(&str, &str, &str)] = &[
     ("hi", "ं", "ँ"),
     ("hi", "ँ", "ं"),
     ("da", "tres", "treds"),
+    // zh 两 is "two" before a measure word and in 两百, 两千 (#177).
+    ("zh", "两", "二"),
+    ("zh", "兩", "二"),
+    ("cn", "两", "二"),
+    ("cn", "兩", "二"),
 ];
 
 type AliasMap = HashMap<String, String>;
@@ -436,6 +441,18 @@ fn word_alias(lang: &str, tok: &str, prev: Option<&str>) -> Option<String> {
                 return Some(r);
             }
         }
+        // Native Korean numerals, read as the Sino-Korean the renderer writes
+        // (#178): 서른다섯 -> 삼십오.
+        "ko" => {
+            // `normalize` leaves Hangul decomposed into jamo (NFKD).
+            use unicode_normalization::UnicodeNormalization;
+            let composed: String = tok.nfc().collect();
+            if let Some((v, _)) = ko_native(&composed) {
+                return num2words2_core::get_lang_by_key("ko")
+                    .and_then(|r| r.to_cardinal(&BigInt::from(v)).ok())
+                    .map(|t| crate::normalize(&t));
+            }
+        }
         // #77: "tư" for 4 after "mươi" (ba mươi tư), "linh" the northern "lẻ".
         "vi" => match tok {
             "tu" if prev == Some("muoi") => return Some("bon".to_string()),
@@ -518,4 +535,63 @@ pub(super) fn alias_rewrite(lang: &str, norm: &str) -> Option<String> {
         }
     }
     changed.then(|| out.join(" "))
+}
+
+// ===========================================================================
+// Native Korean numerals (#178)
+// ===========================================================================
+
+/// A native Korean numeral, 1..99: the value and whether it is the
+/// attributive form used before a counter (한 / 두 / 세 / 네 / 스무, and a
+/// compound ending in one: 열두, 스물한). num2words2 writes only the
+/// Sino-Korean series, but objects, hours and ages are counted natively.
+pub(super) fn ko_native(tok: &str) -> Option<(i64, bool)> {
+    const TENS: [(&str, i64); 9] = [
+        ("열", 10), ("스물", 20), ("서른", 30), ("마흔", 40), ("쉰", 50), ("예순", 60), ("일흔", 70),
+        ("여든", 80), ("아흔", 90),
+    ];
+    const UNITS: [(&str, i64, bool); 13] = [
+        ("하나", 1, false), ("한", 1, true), ("둘", 2, false), ("두", 2, true), ("셋", 3, false),
+        ("세", 3, true), ("넷", 4, false), ("네", 4, true), ("다섯", 5, false), ("여섯", 6, false),
+        ("일곱", 7, false), ("여덟", 8, false), ("아홉", 9, false),
+    ];
+    if tok == "스무" {
+        return Some((20, true));
+    }
+    let unit = |w: &str| UNITS.iter().find(|(u, _, _)| *u == w).map(|&(_, v, a)| (v, a));
+    for (t, tv) in TENS {
+        if let Some(rest) = tok.strip_prefix(t) {
+            if rest.is_empty() {
+                return Some((tv, false));
+            }
+            if let Some((uv, attr)) = unit(rest) {
+                return Some((tv + uv, attr));
+            }
+        }
+    }
+    unit(tok)
+}
+
+/// Native counters: what a native numeral counts (개 things, 시 hours, 살
+/// years of age, 명 people ...). Compared on the start of the next word, so
+/// "개를", "시에", "살이에요" count.
+const KO_NATIVE_COUNTERS: &[&str] = &[
+    "개월", "개", "시간", "시", "살", "명", "마리", "번", "사람", "권", "잔", "병", "장", "대", "달",
+    "그루", "켤레", "벌", "송이", "가지", "군데", "곳", "분", "주", "해", "바퀴", "줄", "통", "채",
+];
+
+/// Is a native numeral at this position a count? The attributive forms (한
+/// 두 세 네 스무) are also "one/a", "two" ... only before a counter, and 네 is
+/// "yes", 세 the Sino age counter, 열 "fever", 쉰 "hoarse": all of these need
+/// the counter after them. 한 번 ("once", "give it a try") stays words.
+pub(super) fn ko_native_needs_counter(tok: &str) -> bool {
+    ko_native(tok).is_some_and(|(_, attr)| attr) || matches!(tok, "열" | "쉰")
+}
+
+pub(super) fn ko_counter_follows(head: &str, next: Option<&str>) -> bool {
+    let Some(next) = next else { return false };
+    if ko_native(head).is_some_and(|(v, _)| v == 1) && next.starts_with('번') {
+        return false;
+    }
+    KO_NATIVE_COUNTERS.iter().any(|c| next.starts_with(c))
 }

@@ -1468,7 +1468,11 @@ fn table_digit_run(
         }
         let clean = rstrip_punct(tok).to_lowercase();
         // "cinq 5": a token in figures is a literal, not a digit word (#68).
-        if clean.contains('-') || holds_digit(&clean) {
+        // ko native numerals count, they are never dictated (#178).
+        if clean.contains('-')
+            || holds_digit(&clean)
+            || (resolved == "ko" && lexicon::ko_native(&clean).is_some())
+        {
             break;
         }
         let article = is_article_word(resolved, &clean);
@@ -2009,6 +2013,9 @@ fn homograph_words(resolved: &str) -> &'static str {
 fn is_homograph(resolved: &str, parts: &[String], i: usize, piece: &str) -> bool {
     let base = resolved.split(&['_', '-'][..]).next().unwrap_or(resolved);
     let word = rstrip_punct(piece);
+    if base == "ko" {
+        return lexicon::ko_native_needs_counter(word);
+    }
     if base == "de" {
         let sentence_start = prev_word(parts, i).is_none()
             || parts[..i]
@@ -2456,6 +2463,14 @@ fn words2num_sentence_walk(
             if words > MAX_RUN_WORDS || failed >= MAX_FAILED_EXTENSIONS {
                 break; // #186
             }
+            // A native Korean numeral is one word: "하나 둘 셋" counts 1 2 3,
+            // and "삼십오 세" is 35 and the age counter (#178).
+            if j > i
+                && resolved == "ko"
+                && (lexicon::ko_native(&clean).is_some() || lexicon::ko_native(&head).is_some())
+            {
+                break;
+            }
             // A token that is not a number word on its own may still complete
             // the run: fr "cents" / "vingts" only exist inside "deux cents" /
             // "quatre vingts". So the run is tried *with* it before giving up.
@@ -2558,6 +2573,13 @@ fn words2num_sentence_walk(
             {
                 // A lone "one" / "un" / "um" is an article or a pronoun.
                 None
+            } else if plain
+                && best_end == i
+                && resolved == "ko"
+                && is_homograph(&resolved, &parts, i, piece)
+            {
+                // ko 세 개 (three things) but 네 (yes), 삼십오 세 (35 years old).
+                (lexicon::ko_counter_follows(&head, next.as_deref())).then(|| v.text_str())
             } else if plain
                 && best_end == i
                 && is_homograph(&resolved, &parts, i, piece)
@@ -4164,6 +4186,24 @@ mod audit_tests {
         assert_eq!(c("البيت بثلاثمائة ألف دولار", "ar"), "البيت ب300000 دولار");
         assert_eq!(c("le train d'onze heures", "fr"), "le train d'11 heures");
         assert_eq!(c("l'un d'entre eux", "fr"), "l'un d'entre eux");
+    }
+
+    #[test]
+    fn issue_177_unspaced_scripts() {
+        assert_eq!(c("我买了三个苹果。", "zh"), "我买了3个苹果。");
+        assert_eq!(c("家は三百万円です。", "ja"), "家は3000000円です。");
+        assert_eq!(c("ฉันจ่ายยี่สิบสามบาท", "th"), "ฉันจ่าย23บาท");
+        assert_eq!(c("我们一起去", "zh"), "我们一起去");
+        assert_eq!(c("สามารถ", "th"), "สามารถ");
+    }
+
+    #[test]
+    fn issue_178_ko_native_numerals() {
+        assert_eq!(c("사과 세 개를 샀어요.", "ko"), "사과 3 개를 샀어요.");
+        assert_eq!(c("그녀는 서른다섯 살이에요.", "ko"), "그녀는 35 살이에요.");
+        assert_eq!(c("하나 둘 셋", "ko"), "1 2 3");
+        assert_eq!(c("네, 알겠습니다", "ko"), "네, 알겠습니다");
+        assert_eq!(c("집은 삼만원이에요", "ko"), "집은 30000원이에요");
     }
 
     #[test]
