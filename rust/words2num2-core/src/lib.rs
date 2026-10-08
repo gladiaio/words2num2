@@ -391,6 +391,11 @@ struct Scales {
     additive_groups: bool,
     /// Numbers are read one digit at a time: en_AERO "wun zero zero" = 100.
     digit_by_digit: bool,
+    /// [`Scales::words`] that may also sit glued at the end of a longer token. A
+    /// word only ever rendered bare and alone is left out: dv writes 1000 as one
+    /// fused "one-thousand" token, and taking it as a suffix would read
+    /// "thirty-one-thousand" (31000) as 30 × 1000.
+    glue: Vec<(String, i64)>,
 }
 
 /// Cache of the derived [`Scales`] per language.
@@ -476,6 +481,8 @@ fn derive_scales(lang: &str) -> Scales {
     // settled once every readable sample has fixed the magnitudes.
     let mut unread: Vec<(String, u32, i64, String)> = Vec::new();
     let mut glued_words: Vec<String> = Vec::new();
+    let mut bare: Vec<String> = Vec::new(); // the whole rendering, no multiplier
+    let mut multiplied: Vec<String> = Vec::new(); // seen with a multiplier
     for p in [3u32, 4, 5, 6, 7, 9] {
         for k in [1i64, 2, 5] {
             let n = k * 10i64.pow(p);
@@ -506,6 +513,11 @@ fn derive_scales(lang: &str) -> Scales {
                 match mult {
                     Some(m) if m >= 1 && n % m == 0 && is_power_of_ten(n / m) && n / m >= 1000 => {
                         add(&mut sc.words, w, n / m);
+                        if left.is_empty() && right.is_empty() {
+                            bare.push(w.to_string());
+                        } else {
+                            multiplied.push(w.to_string());
+                        }
                         if after && m == 1 {
                             if !sc.one_after.iter().any(|(x, _)| x == w) {
                                 sc.one_after.push((w.to_string(), right.clone()));
@@ -546,6 +558,12 @@ fn derive_scales(lang: &str) -> Scales {
     });
     // Plus grande magnitude d'abord : « million » se scinde avant « mille ».
     sc.words.sort_by(|a, b| b.1.cmp(&a.1));
+    sc.glue = sc
+        .words
+        .iter()
+        .filter(|(w, _)| !bare.contains(w) || multiplied.contains(w) || glued_words.contains(w))
+        .cloned()
+        .collect();
     sc.digit_by_digit = match (render(10), render(1), render(0)) {
         (Some(ten), Some(one), Some(zero)) => ten == format!("{one} {zero}"),
         _ => false,
@@ -555,7 +573,7 @@ fn derive_scales(lang: &str) -> Scales {
         toks.len() >= 2
             && toks
                 .iter()
-                .map(|t| lookup_plain(lang, t).or_else(|| split_glued_scale(lang, t, &sc.words)))
+                .map(|t| lookup_plain(lang, t).or_else(|| split_glued_scale(lang, t, &sc.glue)))
                 .sum::<Option<i64>>()
                 == Some(12000)
     });
@@ -656,7 +674,16 @@ pub fn parse_scaled_norm(lang: &str, norm: &str) -> Option<i64> {
     if !is_supported_lang(lang) {
         return None;
     }
-    parse_scaled_inner(lang, norm, &scales_of(lang), connector_words(lang))
+    let sc = scales_of(lang);
+    let v = parse_scaled_inner(lang, norm, &sc, connector_words(lang))?;
+    // Where the multiplier may follow the scale word (ha, ff, sw, sn, bm, tet,
+    // eu), a spelling can split several ways and num2words2 sometimes renders
+    // two values alike. Only a reading the renderer spells this way is kept:
+    // a raise beats a wrong number.
+    if (!sc.postfix.is_empty() || !sc.one_after.is_empty()) && !renders_as(lang, v, norm) {
+        return None;
+    }
+    Some(v)
 }
 
 /// The article that is also "one" in front of a scale word, for languages whose table
@@ -725,6 +752,14 @@ fn digit_run(lang: &str, toks: &[&str]) -> Option<i64> {
     })
 }
 
+/// Does num2words2 render `v` in `lang` exactly as the normalized `text`? The
+/// check for readings the grammar alone cannot settle.
+fn renders_as(lang: &str, v: i64, text: &str) -> bool {
+    num2words2_core::get_lang_by_key(lang)
+        .and_then(|r| r.to_cardinal(&BigInt::from(v)).ok())
+        .is_some_and(|w| normalize(&w) == text)
+}
+
 /// hu "egymillio" -> ["egy", "millio"]: a token that is a multiplier (1..999)
 /// glued to a scale word, split in two. Any other token is returned as is.
 fn unglue<'a>(lang: &str, tok: &'a str, scales: &[(String, i64)]) -> Vec<&'a str> {
@@ -770,14 +805,14 @@ fn parse_scaled_inner(lang: &str, text: &str, sc: &Scales, conns: &[&str]) -> Op
         return Some(v);
     }
     if !text.contains(' ') {
-        if let Some(v) = split_glued_scale(lang, text, scales) {
+        if let Some(v) = split_glued_scale(lang, text, &sc.glue) {
             return Some(v);
         }
     }
     let toks: Vec<&str> = text.split_whitespace().collect();
     // hu "egymillió-egy": a scale glued to its multiplier inside a longer number.
     if toks.len() > 1 {
-        let unglued: Vec<&str> = toks.iter().flat_map(|t| unglue(lang, t, scales)).collect();
+        let unglued: Vec<&str> = toks.iter().flat_map(|t| unglue(lang, t, &sc.glue)).collect();
         if unglued.len() != toks.len() {
             return parse_scaled_inner(lang, &unglued.join(" "), sc, conns);
         }
@@ -850,11 +885,17 @@ fn parse_scaled_inner(lang: &str, text: &str, sc: &Scales, conns: &[&str]) -> Op
             } else {
                 parse_scaled_inner(lang, &right, sc, conns)?
             };
+            // A bare postfix scale whose multiplier could not be read is "one" only
+            // when the renderer says so: tet "miliaun rihun atus sia rihun ida" is
+            // no 1 × 10^6 + 901001.
+            if left_trim.is_empty() && sc.postfix.contains(word) && !renders_as(lang, mag + r, text) {
+                return None;
+            }
             return Some(l * mag + r);
         }
     }
     if sc.additive_groups && toks.len() > 1 {
-        if let Some(v) = additive_groups(lang, &toks, scales) {
+        if let Some(v) = additive_groups(lang, &toks, &sc.glue) {
             return Some(v);
         }
     }
@@ -871,7 +912,14 @@ fn parse_scaled_inner(lang: &str, text: &str, sc: &Scales, conns: &[&str]) -> Op
         let left = trim_connectors(&toks[..i].join(" "), conns);
         let right = trim_connectors(&toks[i..].join(" "), conns);
         if let (Some(l), Some(r)) = (lookup_plain(lang, &left), lookup_plain(lang, &right)) {
-            if l >= 100 && l % 100 == 0 && (1..100).contains(&r) {
+            // A left part of 1000 or more only when the renderer spells the sum
+            // exactly so: fi "kymmenentuhatta yksi" is 10001, but bm "ba tan ni
+            // fila" is 1000 × 12, not 1000 + 12 (bm 1012 is "ba ni tan ni fila").
+            if l >= 100
+                && l % 100 == 0
+                && (1..100).contains(&r)
+                && (l < 1000 || renders_as(lang, l + r, text))
+            {
                 return Some(l + r);
             }
             // fr counts hundreds by the dozen: "douze cents" = 1200, "dix-huit cents" = 1800.
@@ -1254,6 +1302,14 @@ mod tests {
         // A left part as big as the scale is a group, not a multiplier.
         assert_eq!(parse_scaled("ko", "십만 천"), Some(101_000));
         assert_eq!(parse_scaled("ko", "백만 천"), Some(1_001_000));
+        // Never a wrong number where the reading is ambiguous: a fused bare
+        // "one-thousand" is no suffix (dv), 1000 + 12 needs the renderer's
+        // spelling (bm 12000 is 1000 × 12), and a postfix-scale reading must
+        // re-render to the input (tet).
+        assert_eq!(parse_scaled("dv", "ތިރީސްއެއްހާސް"), None);
+        assert_eq!(parse_scaled("bm", "ba tan ni fila"), None);
+        assert_eq!(parse_scaled("fi", "kymmenentuhatta yksi"), Some(10_001));
+        assert_eq!(parse_scaled("tet", "miliaun rihun atus sia rihun ida"), None);
         // A scale glued to its multiplier inside a longer number.
         assert_eq!(parse_scaled("hu", "egymillió-egy"), Some(1_000_001));
         // Prefix languages never take a postfix multiplier or sum bare groups.

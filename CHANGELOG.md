@@ -26,10 +26,13 @@ follows [Semantic Versioning](https://semver.org/) and uses
   - en_AERO and its aliases read digit by digit ("wun zero zero zero zero
     zero" = 100000, was 4000).
   On the round-trip ratchet (`rust/words2num2-core/tests/roundtrip.rs`),
-  wrong values go from 72 to 2 and raises from 153 to 63. The 2 left are ha
+  wrong values go from 72 to 2 and raises from 153 to 62. The 2 left are ha
   10000 / 100000, which num2words2 renders exactly like 1010 / 1100.
-  num2words2 also renders sw / ff / sn 10001 exactly like 11000; both now read
-  as 11000.
+  Where the multiplier may follow the scale word (ha ff sw sn bm tet eu) a
+  composed reading is kept only if num2words2 renders it the same way, so an
+  ambiguous spelling raises rather than returning a wrong number. When the
+  renderer spells two values alike (sw / ff / sn 10001 and 11000), the one
+  that spelling actually denotes is returned (11000).
 
 - **Indic, Tibetan and Thaana numbers no longer parse to a different
   number.** `normalize()` stripped every combining mark, which erased the
