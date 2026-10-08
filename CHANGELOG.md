@@ -6,6 +6,58 @@ follows [Semantic Versioning](https://semver.org/) and uses
 
 ## [Unreleased]
 
+## [0.3.5] — 2026-10-08
+
+### Fixed
+
+- **Numbers above 10000 no longer parse to a different number** (#36). A scale
+  word's magnitude is now read off num2words2's own rendering instead of being
+  assumed from the probed power:
+  - lakh / crore are 10^5 / 10^7, not 10^6 / 10^9 — as bn en_IN en_NE en_NP gu
+    hi kn ml mr ne pa si ta te ur (hi "दस लाख" was 10000000, en_IN "one
+    lakh" 1000000);
+  - a multiplier is never a scale word (eu "bat", ha "biyu", en_AERO "zero");
+  - multipliers after the scale word: ha / ff / sw "dubu biyu" = 2000, eu
+    "milioi bat" = 1000000 (was 10^12);
+  - scales glued to their multiplier: km / lo / th / my myriads and
+    hundred-thousands, zh / ja / ko 万 / 億, bo, dv;
+  - en_AERO and its aliases read digit by digit ("wun zero zero zero zero
+    zero" = 100000, was 4000).
+  On the round-trip ratchet (`rust/words2num2-core/tests/roundtrip.rs`),
+  wrong values go from 72 to 2 and raises from 153 to 71. The 2 left are ha
+  10000 / 100000, which num2words2 renders exactly like 1010 / 1100.
+
+- **Indic, Tibetan and Thaana numbers no longer parse to a different
+  number.** `normalize()` stripped every combining mark, which erased the
+  vowel signs of these scripts — they are letters, not accents. hi `"पचासी"`
+  (85) normalized to `"पचास"` (50) and parsed as **50**; bo `"དགུ་"` (9) as 6;
+  bn `"একাশি"` (81) as 21; dv 8000 as 1000. Across the 0..=10000 tables that
+  was **5310 silently wrong values in 7 languages** (bn bo dv gu hi kn pa).
+  The 101 that remain (or 70 vs 17, ha 10000 vs 1010) are the renderer
+  spelling two numbers the same way.
+  Only optional diacritics are stripped now: the generic combining blocks
+  (é, ñ, й), Arabic harakat, Hebrew points and the Indic nukta (so hi
+  `"सडसठ"` still reads as 67). Behaviour change for
+  `normalize()`: Brahmic, Tibetan, Thaana, Thai and Lao marks are kept.
+
+### Changed
+
+- **Breaking for five languages: Tigrinya, Kyrgyz, Odia, Central Kurdish
+  and Konkani parse their own script, and no longer parse a Latin
+  transliteration** (#14). ti `"ሓደ"`, ky `"кырк эки"`, or `"ଚାଳିଶ"`, ckb
+  `"یەک هەزار"`, kok `"एक शंभर"` now parse; `"ḥade"`, `"kırk eki"`,
+  `"calīśa"`, `"yek hezar"`, `"ek xambhar"` — spellings no native writer
+  uses — raise `Words2NumError`. The reverse tables follow the renderer,
+  which moved to the native scripts in gladiaio/num2words2#134–#142. Odia
+  70 (`"ସତୁରୀ"`) and 17 are distinct again; before, 70 / 170 / … parsed as
+  17 / 117 / ….
+- `num2words2-core` dependency floor raised to **0.1.3** (was `"0.1"`,
+  which the lockfile resolved to 0.1.0), and the unlinked copy at
+  `rust/num2words2-core/` is gone (#15). It was a workspace member nothing
+  depended on: compiled on every build, and editing it changed nothing.
+
+## [0.3.4] — 2026-10-05
+
 Sentence mode (`words2num_sentence`) was audited on ~300 real-life ASR finals
 (call-center, IVR, finance; en / fr / es, plus de / it / pt / nl and a sweep
 of 20 other locales): 59 % correct before, 96 % after. Every change is
@@ -76,35 +128,6 @@ covered in `tests/test_sentence_realworld.py`.
 
 ### Fixed
 
-- **Numbers above 10000 no longer parse to a different number** (#36). A scale
-  word's magnitude is now read off num2words2's own rendering instead of being
-  assumed from the probed power:
-  - lakh / crore are 10^5 / 10^7, not 10^6 / 10^9 — as bn en_IN en_NE en_NP gu
-    hi kn ml mr ne pa si ta te ur (hi "दस लाख" was 10000000, en_IN "one
-    lakh" 1000000);
-  - a multiplier is never a scale word (eu "bat", ha "biyu", en_AERO "zero");
-  - multipliers after the scale word: ha / ff / sw "dubu biyu" = 2000, eu
-    "milioi bat" = 1000000 (was 10^12);
-  - scales glued to their multiplier: km / lo / th / my myriads and
-    hundred-thousands, zh / ja / ko 万 / 億, bo, dv;
-  - en_AERO and its aliases read digit by digit ("wun zero zero zero zero
-    zero" = 100000, was 4000).
-  On the round-trip ratchet (`rust/words2num2-core/tests/roundtrip.rs`),
-  wrong values go from 72 to 2 and raises from 153 to 71. The 2 left are ha
-  10000 / 100000, which num2words2 renders exactly like 1010 / 1100.
-
-- **Indic, Tibetan and Thaana numbers no longer parse to a different
-  number.** `normalize()` stripped every combining mark, which erased the
-  vowel signs of these scripts — they are letters, not accents. hi `"पचासी"`
-  (85) normalized to `"पचास"` (50) and parsed as **50**; bo `"དགུ་"` (9) as 6;
-  bn `"একাশি"` (81) as 21; dv 8000 as 1000. Across the 0..=10000 tables that
-  was **5310 silently wrong values in 7 languages** (bn bo dv gu hi kn pa).
-  The 101 that remain (or 70 vs 17, ha 10000 vs 1010) are the renderer
-  spelling two numbers the same way.
-  Only optional diacritics are stripped now: the generic combining blocks
-  (é, ñ, й), Arabic harakat, Hebrew points and the Indic nukta (so hi
-  `"सडसठ"` still reads as 67). Behaviour change for
-  `normalize()`: Brahmic, Tibetan, Thaana, Thai and Lao marks are kept.
 - **Every advertised language is now actually accepted.** `supported_langs()`
   reported 172 codes while the resolver knew 120, because the two were
   separate hand-maintained lists. **28 languages raised
@@ -162,19 +185,6 @@ covered in `tests/test_sentence_realworld.py`.
 ### Changed
 
 - `"twenty first"` in sentence mode is `"21st"` (was `"21"`).
-- **Breaking for five languages: Tigrinya, Kyrgyz, Odia, Central Kurdish
-  and Konkani parse their own script, and no longer parse a Latin
-  transliteration** (#14). ti `"ሓደ"`, ky `"кырк эки"`, or `"ଚାଳିଶ"`, ckb
-  `"یەک هەزار"`, kok `"एक शंभर"` now parse; `"ḥade"`, `"kırk eki"`,
-  `"calīśa"`, `"yek hezar"`, `"ek xambhar"` — spellings no native writer
-  uses — raise `Words2NumError`. The reverse tables follow the renderer,
-  which moved to the native scripts in gladiaio/num2words2#134–#142. Odia
-  70 (`"ସତୁରୀ"`) and 17 are distinct again; before, 70 / 170 / … parsed as
-  17 / 117 / ….
-- `num2words2-core` dependency floor raised to **0.1.3** (was `"0.1"`,
-  which the lockfile resolved to 0.1.0), and the unlinked copy at
-  `rust/num2words2-core/` is gone (#15). It was a workspace member nothing
-  depended on: compiled on every build, and editing it changed nothing.
 
 ## [0.3.3] — 2026-09-24
 
