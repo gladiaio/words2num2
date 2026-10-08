@@ -18,6 +18,7 @@ use num_bigint::BigInt;
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock, RwLock};
 
+pub mod ord_forms;
 pub mod w2n_currency;
 pub mod w2n_formats;
 pub mod w2n_lang_en;
@@ -287,12 +288,18 @@ fn build_table(lang: &str, ordinal: bool) -> Result<HashMap<String, i64>, Lookup
     for n in LOOKUP_LO..LOOKUP_HI {
         let v = BigInt::from(n);
         let words = if ordinal { l.to_ordinal(&v) } else { l.to_cardinal(&v) };
-        let Ok(words) = words else { continue }; // Python swallows every raise
-        let key = normalize(&words);
-        if key.contains('å') {
-            ringless.push((key.replace('å', "a"), n));
+        let key = words.ok().map(|w| normalize(&w)); // Python swallows every raise
+        if let Some(key) = &key {
+            if key.contains('å') {
+                ringless.push((key.replace('å', "a"), n));
+            }
+            table.entry(key.clone()).or_insert(n);
         }
-        table.entry(key).or_insert(n);
+        if ordinal {
+            for extra in ord_forms::extra_keys(lang, n, key.as_deref()) {
+                table.entry(extra).or_insert(n);
+            }
+        }
     }
     // "å" typed without its ring ("atte" for "åtte") still reads, but only where
     // no number is spelled that way: no/nb "attende" is 18th, not "åttende" (8th).
@@ -452,11 +459,26 @@ fn table_get(
     if let Some(v) = tab.get(normalized) {
         return Some(*v);
     }
-    let variants = if ordinal {
+    let mut variants = if ordinal {
         ordinal_variants(lang, normalized)
     } else {
         fr_plural_variants(lang, normalized)
     };
+    if ordinal {
+        // Gender / case / number / article forms (ru "первая", pl "dwudziesta
+        // pierwsza", hu "másodikán"), per language.
+        variants.extend(ord_forms::variants(lang, normalized));
+        // A compound spoken spaced where num2words glues it: es "vigésimo
+        // primero" / "vigésima primera" -> "vigesimoprimero". Only a genuine
+        // table hit counts, as for the cardinal despace retry.
+        if normalized.contains(' ') {
+            let despaced: Vec<String> = std::iter::once(normalized)
+                .chain(variants.iter().map(String::as_str))
+                .map(|v| v.split(' ').collect())
+                .collect();
+            variants.extend(despaced);
+        }
+    }
     for variant in variants {
         if let Some(v) = tab.get(&variant) {
             return Some(*v);
