@@ -7,6 +7,7 @@ examples keeps it honest. ``python -m doctest REFERENCE.md`` cannot be used
 directly: the closing code fence would be read as expected output, so each
 ```python block is extracted and run on its own, sharing one namespace.
 """
+
 import doctest
 import pathlib
 import re

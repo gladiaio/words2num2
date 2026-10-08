@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """The public call contract: language codes, ``to=`` modes, keyword
 arguments and the command-line entry point."""
+
 import subprocess
 import sys
 

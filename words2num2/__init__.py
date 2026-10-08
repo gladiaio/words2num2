@@ -27,12 +27,14 @@ Decimal('3.14')
 >>> words2num("trente-deux", lang="fr")
 32
 """
+
 from __future__ import unicode_literals
 
 # The compiled core is mandatory: this package is a binder over it. A source
 # checkout must build the extension (maturin develop) — an ImportError here is
 # the honest signal that it has not been built.
 from . import _rust as _RUST  # noqa: E402
+from ._version import __version__, __version_tuple__  # noqa: E402,F401
 
 # Exception + result types the core references by name (see
 # rust/words2num2-py/src/lib.rs: `words2num_error` imports
@@ -41,8 +43,6 @@ from . import _rust as _RUST  # noqa: E402
 # import surface keeps working.
 from .base import Words2NumError  # noqa: E402
 from .converters.auto import Quantity  # noqa: E402
-
-from ._version import __version__, __version_tuple__  # noqa: E402
 
 #: The ``to=`` conversion types :func:`words2num` and
 #: :func:`words2num_sentence` accept.
@@ -114,8 +114,7 @@ convert_sentence = words2num_sentence
 sentence_to_words = words2num_sentence
 
 
-def auto_parse(text, lang="en", prefer=None, thousands_sep=None,
-               decimal_sep=None):
+def auto_parse(text, lang="en", prefer=None, thousands_sep=None, decimal_sep=None):
     """Parse a single quantity expression, e.g. ``"$12,345.00"`` or ``"5cm"``.
 
     Returns a :class:`Quantity`; raises ``Words2NumError`` if unparseable.
@@ -124,15 +123,17 @@ def auto_parse(text, lang="en", prefer=None, thousands_sep=None,
     return _RUST.auto_parse(text, lang, prefer, thousands_sep, decimal_sep)
 
 
-def auto_parse_sentence(text, lang="en", prefer=None, thousands_sep=None,
-                        decimal_sep=None, expand=False):
+def auto_parse_sentence(
+    text, lang="en", prefer=None, thousands_sep=None, decimal_sep=None, expand=False
+):
     """Walk free text and rewrite every quantity expression in place.
 
     Each match becomes ``"<value> <unit>"``; with ``expand=True`` units use
     their long form. Returns the rewritten string.
     """
     return _RUST.auto_parse_sentence(
-        text, lang, prefer, thousands_sep, decimal_sep, expand)
+        text, lang, prefer, thousands_sep, decimal_sep, expand
+    )
 
 
 def parse_number_string(s, thousands_sep=None, decimal_sep=None, lang=None):

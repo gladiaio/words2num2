@@ -18,8 +18,14 @@ def fold(text, lang):
 @pytest.mark.parametrize(
     "text,expected",
     [
-        ("one thousand three hundred fifty five dollars and twenty eight cents", "$1,355.28"),
-        ("your balance is one hundred and fifty four dollars and ninety two cents.", "your balance is $154.92."),
+        (
+            "one thousand three hundred fifty five dollars and twenty eight cents",
+            "$1,355.28",
+        ),
+        (
+            "your balance is one hundred and fifty four dollars and ninety two cents.",
+            "your balance is $154.92.",
+        ),
         ("twelve dollars", "$12"),
         ("one dollar", "$1"),
         ("five dollars, please", "$5, please"),
@@ -55,7 +61,10 @@ def test_en(text, expected):
         ("mille deux cents euros cinquante", "1 200,50 €"),
         ("trois mille quatre cent cinquante euros", "3 450 €"),
         ("cent mille euros", "100 000 €"),
-        ("un solde de quarante-trois euros et vingt-deux centimes.", "un solde de 43,22 €."),
+        (
+            "un solde de quarante-trois euros et vingt-deux centimes.",
+            "un solde de 43,22 €.",
+        ),
         ("deux euros cinquante", "2,50 €"),
         ("deux virgule cinq euros", "2,50 €"),
         ("vingt centimes", "0,20 €"),
@@ -152,7 +161,11 @@ def test_it_centesimi_is_the_cent_after_a_number_even_without_the_fold():
     [
         # A transcript's punctuation puts a comma where the speaker paused: the
         # subunit that follows (connector + number + subunit word) is the same amount.
-        ("fr", "le solde est de zéro dollar, et cinquante-cinq centimes.", "le solde est de 0,55 $."),
+        (
+            "fr",
+            "le solde est de zéro dollar, et cinquante-cinq centimes.",
+            "le solde est de 0,55 $.",
+        ),
         ("fr", "deux euros, et cinquante centimes", "2,50 €"),
         ("en", "zero dollars, and fifty five cents", "$0.55"),
         ("es", "dos dólares, con cincuenta centavos", "$2.50"),

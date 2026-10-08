@@ -1,13 +1,14 @@
 # -*- coding: utf-8 -*-
 """words2num2 CLI entrypoint.
 
-    $ words2num2 forty two
-    42
-    $ words2num2 --lang fr trois cent quatre
-    304
-    $ words2num2 --lang=en --to=ordinal twenty-first
-    21
+$ words2num2 forty two
+42
+$ words2num2 --lang fr trois cent quatre
+304
+$ words2num2 --lang=en --to=ordinal twenty-first
+21
 """
+
 from __future__ import unicode_literals
 
 import argparse

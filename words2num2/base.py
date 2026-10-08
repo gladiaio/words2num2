@@ -12,6 +12,7 @@ lives there. The core raises this error by importing the class from Python (see
 ``rust/words2num2-py/src/lib.rs``, ``words2num_error``), so it must stay
 importable as ``words2num2.base.Words2NumError``.
 """
+
 from __future__ import unicode_literals
 
 

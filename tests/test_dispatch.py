@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """Tests for the locale dispatch (now entirely in the Rust core)."""
+
 import pytest
 
 from words2num2 import words2num

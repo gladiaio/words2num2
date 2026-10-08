@@ -280,7 +280,11 @@ def test_article_one_other_languages(lang, text, expected):
         ("en", "a double espresso", "a double espresso"),
         ("en", "double the amount", "double the amount"),
         ("fr", "sept cinq zéro un zéro", "75010"),
-        ("fr", "zéro six douze trente-quatre cinquante-six soixante-dix-huit", "06 12 34 56 78"),
+        (
+            "fr",
+            "zéro six douze trente-quatre cinquante-six soixante-dix-huit",
+            "06 12 34 56 78",
+        ),
         ("fr", "un deux trois", "123"),
         ("fr", "un deux", "1 2"),
         ("fr", "j'en ai deux, trois", "j'en ai 2, 3"),
@@ -398,7 +402,11 @@ def test_quantities_and_compounds(lang, text, expected):
     "lang,text,expected",
     [
         # Other locales: the walker's new rules only change what they mean to.
-        ("vi", "bốn mươi hai", "42"),  # vi's ordinal table holds every cardinal ("thứ" + n)
+        (
+            "vi",
+            "bốn mươi hai",
+            "42",
+        ),  # vi's ordinal table holds every cardinal ("thứ" + n)
         ("ru", "первый", "первый"),  # no figure form with a rank marker: the words stay
         ("pl", "pierwszy", "pierwszy"),
         ("tr", "birinci", "1'inci"),
