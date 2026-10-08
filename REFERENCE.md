@@ -6,23 +6,21 @@ overview, see [README.rst](README.rst).
 ## Table of contents
 
 - [Top-level functions](#top-level-functions)
-  - [`words2num`](#words2numtext-lang--en-to--cardinal-kwargs)
-  - [`words2num_sentence`](#words2num_sentencesentence-lang--en-to--cardinal-kwargs)
-  - [`auto_parse`](#auto_parsetext-lang--en-prefer--none-thousands_sep--none-decimal_sep--none)
-  - [`auto_parse_sentence`](#auto_parse_sentencetext--expandfalse)
-  - [`parse_number_string`](#parse_number_strings-thousands_sep--none-decimal_sep--none-lang--none)
+  - [`words2num`](#words2num)
+  - [`words2num_sentence`](#words2num_sentence)
+  - [`auto_parse`](#auto_parse)
+  - [`auto_parse_sentence`](#auto_parse_sentence)
+  - [`parse_number_string`](#parse_number_string)
+  - [`normalize`](#normalize)
+  - [`supported_langs`](#supported_langs)
 - [Data classes](#data-classes)
   - [`Quantity`](#quantity)
-  - [`UnitInfo`](#unitinfo)
-  - [`CurrencyInfo`](#currencyinfo)
-- [Registries](#registries)
-  - [`CONVERTER_CLASSES`](#converter_classes)
-  - [`UNITS`](#units)
-  - [`CURRENCIES`](#currencies)
-  - [`NUMBER_FORMAT_DEFAULTS`](#number_format_defaults)
+- [Constants](#constants)
+  - [`CONVERTER_TYPES`](#converter_types)
 - [Exceptions](#exceptions)
   - [`Words2NumError`](#words2numerror)
-- [Per-language converters](#per-language-converters)
+- [Language codes](#language-codes)
+- [How a language is parsed](#how-a-language-is-parsed)
 - [Pluralization](#pluralization)
 - [Conversion types](#conversion-types)
 
@@ -30,7 +28,9 @@ overview, see [README.rst](README.rst).
 
 ## Top-level functions
 
-### `words2num(text, lang="en", to="cardinal", **kwargs)`
+### `words2num`
+
+`words2num(text, lang="en", to="cardinal")`
 
 Parse `text` (a number written in words) into a numeric value.
 
@@ -39,8 +39,11 @@ Parse `text` (a number written in words) into a numeric value.
 | Name | Type | Default | Description |
 |---|---|---|---|
 | `text` | `str` | — | The words to parse (e.g. `"forty-two"`). |
-| `lang` | `str` | `"en"` | Locale code. Same set as `num2words2`. Hyphens (`en-US`) are normalized to underscores; unknown subtags fall back to the base language. |
-| `to` | `str` | `"cardinal"` | One of `"cardinal"`, `"ordinal"`, `"ordinal_num"`, `"year"`, `"currency"`. |
+| `lang` | `str` | `"en"` | Locale code, case-insensitive; see [Language codes](#language-codes). |
+| `to` | `str` | `"cardinal"` | One of [`CONVERTER_TYPES`](#converter_types): `"cardinal"`, `"ordinal"`, `"ordinal_num"`, `"year"`, `"currency"`, `"digits"`. See [Conversion types](#conversion-types). |
+
+There are no other keyword arguments: an unknown one is a `TypeError`
+naming it.
 
 **Returns**
 
@@ -48,7 +51,8 @@ Parse `text` (a number written in words) into a numeric value.
 
 **Raises**
 
-- `NotImplementedError` — `lang` is not registered in `CONVERTER_CLASSES`.
+- `NotImplementedError` — `lang` is not a supported language, or `to` is
+  not a conversion type.
 - `Words2NumError` — `text` cannot be parsed.
 
 **Examples**
@@ -66,18 +70,28 @@ Decimal('3.14')
 1999
 >>> words2num("quarante-deux", lang="fr")
 42
+>>> words2num("two seven five", to="digits")
+275
+>>> words2num("one", lang="EN-us")
+1
 ```
 
 ---
 
-### `words2num_sentence(sentence, lang="en", to="cardinal", **kwargs)`
+### `words2num_sentence`
+
+`words2num_sentence(sentence, lang="en", to="cardinal", currency=False)`
 
 Walk a sentence and replace every word-number with its numeric form.
 Non-number tokens pass through unchanged. Punctuation is preserved.
 
 **Aliases:** `convert_sentence`, `sentence_to_words`.
 
-**Parameters** — same as `words2num`.
+**Parameters** — `lang` and `to` as for `words2num`, checked before the
+walk (an unsupported value raises `NotImplementedError`, it does not
+return the sentence unchanged). `currency=True` writes an amount spoken as
+number + currency word (+ subunit) the way the language writes it
+(`"twelve dollars and fifty cents"` → `"$12.50"`).
 
 **Returns** — `str`.
 
@@ -90,11 +104,15 @@ Non-number tokens pass through unchanged. Punctuation is preserved.
 'She is 21 years old.'
 >>> words2num_sentence("In nineteen ninety nine, two thousand people came.", to="year")
 'In 1999, 2000 people came.'
+>>> words2num_sentence("my code is zero seven")
+'my code is 07'
 ```
 
 ---
 
-### `auto_parse(text, lang="en", prefer=None, thousands_sep=None, decimal_sep=None)`
+### `auto_parse`
+
+`auto_parse(text, lang="en", prefer=None, thousands_sep=None, decimal_sep=None)`
 
 Parse a single quantity expression — a number plus an optional unit
 or currency — and return a structured [`Quantity`](#quantity).
@@ -146,7 +164,9 @@ Quantity(value=5, unit='cm', kind='length', confidence=1.0)
 
 ---
 
-### `auto_parse_sentence(text, lang="en", prefer=None, thousands_sep=None, decimal_sep=None, expand=False)`
+### `auto_parse_sentence`
+
+`auto_parse_sentence(text, lang="en", prefer=None, thousands_sep=None, decimal_sep=None, expand=False)`
 
 Walk free text and replace every quantity in place. Punctuation
 between matches is preserved.
@@ -185,15 +205,17 @@ In short form, percent and bare degree are tightly glued
 
 ---
 
-### `parse_number_string(s, thousands_sep=None, decimal_sep=None, lang=None)`
+### `parse_number_string`
+
+`parse_number_string(s, thousands_sep=None, decimal_sep=None, lang=None)`
 
 Parse a digit-form numeric string with configurable separators.
 
 **Resolution order:**
 
 1. If `thousands_sep` and/or `decimal_sep` are given, use them.
-2. Otherwise if `lang` matches a known locale, use its defaults from
-   [`NUMBER_FORMAT_DEFAULTS`](#number_format_defaults).
+2. Otherwise if `lang` matches a known locale, use its default
+   separators (see [the table below](#locale-separator-defaults)).
 3. Otherwise auto-detect from the string itself.
 
 **Auto-detect heuristic:**
@@ -237,6 +259,39 @@ Parse a digit-form numeric string with configurable separators.
 
 ---
 
+### `normalize`
+
+`normalize(text)`
+
+Normalize `text` the way the core does before a lookup: NFKD, lowercase,
+strip diacritics, hyphens between words become spaces, collapse
+whitespace. Returns `str`.
+
+```python
+>>> normalize("Forty-Two")
+'forty two'
+>>> normalize("Trente-Deux")
+'trente deux'
+```
+
+---
+
+### `supported_langs`
+
+`supported_langs()`
+
+Return the list of language keys `words2num` accepts (the same set the
+embedded num2words2 renderer serves).
+
+```python
+>>> "fr" in supported_langs()
+True
+>>> "pt_BR" in supported_langs()
+True
+```
+
+---
+
 ## Data classes
 
 ### `Quantity`
@@ -254,80 +309,24 @@ Returned by `auto_parse` and used by `auto_parse_sentence` internally.
 
 `Quantity` has a custom `__repr__` for readable debug output.
 
-### `UnitInfo`
-
-Per-unit metadata in the [`UNITS`](#units) registry.
-
-| Field | Type | Description |
-|---|---|---|
-| `short` | `str` | Canonical short form (e.g. `"cm"`). |
-| `long` | `str` | Canonical long form (e.g. `"centimeter"`). |
-| `kind` | `str` | `"length"`, `"mass"`, `"temperature"`, `"time"`, `"volume"`, or `"percent"`. |
-| `confidence` | `float` | Default confidence reported when the token is matched (lower for ambiguous tokens). |
-
-### `CurrencyInfo`
-
-Per-currency metadata in the [`CURRENCIES`](#currencies) registry.
-
-| Field | Type | Description |
-|---|---|---|
-| `code` | `str` | ISO 4217 code (`"USD"`, `"EUR"`, …). |
-| `symbol` | `str` | Symbol (`"$"`, `"€"`, …). |
-| `long` | `str` | Singular long form (`"dollar"`, `"euro"`, …). |
-
 ---
 
-## Registries
+## Constants
 
-### `CONVERTER_CLASSES`
+### `CONVERTER_TYPES`
 
-`Dict[str, Words2Num_Base]`. Maps a locale code to a per-language
-converter instance. Same keys as `num2words2.CONVERTER_CLASSES`.
+Tuple of the accepted `to=` values (see [Conversion types](#conversion-types)).
 
 ```python
->>> from words2num2 import CONVERTER_CLASSES
->>> len(CONVERTER_CLASSES)
-120
->>> "fr" in CONVERTER_CLASSES
-True
->>> CONVERTER_CLASSES["fr"].to_cardinal("quarante-deux")
-42
+>>> CONVERTER_TYPES
+('cardinal', 'ordinal', 'ordinal_num', 'year', 'currency', 'digits')
 ```
 
-### `UNITS`
+### Locale separator defaults
 
-`Dict[str, UnitInfo]`. Maps a unit token (and its case-insensitive or
-plural alias) to its `UnitInfo`. Used by `auto_parse` to resolve the
-unit suffix.
-
-Categories included:
-
-- **Length:** `mm`, `cm`, `dm`, `m`, `km`, `in`, `ft`, `yd`, `mi`, `nm`, `µm`/`um`
-- **Mass:** `mg`, `g`, `kg`, `t`, `lb`/`lbs`, `oz`
-- **Temperature:** `°`, `°C`, `°F`, `K`, `C`, `F`
-- **Time:** `ms`, `s`, `sec`, `min`, `h`/`hr`/`hrs`, `d`
-- **Volume:** `ml`, `cl`, `dl`, `l`/`L`, `gal`
-- **Percent:** `%`
-
-Ambiguous tokens (`m`, `g`, `t`, `K`, `s`, `h`, `d`, `in`) have a
-`confidence` < 1.0; callers can override with `prefer={...}`.
-
-### `CURRENCIES`
-
-`Dict[str, CurrencyInfo]`. Maps a currency symbol (`$`, `€`, …) **or**
-ISO code (`USD`, `EUR`, …) to its `CurrencyInfo`.
-
-Symbols recognized: `$`, `€`, `£`, `¥`, `₹`, `₽`, `₩`, `₺`.
-Codes recognized: `USD`, `EUR`, `GBP`, `JPY`, `CHF`, `CAD`, `AUD`,
-`CNY`, `INR`, `BRL`, `MXN`, `RUB`, `KRW`.
-
-### `NUMBER_FORMAT_DEFAULTS`
-
-`Dict[str, Dict[str, str]]`. Per-locale defaults for the
-`thousands` and `decimal` separators used by `parse_number_string`
-when no explicit override is given.
-
-Excerpt:
+`parse_number_string` and `auto_parse` use per-locale default separators
+when none is given. The table lives in the core
+(`rust/words2num2-core/src/w2n_formats.rs`); it is not exported. Excerpt:
 
 | Locale | thousands | decimal | Notes |
 |---|---|---|---|
@@ -336,9 +335,15 @@ Excerpt:
 | `fr_CH` | `'` | `.` | Swiss apostrophe |
 | `de`, `es*`, `it`, `pt*`, `nl`, `ro`, `hr`, `sl`, `sr`, `tr`, `el`, `da`, `is`, `fo` | `.` | `,` | |
 | `ru`, `uk`, `be`, `bg`, `pl`, `cs`, `sk`, `hu`, `sv`, `no`, `nn`, `fi`, `et`, `lt`, `lv` | ` ` | `,` | |
-| `_default` | `,` | `.` | Fallback. |
+| anything else | `,` | `.` | Fallback. |
 
-Full table: `words2num2/formats.py`.
+Units recognized by `auto_parse` (also internal): length (`mm` `cm` `m`
+`km` `in` `ft` `yd` `mi` …), mass (`mg` `g` `kg` `t` `lb` `oz`),
+temperature (`°C` `°F` `K`), time (`ms` `s` `min` `h` `d`), volume (`ml`
+`l` `gal`), and `%`; currencies by symbol (`$` `€` `£` `¥` `₹` `₽` `₩` `₺`)
+or ISO code (`USD`, `EUR`, `GBP`, …). Ambiguous tokens (`m`, `g`, `t`,
+`K`, `s`, `h`, `d`, `in`) get a `confidence` below 1.0; override them with
+`prefer={...}`.
 
 ---
 
@@ -362,35 +367,45 @@ could not parse: unrecognized token 'zoot' in 'forty zoot'
 
 ---
 
-## Per-language converters
+## Language codes
 
-Every locale module (`words2num2/lang_XX.py`) defines a class
-`Words2Num_XX` inheriting from `Words2Num_Base`. The class is
-instantiated once and stored in `CONVERTER_CLASSES`.
+`lang` is matched against [`supported_langs()`](#supported_langs):
 
-The base class provides a generic implementation that derives a
-`{normalized_words: integer}` lookup table by calling `num2words2`
-forward across an integer range (`-1..10000` by default, configurable
-via `LOOKUP_RANGE`). The first `to_cardinal` / `to_ordinal` call
-materializes the table lazily.
+1. an exact key (`"en"`, `"sr_Latn"`, `"en_Aero_FAA"`);
+2. `-` and `_` are interchangeable (`"pt-BR"`);
+3. case is ignored (`"EN"`, `"pt_br"`), and ISO 639-2 three-letter codes
+   name their language (`"eng"`, `"fra"`, `"ger"`);
+4. unknown trailing subtags fall back to the base language
+   (`"en-US"` → `en`, `"sr-Latn-RS"` → `sr_Latn`).
 
-To add a hand-written grammar parser for a locale, override
-`to_cardinal` / `to_ordinal` in the subclass:
+Anything else raises `NotImplementedError`, including language names
+(`"swedish"`): there is no prefix guessing, which used to read
+`"swedish"` as Swahili (`sw`).
 
 ```python
-# words2num2/lang_FR.py
-from .base import Words2Num_Base
-
-class Words2Num_FR(Words2Num_Base):
-    LANG = "fr"
-
-    def to_cardinal(self, text):
-        # Custom French grammar that handles soixante-dix (70),
-        # quatre-vingts (80), conjunctions like "et", etc.
-        ...
+>>> words2num("trois", lang="FR")
+3
+>>> words2num("um", lang="pt-br")
+1
+>>> words2num("one", lang="swedish")
+Traceback (most recent call last):
+  ...
+NotImplementedError: language 'swedish' is not supported
 ```
 
-`words2num2/lang_EN.py` is a complete reference implementation.
+---
+
+## How a language is parsed
+
+All parsing happens in the compiled Rust core (`rust/words2num2-core`);
+the `words2num2` Python package is a thin binder over it. English has a
+hand-written grammar (`w2n_lang_en.rs`). Every other language is parsed
+by a reverse lookup table built lazily, on first use, by rendering
+`-1..10000` with the embedded num2words2 renderer (`num2words2-core`) and
+inverting it; larger numbers are composed from the language's scale words
+(thousand, million, …) derived the same way. There are no per-language
+Python modules to override: to improve a language, change the core (see
+[CONTRIBUTING.md](CONTRIBUTING.md)).
 
 ---
 
@@ -427,7 +442,8 @@ plural rules to a long-form unit name. Invoked automatically by
 
 ## Conversion types
 
-The `to=` parameter on `words2num` accepts:
+The `to=` parameter on `words2num` and `words2num_sentence` accepts
+(`CONVERTER_TYPES`):
 
 | Value | Meaning | Example |
 |---|---|---|
@@ -435,7 +451,12 @@ The `to=` parameter on `words2num` accepts:
 | `"ordinal"` | Position. | `"twenty-first"` → `21` |
 | `"ordinal_num"` | Digit-form ordinal. | `"21st"` → `21` |
 | `"year"` | Year-pair shorthand. | `"nineteen ninety nine"` → `1999` |
-| `"currency"` | Currency expression. | `"twelve dollars and fifty cents"` → varies by locale |
+| `"currency"` | Currency amount (unit + subunit). | `"twelve dollars and fifty cents"` |
+| `"digits"` | Digit by digit, concatenated. | `"two seven five"` → `275` |
+
+`"digits"` returns an `int`, so leading zeros are dropped
+(`"zero seven"` → `7`); [`words2num_sentence`](#words2num_sentence) keeps
+them (`"zero seven"` → `"07"`).
 
 Unsupported values raise `NotImplementedError`.
 
