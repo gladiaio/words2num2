@@ -19,6 +19,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, OnceLock, RwLock};
 
 pub mod w2n_currency;
+pub mod w2n_decimal;
 pub mod w2n_formats;
 pub mod w2n_lang_en;
 pub mod w2n_sentence;

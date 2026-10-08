@@ -1039,8 +1039,16 @@ pub fn words2num(
         },
         Converter::Table(_) => {
             let v = match to {
+                // A decimal spoken in words, read as the sentence walker
+                // reads it: fr "trois virgule un quatre" -> 3.14 (#191).
+                "cardinal" => converter.to_cardinal(text).or_else(|e| {
+                    table_decimal(&converter, &resolved, text)
+                        .and_then(|(int, _, frac)| BigDecimal::from_str(&format!("{}.{}", int, frac)).ok())
+                        .map(W2nValue::Dec)
+                        .ok_or(e)
+                }),
                 // `Words2Num_Base.to_year`/`to_currency` == `self.to_cardinal`.
-                "cardinal" | "year" | "currency" => converter.to_cardinal(text),
+                "year" | "currency" => converter.to_cardinal(text),
                 "ordinal" => converter.to_ordinal(text),
                 "digits" => converter.to_digits(text),
                 _ => converter.to_ordinal_num(text),
@@ -1370,8 +1378,32 @@ const INCLUDABLE_EN: [&str; 7] = ["and", "point", "dot", "minus", "negative", "a
 /// analogue of English "and". Without them the walker breaks a run at the
 /// connector ("sesenta **y** nueve mil ocho" stopped at "sesenta"), so
 /// composed cardinals above the reverse table never reached the parser. Keyed
-/// by resolved language prefix; empty for locales that don't join with a word.
+/// by resolved language prefix.
+///
+/// The words of a spoken decimal are added from the renderer
+/// ([`crate::w2n_decimal::run_words`]): sv "komma", ko "점", hi "दशमलव", ru
+/// "целых" — so the run grows across the separator (#107, #108).
 fn includable_for(resolved: &str) -> &'static [&'static str] {
+    static CACHE: std::sync::OnceLock<std::sync::RwLock<HashMap<String, &'static [&'static str]>>> =
+        std::sync::OnceLock::new();
+    let cache = CACHE.get_or_init(Default::default);
+    if let Some(l) = cache.read().ok().and_then(|m| m.get(resolved).copied()) {
+        return l;
+    }
+    let mut words: Vec<&'static str> = hand_includable(resolved).to_vec();
+    for w in crate::w2n_decimal::run_words(converter_for(resolved).n2w_key()) {
+        if !words.contains(&w) {
+            words.push(w);
+        }
+    }
+    let built: &'static [&'static str] = Box::leak(words.into_boxed_slice());
+    if let Ok(mut m) = cache.write() {
+        m.entry(resolved.to_string()).or_insert(built);
+    }
+    built
+}
+
+fn hand_includable(resolved: &str) -> &'static [&'static str] {
     let base = resolved.split(&['_', '-'][..]).next().unwrap_or(resolved);
     match base {
         "es" | "gl" => &["y", "e", "coma", "punto"],
@@ -1389,7 +1421,10 @@ fn includable_for(resolved: &str) -> &'static [&'static str] {
 
 /// The spoken decimal separator of a language and the character it stands
 /// for: fr "virgule" → ",", es "punto" → ".", "coma" → ",". English "point"
-/// belongs to its own grammar.
+/// belongs to its own grammar. Every other language's separator is derived
+/// from the renderer ([`crate::w2n_decimal`]) and writes the locale's decimal
+/// character; this table only says which character a word stands for where
+/// a language has two (es "punto" and "coma").
 fn decimal_word(resolved: &str, word: &str) -> Option<char> {
     let base = resolved.split(&['_', '-'][..]).next().unwrap_or(resolved);
     match (base, word) {
@@ -1406,53 +1441,30 @@ fn decimal_word(resolved: &str, word: &str) -> Option<char> {
 }
 
 /// A decimal spoken in a reverse-table language: "trois virgule cinq" →
-/// ("3", ',', "5"), "dos coma cero cinco" → ("2", ',', "05"), "deux virgule
-/// cinquante" → ("2", ',', "50"). The fraction is single-digit words read
-/// one by one, or one number below 100. `None` when it is not one.
+/// ("3", ',', "5"), "dos coma cero cinco" → ("2", ',', "05"), "trois virgule
+/// cent vingt-cinq" → ("3", ',', "125"), ru "три целых четырнадцать сотых" →
+/// ("3", ',', "14"). The shapes are derived from the renderer, see
+/// [`crate::w2n_decimal::read`]; a derived separator writes the locale's
+/// decimal character. `None` when it is not one.
 fn table_decimal(
     converter: &Converter,
     resolved: &str,
     text: &str,
 ) -> Option<(String, char, String)> {
-    let norm = crate::normalize(text);
-    let toks: Vec<&str> = norm.split_whitespace().collect();
-    let pos = toks
-        .iter()
-        .position(|t| decimal_word(resolved, t).is_some())?;
-    let sep = decimal_word(resolved, toks[pos])?;
-    let int_part = if pos == 0 {
-        "0".to_string()
-    } else {
-        match converter.to_cardinal(&toks[..pos].join(" ")).ok()? {
-            W2nValue::Int(i) => i.to_string(),
-            _ => return None,
-        }
+    let default_sep = crate::w2n_formats::locale_format(resolved)
+        .and_then(|f| f.decimal.chars().next())
+        .unwrap_or('.');
+    let cardinal = |words: &str| match converter.to_cardinal(words).ok()? {
+        W2nValue::Int(i) => Some(i),
+        _ => None,
     };
-    let frac = &toks[pos + 1..];
-    if frac.is_empty() {
-        return None;
-    }
-    let mut digits = String::new();
-    for t in frac {
-        match converter.to_cardinal(t).ok()? {
-            W2nValue::Int(d) if d >= BigInt::from(0) && d <= BigInt::from(9) => {
-                digits.push_str(&d.to_string())
-            }
-            _ => {
-                digits.clear();
-                break;
-            }
-        }
-    }
-    if digits.is_empty() {
-        match converter.to_cardinal(&frac.join(" ")).ok()? {
-            W2nValue::Int(n) if n >= BigInt::from(0) && n < BigInt::from(100) => {
-                digits = n.to_string()
-            }
-            _ => return None,
-        }
-    }
-    Some((int_part, sep, digits))
+    crate::w2n_decimal::read(
+        converter.n2w_key(),
+        text,
+        &|w| decimal_word(resolved, w),
+        default_sep,
+        &cardinal,
+    )
 }
 
 /// "pour cent" / "por ciento" / "per cent": the second word is the number 100

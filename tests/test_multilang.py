@@ -200,3 +200,45 @@ def test_digit_literal_locale_separators(text, lang, expected):
     got = words2num(text, lang=lang)
     assert got == expected
     assert type(got) is type(expected)
+
+
+@pytest.mark.parametrize(
+    "lang,text,expected",
+    [
+        # Leading zeros / a fraction of any size (#52).
+        ("fr", "trois virgule zéro vingt-cinq", "3,025"),
+        ("fr", "trois virgule cent vingt-cinq", "3,125"),
+        # The separator word derived from the renderer (#107).
+        ("sv", "tre komma ett fyra", "3,14"),
+        ("cs", "tři čárka jedna čtyři", "3,14"),
+        ("hi", "तीन दशमलव एक चार", "3.14"),
+        ("ko", "삼 점 일 사", "3.14"),
+        ("en_IN", "three point one four", "3.14"),
+        # Whole-word + denominator (#108).
+        ("ru", "три целых четырнадцать сотых", "3,14"),
+        ("hu", "három egész tizennégy század", "3,14"),
+        ("fa", "سه و چهارده صدم", "3.14"),
+        # Native spelling where the renderer writes "point" (#267).
+        ("gl", "tres coma un catro", "3,14"),
+    ],
+)
+def test_spoken_decimals_in_sentences(lang, text, expected):
+    assert words2num_sentence(text, lang=lang) == expected
+
+
+@pytest.mark.parametrize(
+    "lang,text,expected",
+    [
+        # words2num reads a decimal in every language (#191).
+        ("fr", "trois virgule un quatre", Decimal("3.14")),
+        ("es", "tres punto uno cuatro", Decimal("3.14")),
+        ("de", "drei Komma eins vier", Decimal("3.14")),
+        ("ru", "три целых пять сотых", Decimal("3.05")),
+        ("ja", "三点一四", Decimal("3.14")),
+        ("tr", "üçvirgülondört", Decimal("3.14")),
+    ],
+)
+def test_words2num_spoken_decimals(lang, text, expected):
+    got = words2num(text, lang=lang)
+    assert got == expected
+    assert isinstance(got, Decimal)
