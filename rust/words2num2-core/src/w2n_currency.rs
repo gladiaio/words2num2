@@ -285,18 +285,6 @@ pub fn is_subunit_word(lang: &str, norm: &str) -> bool {
     lexicon(lang).iter().any(|(name, w)| w.sub && name == norm)
 }
 
-/// Does a currency name (unit or subunit) start at `word`, the following
-/// word being `next`: "yen", "roupie", "swiss" + "franc"? Both normalized.
-/// The walker asks whether a lone article-number counts something ("one
-/// yen", "un rouble", "um iene"), so this answers from the same lexicon the
-/// fold uses rather than a second hand list (#103).
-pub fn is_currency_word(lang: &str, word: &str, next: Option<&str>) -> bool {
-    let two = next.map(|n| format!("{} {}", word, n));
-    lexicon(lang)
-        .iter()
-        .any(|(name, _)| name == word || two.as_deref() == Some(name.as_str()))
-}
-
 static LEX_EN: &[(&str, Word)] = &[
     ("us dollars", unit(USD)),
     ("us dollar", unit(USD)),
@@ -1186,6 +1174,29 @@ fn masculine_numeral(lang: &str, word: &str) -> Option<String> {
     }
 }
 
+/// The words the sentence walker treats as article-or-one (en "one", fr
+/// "un"/"une", de "ein"...); "a"/"an" stay articles in running text.
+fn walker_article(lang: &str, word: &str) -> bool {
+    word != "a" && word != "an" && article_one(lang, word)
+}
+
+/// Currency names whose everyday reading dominates after an article: fr
+/// "un livre" (a book), "une livre" (a pound weight), "un franc succès"; es
+/// "una corona", "un real desafío", "una libra de carne"; en "one real
+/// problem", "no one won"; de "eine Krone", nl "een kroon", "een pond". The
+/// article stays a word before them; a figure before them still folds.
+fn article_homograph(lang: &str, name: &str) -> bool {
+    matches!(
+        (lang, name),
+        ("en", "real" | "won" | "rand" | "p")
+            | ("fr", "livre" | "livres" | "franc" | "real" | "couronne")
+            | ("es" | "gl" | "ca" | "it", "corona" | "real" | "libra" | "lliura" | "franco")
+            | ("pt", "coroa" | "real" | "libra")
+            | ("de", "krone" | "pfund" | "real")
+            | ("nl", "kroon" | "pond" | "real")
+    )
+}
+
 /// The article-one of a language, which counts 1 in front of a currency name.
 fn article_one(lang: &str, word: &str) -> bool {
     matches!(
@@ -1210,6 +1221,10 @@ fn article_one(lang: &str, word: &str) -> bool {
 ///   number before it stays 34 and the fold reads "12 $ et 34 cents" (#49).
 /// * pt/es feminine numerals in front of a currency name are given their
 ///   masculine form, which the tables hold ("duas libras" -> "dois libras").
+/// * the article-one in front of a currency name is the amount 1: "one yen",
+///   "un rouble", "um iene" (#103) — the walker only counts it before its own
+///   short list of units. Not before a name whose ordinary reading dominates
+///   ([`article_homograph`]): "un livre de poche", "one real problem".
 pub fn pieces_for_walk(sentence: &str, lang: &str) -> Vec<(String, bool)> {
     let base = lang.split(&['_', '-'][..]).next().unwrap_or(lang);
     if hand_lexicon(base).is_empty() {
@@ -1254,8 +1269,29 @@ pub fn pieces_for_walk(sentence: &str, lang: &str) -> Vec<(String, bool)> {
                 kept.push(words[w]);
             }
         }
-        // A feminine numeral whose number run ends on a currency unit.
-        if let Some(masc) = masculine_numeral(base, &keys[w]) {
+        // The article-one right before a currency unit name, opening the
+        // amount ("vinte e uma libras" is 21, the "uma" is not an article).
+        let starts_unit = |v: usize| {
+            named[v].as_ref().is_some_and(|m| !m.word.sub) && !article_homograph(base, &keys[v])
+        };
+        let in_compound = w > 0 && {
+            let p = keys[w - 1].as_str();
+            conns.contains(&p) || crate::token_may_be_number(base, p) || masculine_numeral(base, p).is_some()
+        };
+        if !in_compound
+            && walker_article(base, &keys[w])
+            && word_key(&parts[words[w]].text).1.is_empty()
+            && w + 1 < words.len()
+            && starts_unit(w + 1)
+        {
+            renames.push((words[w], "1".to_string()));
+        }
+        // A feminine numeral whose number run ends on a currency unit. A lone
+        // article-one right before the unit ("uma libra") is the article
+        // path's call above, not a numeral to rewrite.
+        let lone_article =
+            !in_compound && walker_article(base, &keys[w]) && w + 1 < words.len() && is_unit(w + 1);
+        if let Some(masc) = masculine_numeral(base, &keys[w]).filter(|_| !lone_article) {
             let numberish = |v: usize| {
                 masculine_numeral(base, &keys[v]).is_some()
                     || conns.contains(&keys[v].as_str())
@@ -1510,6 +1546,19 @@ mod tests {
         assert_eq!(fold("un rouble", "fr"), "1 ₽");
         assert_eq!(fold("un rublo", "es"), "1 ₽");
         assert_eq!(fold("um iene", "pt"), "1 ¥");
+        // Not before a name whose ordinary reading dominates.
+        assert_eq!(fold("j'ai lu un livre", "fr"), "j'ai lu un livre");
+        assert_eq!(fold("une livre de beurre", "fr"), "une livre de beurre");
+        assert_eq!(fold("one real problem", "en"), "one real problem");
+        assert_eq!(fold("no one won", "en"), "no one won");
+        assert_eq!(fold("una corona de flores", "es"), "una corona de flores");
+        assert_eq!(fold("uma libra", "pt"), "uma libra");
+        assert_eq!(fold("vinte e uma libras", "pt"), "21 £");
+        // Plain sentence mode is not touched.
+        let plain = |t: &str, l: &str| crate::w2n_sentence::words2num_sentence(t, l, "cardinal", false).unwrap();
+        assert_eq!(plain("un livre de poche", "fr"), "un livre de poche");
+        assert_eq!(plain("one real problem", "en"), "one real problem");
+        assert_eq!(plain("one yen", "en"), "one yen");
     }
 
     /// #104: every unit and subunit name num2words writes is read.

@@ -1895,11 +1895,6 @@ fn article_is_count(resolved: &str, parts: &[String], i: usize, next_is_number: 
         if unit_words(resolved).split_whitespace().any(|u| u == n) {
             return true;
         }
-        // "one yen", "un rouble", "um iene": any currency the fold knows (#103).
-        let base = resolved.split(&['_', '-'][..]).next().unwrap_or(resolved);
-        if crate::w2n_currency::is_currency_word(base, n, next2.as_deref()) {
-            return true;
-        }
         if percent_phrase(resolved)
             .is_some_and(|(prep, word)| n == prep && next2.as_deref() == Some(word))
         {
