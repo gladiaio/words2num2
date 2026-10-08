@@ -108,3 +108,51 @@ def test_202_positional_notation():
 )
 def test_69_punctuation_is_kept(lang, text, expected):
     assert s(text, lang) == expected
+
+
+# #65: the connectors the renderer writes between number words keep a run
+# whole, and a run never ends on (and so never swallows) one.
+@pytest.mark.parametrize(
+    "lang,text,expected",
+    [
+        ("is", "har fjörutíu og tveir kindur", "har 42 kindur"),
+        ("no", "fem hundre og femtifem", "555"),
+        ("fa", "چهل و دو", "42"),
+        ("sq", "dyzet e dy", "42"),
+        ("bg", "четиридесет и два лева", "42 лева"),
+        ("ha", "qqx ɗari biyar hamsin da biyar zzx", "qqx 555 zzx"),
+        ("ha", "qqx miliyan dubu ɗari biyu talatin da huɗu ɗari biyar sittin da bakwai zzx",
+         "qqx 1234567 zzx"),
+        ("lus", "qqx pakhat nuai pahnih za leh sawmthum leh pali sang panga za leh sawmruk "
+                "leh pasarih zzx", "qqx 1234567 zzx"),
+        ("vi", "hai nghìn lẻ bốn", "2004"),
+        ("ro", "douăzeci de lei", "20 de lei"),
+        ("ro", "douăzeci de mii de lei", "20000 de lei"),
+        # "and" between two numbers is a list, not a sum.
+        ("sw", "mbili na tatu", "2 na 3"),
+        ("no", "fem og seks", "5 og 6"),
+        ("fa", "پنج و شش", "5 و 6"),
+        ("bg", "пет и шест", "5 и 6"),
+    ],
+)
+def test_65_renderer_connectors(lang, text, expected):
+    assert s(text, lang) == expected
+
+
+# #67: the comma num2words2 writes after a scale word is inside the number.
+@pytest.mark.parametrize(
+    "lang,text,expected",
+    [
+        ("en", "hello twelve thousand, three hundred and forty-five world", "hello 12345 world"),
+        ("en", "one million, two hundred and thirty-four thousand, five hundred and sixty-seven",
+         "1234567"),
+        ("pt_BR", "doze mil, trezentos e quarenta e cinco", "12345"),
+        ("en", "two thousand, three hundred people", "2300 people"),
+        # Not a lower group after the comma: two numbers.
+        ("en", "in two thousand, five people came", "in 2000, 5 people came"),
+        ("en", "twelve thousand, hello", "12000, hello"),
+        ("en", "one, two, three", "1, 2, 3"),
+    ],
+)
+def test_67_comma_inside_a_cardinal(lang, text, expected):
+    assert s(text, lang) == expected

@@ -48,6 +48,7 @@
 //! * The `°[CF]?` alternative appears **twice** in `_try_digit_unit`'s regex.
 //!   Harmless; the second is dead. Kept in the comment, folded in the code.
 
+mod lexicon;
 mod tokens;
 
 use bigdecimal::num_traits::FromPrimitive;
@@ -1170,7 +1171,7 @@ fn is_candidate(converter: &Converter, token: &str, includable: &[&str]) -> bool
     if token.is_empty() || holds_digit(token) {
         return false;
     }
-    if includable.contains(&token) || converter.apocope(token).is_some() {
+    if is_includable(token, includable) || converter.apocope(token).is_some() {
         return true;
     }
     let dehyphened = token.replace('-', " ");
@@ -1184,7 +1185,7 @@ fn is_candidate(converter: &Converter, token: &str, includable: &[&str]) -> bool
 /// run that stops on one leaves it out — the walker then emits the connector
 /// as a word instead of swallowing it.
 fn candidate_is_number(converter: &Converter, token: &str, includable: &[&str]) -> bool {
-    if !includable.contains(&token) {
+    if !is_includable(token, includable) {
         return true;
     }
     // en "point" parses as Decimal(0) on its own; still a connector here.
@@ -1192,6 +1193,87 @@ fn candidate_is_number(converter: &Converter, token: &str, includable: &[&str]) 
     py_split_whitespace(&dehyphened)
         .iter()
         .any(|sub| converter.is_number_word(sub) && !includable.contains(sub))
+}
+
+/// Is `token` one of the run-internal words? The derived connectors are
+/// normalised (ro "si", vi "le"), the hand list is not (ro "și").
+fn is_includable(token: &str, includable: &[&str]) -> bool {
+    includable.contains(&token) || {
+        let norm = crate::normalize(token);
+        includable.contains(&norm.as_str())
+    }
+}
+
+/// A run that crosses a connector only the renderer lists ([`lexicon::
+/// derived_connectors`]) must read as one number the way the renderer joins
+/// them: "fjörutíu og tveir" is 40 + 2, "douăzeci de mii" 20 × 1000, and
+/// num2words2 spells either. "fem og seks" (five and six) and sw "mbili na
+/// tatu" (two and three) are two numbers, and stay two (#65). The hand-listed
+/// connectors keep their behaviour.
+fn connector_join_ok(converter: &Converter, stripped: &str, total: &W2nValue, hand: &[&str]) -> bool {
+    let Converter::Table(lang) = converter else { return true };
+    let derived = lexicon::derived_connectors(lang);
+    let norm = crate::normalize(stripped).replace('-', " ");
+    let words: Vec<&str> = norm.split_whitespace().collect();
+    let Some(p) = words
+        .iter()
+        .rposition(|w| derived.iter().any(|d| d == w) && !hand.contains(w))
+    else {
+        return true;
+    };
+    if p == 0 || p + 1 == words.len() {
+        return true;
+    }
+    let W2nValue::Int(t) = total else { return true };
+    if lexicon::renders_as(lang, t, &norm) {
+        return true;
+    }
+    let int = |ws: &[&str]| match converter.to_cardinal(&ws.join(" ")) {
+        Ok(W2nValue::Int(v)) => Some(v),
+        _ => None,
+    };
+    let (Some(l), Some(r)) = (int(&words[..p]), int(&words[p + 1..])) else {
+        return false;
+    };
+    let zero = BigInt::from(0);
+    (*t == &l + &r && r < l && &l % BigInt::from(10) == zero) || *t == &l * &r
+}
+
+/// The scale a token closes with a comma: "thousand," -> 1000, "million," ->
+/// 1000000, pt "mil," -> 1000. `None` for any other token or punctuation.
+fn comma_after_scale(converter: &Converter, tok: &str) -> Option<BigInt> {
+    if trailing_punct(tok) != "," {
+        return None;
+    }
+    let clean = rstrip_punct(tok).to_lowercase().replace('-', " ");
+    let last = *py_split_whitespace(&clean).last()?;
+    if !is_scale_word(converter, last, 1_000) {
+        return None;
+    }
+    match converter.to_cardinal(last).ok()? {
+        W2nValue::Int(v) => Some(v),
+        _ => None,
+    }
+}
+
+/// After each comma the run crossed, the words up to the next comma (or the
+/// run end `j`) must be one group of the number: at least a hundred and below
+/// the scale before the comma. "twelve thousand, three hundred" is 12300 the
+/// way num2words2 writes it; "in two thousand, five people came" keeps 2000
+/// and 5 apart (#67).
+fn comma_groups_ok(converter: &Converter, parts: &[String], j: usize, commas: &[(usize, BigInt)]) -> bool {
+    for (k, (at, scale)) in commas.iter().enumerate() {
+        let end = commas.get(k + 1).map_or(j, |(next, _)| *next);
+        if end <= *at {
+            continue; // the run ends on this comma: nothing after it yet
+        }
+        let group = rstrip_punct(py_strip(&parts[at + 1..=end].concat())).to_string();
+        match converter.to_cardinal(&group) {
+            Ok(W2nValue::Int(v)) if v >= BigInt::from(100) && v < *scale => {}
+            _ => return false,
+        }
+    }
+    true
 }
 
 /// One word of an English number run: the word itself (lowercased, hyphens
@@ -1314,9 +1396,11 @@ fn is_digit_string(digits: &str) -> bool {
 const MAX_RUN_WORDS: usize = 40;
 
 /// A run stops growing after this many consecutive words that did not make
-/// the run parse: a connector or a "cents"-type word needs one or two, never
-/// eight (#186).
-const MAX_FAILED_EXTENSIONS: usize = 3;
+/// the run parse (#186). A connector or a "cents"-type word needs one or two;
+/// where the multiplier follows the scale word (ha "miliyan dubu ɗari biyu
+/// talatin da huɗu ...") the partial runs fail for up to six words before the
+/// group closes.
+const MAX_FAILED_EXTENSIONS: usize = 8;
 
 /// The longest digit dictation read at once (an IBAN is 34 characters). A
 /// longer one is cut into consecutive strings rather than rescanned from
@@ -2052,11 +2136,22 @@ fn words2num_sentence_walk(
 ) -> Result<String, W2nError> {
     let resolved = resolve_lang(lang)?;
     let converter = converter_for(&resolved);
-    let includable: &[&str] = if resolved == "en" {
+    let hand_includable: &[&str] = if resolved == "en" {
         &INCLUDABLE_EN
     } else {
         includable_for(&resolved)
     };
+    // The hand list (decimal words, the English "a"/"minus") plus every
+    // connector the renderer writes between number words (#65).
+    let mut includable_owned: Vec<&str> = hand_includable.to_vec();
+    if let Converter::Table(lang) = converter {
+        for w in lexicon::derived_connectors(lang) {
+            if !includable_owned.contains(&w.as_str()) {
+                includable_owned.push(w.as_str());
+            }
+        }
+    }
+    let includable: &[&str] = &includable_owned;
     let decimal_heads = decimal_heads_for(&resolved);
 
     // The digit-string and spoken-year readings are English-only and belong
@@ -2184,6 +2279,8 @@ fn words2num_sentence_walk(
         let mut j = i;
         let mut words = 0usize;
         let mut failed = 0usize;
+        // The commas the run crossed after a scale word, with that scale (#67).
+        let mut commas: Vec<(usize, BigInt)> = Vec::new();
         while j < n {
             let tok = &parts[j];
             if py_str_isspace(tok) {
@@ -2244,6 +2341,8 @@ fn words2num_sentence_walk(
             // "deux trois", "two three": two digit words are a range, not one
             // number (#51). A dictated string goes through the digit run.
             let hit = hit.filter(|_| !two_digit_words(&converter, &parts[i..=j]));
+            let hit = hit.filter(|(v, _)| connector_join_ok(&converter, &stripped, v, hand_includable));
+            let hit = hit.filter(|_| comma_groups_ok(&converter, &parts, j, &commas));
             match hit {
                 // A run never ends on a connector: "one and a half" is "1 and
                 // a half", not "1 half"; "five point" keeps its "point".
@@ -2257,9 +2356,15 @@ fn words2num_sentence_walk(
                 None if !candidate => break,
                 None => failed += 1,
             }
-            // A token ending in terminal punctuation closes the run.
+            // A token ending in terminal punctuation closes the run — except
+            // the comma num2words2 itself writes after a scale word ("twelve
+            // thousand, three hundred and forty-five"), which the run may cross
+            // if what follows is the next lower group (#67).
             if ends_with_terminal_punct(tok) {
-                break;
+                match comma_after_scale(&converter, tok) {
+                    Some(scale) if j > i => commas.push((j, scale)),
+                    _ => break,
+                }
             }
             j += 1;
         }
