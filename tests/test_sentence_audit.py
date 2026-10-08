@@ -233,3 +233,165 @@ def test_83_article_one(lang, text, expected):
 )
 def test_183_article_before_scale(lang, text, expected):
     assert s(text, lang) == expected
+
+
+# #74: case-declined cardinals are read as their nominative.
+@pytest.mark.parametrize(
+    "lang,text,expected",
+    [
+        ("ru", "Со скоростью сто двадцати километров в час.", "Со скоростью 120 километров в час."),
+        ("ru", "Около трёх тысяч человек.", "Около 3000 человек."),
+        ("ru", "двадцати трёх тысяч", "23000"),
+        ("uk", "близько трьох тисяч людей", "близько 3000 людей"),
+        ("uk", "п'яти тисяч", "5000"),
+        ("pl", "około trzech tysięcy osób", "około 3000 osób"),
+        ("ar", "دفعت ثلاثة وعشرين يورو", "دفعت 23 يورو"),
+        ("ar", "ولد في عام ألف وتسعمائة وتسعة وتسعين.", "ولد في عام 1999."),
+        ("ar", "عشرين", "20"),
+        ("ar", "اثنين", "2"),
+    ],
+)
+def test_74_declined_cardinals(lang, text, expected):
+    assert s(text, lang) == expected
+
+
+# #75: tr spaced hundreds in front of a scale word.
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("Ev üç yüz bin lira.", "Ev 300000 lira."),
+        ("üç yüz bin beş yüz", "300500"),
+        ("iki yüz elli bin", "250000"),
+        ("üç yüz milyon", "300000000"),
+        ("üç yüz bin", "300000"),
+    ],
+)
+def test_75_tr_spaced_hundreds(text, expected):
+    assert s(text, "tr") == expected
+
+
+# #77: vi "không trăm" (zero hundreds), "linh", "tư".
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("hai nghìn không trăm linh bốn", "2004"),
+        ("hai nghìn không trăm hai mươi", "2020"),
+        ("ba mươi tư", "34"),
+        ("hai nghìn lẻ bốn", "2004"),
+    ],
+)
+def test_77_vi_spoken_forms(text, expected):
+    assert s(text, "vi") == expected
+
+
+# #78: standard spellings beside the renderer's.
+@pytest.mark.parametrize(
+    "lang,text,expected",
+    [
+        ("el", "Γεννήθηκε το χίλια εννιακόσια ενενήντα εννιά.", "Γεννήθηκε το 1999."),
+        ("el", "δεκαοχτώ", "18"),
+        ("hi", "मेरा नंबर नौ आठ सात छह पाँच है।", "मेरा नंबर 98765 है।"),
+        ("hi", "पांच", "5"),
+        ("da", "tres kroner", "60 kroner"),
+        ("da", "toogtres", "62"),
+        ("bn", "তার বয়স পঁয়ত্রিশ বছর।", "তার বয়স 35 বছর।"),
+    ],
+)
+def test_78_spelling_variants(lang, text, expected):
+    assert s(text, lang) == expected
+
+
+# #179: cs inverted unit-a-tens.
+@pytest.mark.parametrize(
+    "text,expected",
+    [("pětadvacet korun", "25 korun"), ("dvaadvacet", "22"), ("jednadvacet", "21"),
+     ("dvacet pět korun", "25 korun")],
+)
+def test_179_cs_inverted(text, expected):
+    assert s(text, "cs") == expected
+
+
+# #180: ro contracted teens.
+@pytest.mark.parametrize(
+    "text,expected",
+    [("șaișpe", "16"), ("paișpe", "14"), ("doișpe lei", "12 lei"), ("unșpe", "11"),
+     ("cinșpe", "15")],
+)
+def test_180_ro_contracted_teens(text, expected):
+    assert s(text, "ro") == expected
+
+
+# #73: a case ending / classifier glued to the last number word is cut off
+# and re-emitted after the figures; a suffixed homograph stays a word.
+@pytest.mark.parametrize(
+    "lang,text,expected",
+    [
+        ("tr", "on ikide", "12'de"),
+        ("tr", "otuz beşte", "35'te"),
+        ("tr", "Bin dokuz yüz doksan dokuzda doğdu.", "1999'da doğdu."),
+        ("tr", "Saat üçte buluşalım.", "Saat 3'te buluşalım."),
+        ("hu", "Háromkor találkozunk.", "3-kor találkozunk."),
+        ("hu", "Ötöt kérek.", "5-öt kérek."),
+        ("hu", "hármat kérek", "3-at kérek"),
+        ("bn", "আমরা বারোটা ডিম কিনেছি।", "আমরা 12টা ডিম কিনেছি।"),
+        # Ordinary words that end like a suffixed number.
+        ("tr", "yüzde elli", "yüzde 50"),
+        ("tr", "ona verdim", "ona verdim"),
+        ("tr", "onda kaldı", "onda kaldı"),
+        ("tr", "masanın altında", "masanın altında"),
+        ("tr", "biri geldi", "biri geldi"),
+        ("hu", "egykor", "egykor"),
+        ("hu", "a héten", "a héten"),
+        ("bn", "একটা বই", "একটা বই"),
+    ],
+)
+def test_73_case_suffixes(lang, text, expected):
+    assert s(text, lang) == expected
+
+
+# #74 (fi): Finnish case forms, ending re-emitted after a colon.
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("Tulen viidellä bussilla.", "Tulen 5:llä bussilla."),
+        ("kahdessa paikassa", "2:ssa paikassa"),
+        ("kolmen", "3:n"),
+    ],
+)
+def test_74_fi_case_forms(text, expected):
+    assert s(text, "fi") == expected
+
+
+# #76: ar / he proclitic preposition glued to a number.
+@pytest.mark.parametrize(
+    "lang,text,expected",
+    [
+        ("he", "נולד באלף תשע מאות תשעים ותשע", "נולד ב-1999"),
+        ("he", "נפגש בשלוש", "נפגש ב-3"),
+        ("he", "לחמש דקות", "ל-5 דקות"),
+        ("ar", "البيت بثلاثمائة ألف دولار", "البيت ب300000 دولار"),
+        ("ar", "لخمسة أيام", "ل5 أيام"),
+        # Not a proclitic + number.
+        ("ar", "لست هنا", "لست هنا"),
+        ("he", "המאה העשרים", "המאה העשרים"),
+    ],
+)
+def test_76_proclitics(lang, text, expected):
+    assert s(text, lang) == expected
+
+
+# #184: fr / it / ca elided clitic before a number word.
+@pytest.mark.parametrize(
+    "lang,text,expected",
+    [
+        ("fr", "le train d'onze heures", "le train d'11 heures"),
+        ("it", "dell'otto per cento", "dell'8 per cento"),
+        ("it", "dall'undici al venti", "dall'11 al 20"),
+        ("fr", "jusqu'à onze", "jusqu'à 11"),
+        ("ca", "d'onze", "d'11"),
+        ("fr", "l'un d'entre eux", "l'un d'entre eux"),
+        ("it", "un'altra", "un'altra"),
+    ],
+)
+def test_184_elided_clitic(lang, text, expected):
+    assert s(text, lang) == expected

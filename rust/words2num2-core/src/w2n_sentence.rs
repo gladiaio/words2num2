@@ -672,7 +672,9 @@ impl Converter {
             Converter::Table(lang) => {
                 let norm = crate::normalize(token);
                 // Cheap gate first: most words of a transcript are not numbers.
-                (self.apocope(&norm).is_some() || crate::token_may_be_number(lang, &norm))
+                (self.apocope(&norm).is_some()
+                    || crate::token_may_be_number(lang, &norm)
+                    || lexicon::is_alias_word(lang, &norm))
                     && self.to_cardinal(&norm).is_ok()
             }
         }
@@ -875,6 +877,24 @@ fn canonical_apocopes_norm(lang: &str, norm: &str) -> Option<String> {
 }
 
 fn base_convert(lang: &str, text: &str, ordinal: bool) -> Result<W2nValue, W2nError> {
+    let first = base_convert_as_written(lang, text, ordinal);
+    if first.is_ok() || ordinal || !crate::is_supported_lang(lang) {
+        return first;
+    }
+    // Declined forms and spelling variants the renderer does not write (ru
+    // "трёх", ar "عشرين", el "εννιά", ro "șaișpe", cs "pětadvacet", vi "ba
+    // mươi tư"): read through the language's aliases, only once every reading
+    // as written has failed (#74, #77, #78, #179, #180).
+    let norm = crate::normalize(text);
+    if let Some(rewritten) = lexicon::alias_rewrite(lang, &norm) {
+        if let Ok(v) = base_convert_as_written(lang, &rewritten, false) {
+            return Ok(v);
+        }
+    }
+    first
+}
+
+fn base_convert_as_written(lang: &str, text: &str, ordinal: bool) -> Result<W2nValue, W2nError> {
     // Normalized once here; every reading below works on `norm`.
     let norm = crate::normalize(text);
     let supported = crate::is_supported_lang(lang);
@@ -914,6 +934,15 @@ fn base_convert(lang: &str, text: &str, ordinal: bool) -> Result<W2nValue, W2nEr
                     crate::lookup_norm(lang, &despaced, false, &BASE_NEGATIVE_WORDS)
                 {
                     return Ok(W2nValue::Int(BigInt::from(v)));
+                }
+                // Beyond the table: tr writes "üç yüz bin" spaced where
+                // num2words2 glues "üçyüzbin" (300000). Kept only when the
+                // glued form is exactly the renderer's spelling of the value
+                // (#75).
+                if let Some(v) = crate::parse_scaled_norm(lang, &despaced) {
+                    if lexicon::renders_as(lang, &BigInt::from(v), &despaced) {
+                        return Ok(W2nValue::Int(BigInt::from(v)));
+                    }
                 }
             }
             // Spoken "year" readings (two 2-digit groups, or an explicit/glued
@@ -1173,6 +1202,13 @@ fn is_candidate(converter: &Converter, token: &str, includable: &[&str]) -> bool
     }
     if is_includable(token, includable) || converter.apocope(token).is_some() {
         return true;
+    }
+    // vi "tư" is 4 only after "mươi", ar "وعشرين" only after a unit: not
+    // number words on their own, but they may complete a run (#74, #77).
+    if let Converter::Table(lang) = converter {
+        if lexicon::is_alias_word(lang, &crate::normalize(token)) {
+            return true;
+        }
     }
     let dehyphened = token.replace('-', " ");
     py_split_whitespace(&dehyphened)
@@ -1941,7 +1977,7 @@ fn article_words(resolved: &str) -> &'static str {
     }
 }
 
-fn is_article_word(resolved: &str, word: &str) -> bool {
+pub(super) fn is_article_word(resolved: &str, word: &str) -> bool {
     let norm = crate::normalize(word);
     article_words(resolved)
         .split_whitespace()
@@ -2259,7 +2295,17 @@ fn words2num_sentence_walk(
 
     let percent = percent_phrase(&resolved);
 
-    let (parts, _glue) = tokens::split_parts(sentence);
+    let (parts, glue) = tokens::split_parts(sentence, &converter, &resolved);
+    // The separator to write before a number that follows a proclitic part
+    // (he "ב-1999") and after one that precedes a case ending (tr "3'te").
+    let sep_before = |i: usize| match i.checked_sub(1).map(|k| glue[k]) {
+        Some(tokens::Glue::Prefix(sep)) => sep,
+        _ => "",
+    };
+    let sep_after = |end: usize| match glue.get(end + 1) {
+        Some(tokens::Glue::Suffix(sep)) => *sep,
+        _ => "",
+    };
     let n = parts.len();
     let mut out = String::new();
     let mut i = 0usize;
@@ -2269,7 +2315,8 @@ fn words2num_sentence_walk(
 
     while i < n {
         let piece = &parts[i];
-        if py_str_isspace(piece) {
+        if py_str_isspace(piece) || glue[i] != tokens::Glue::Free {
+            // A proclitic or case ending cut off a word is never a number.
             out.push_str(piece);
             i += 1;
             continue;
@@ -2368,8 +2415,10 @@ fn words2num_sentence_walk(
         };
         if let Some((digits, end)) = digit_run {
             let run = parts[i..=end].concat();
+            out.push_str(sep_before(i));
             out.push_str(&digits);
             out.push_str(trailing_punct(&run));
+            out.push_str(sep_after(end));
             i = end + 1;
             continue;
         }
@@ -2392,7 +2441,7 @@ fn words2num_sentence_walk(
                 continue;
             }
             let clean = rstrip_punct(tok).to_lowercase();
-            if clean.is_empty() || tokens::is_punct_part(&clean) {
+            if clean.is_empty() || tokens::is_punct_part(&clean) || glue[j] != tokens::Glue::Free {
                 // a lone punctuation part ("quarante-deux ?", the ")" of
                 // "two)") never extends a run
                 break;
@@ -2534,8 +2583,10 @@ fn words2num_sentence_walk(
             match rendered {
                 Some(text) => {
                     after_decimal = matches!(v, W2nValue::Dec(_)) && trailing.is_empty();
+                    out.push_str(sep_before(i));
                     out.push_str(&text);
                     out.push_str(trailing);
+                    out.push_str(sep_after(best_end));
                 }
                 None => out.push_str(&run),
             }
@@ -4080,6 +4131,39 @@ mod audit_tests {
                 start.elapsed()
             );
         }
+    }
+
+    #[test]
+    fn issue_74_77_78_179_180_aliases() {
+        assert_eq!(c("Около трёх тысяч человек.", "ru"), "Около 3000 человек.");
+        assert_eq!(c("około trzech tysięcy osób", "pl"), "około 3000 osób");
+        assert_eq!(c("دفعت ثلاثة وعشرين يورو", "ar"), "دفعت 23 يورو");
+        assert_eq!(c("ba mươi tư", "vi"), "34");
+        assert_eq!(c("hai nghìn không trăm hai mươi", "vi"), "2020");
+        assert_eq!(c("δεκαοχτώ", "el"), "18");
+        assert_eq!(c("tres kroner", "da"), "60 kroner");
+        assert_eq!(c("pětadvacet korun", "cs"), "25 korun");
+        assert_eq!(c("șaișpe", "ro"), "16");
+        // The cardinal API reads them too; the renderer's own spelling wins.
+        assert!(matches!(super::words2num("трёх", "ru", "cardinal"), Ok(crate::w2n_lang_en::W2nValue::Int(v)) if v == 3.into()));
+    }
+
+    #[test]
+    fn issue_75_tr_spaced_hundreds() {
+        assert_eq!(c("üç yüz bin beş yüz", "tr"), "300500");
+        assert_eq!(c("Ev üç yüz bin lira.", "tr"), "Ev 300000 lira.");
+    }
+
+    #[test]
+    fn issue_73_76_184_affixes() {
+        assert_eq!(c("on ikide", "tr"), "12'de");
+        assert_eq!(c("yüzde elli", "tr"), "yüzde 50");
+        assert_eq!(c("Háromkor találkozunk.", "hu"), "3-kor találkozunk.");
+        assert_eq!(c("Tulen viidellä bussilla.", "fi"), "Tulen 5:llä bussilla.");
+        assert_eq!(c("נולד באלף תשע מאות תשעים ותשע", "he"), "נולד ב-1999");
+        assert_eq!(c("البيت بثلاثمائة ألف دولار", "ar"), "البيت ب300000 دولار");
+        assert_eq!(c("le train d'onze heures", "fr"), "le train d'11 heures");
+        assert_eq!(c("l'un d'entre eux", "fr"), "l'un d'entre eux");
     }
 
     #[test]
