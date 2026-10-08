@@ -1320,10 +1320,11 @@ fn glued_multiplier(lang: &str, pre: &str, sc: &Scales) -> Option<i64> {
                 .flatten()
         })
         .or_else(|| {
+            // The unit's combining form first: a scan of a short list, where
+            // a table lookup of every prefix made long glued input cubic (#186).
             pre.char_indices().skip(1).find_map(|(i, _)| {
-                let tens = lookup_plain(lang, &pre[..i]).filter(|t| (20..100).contains(t) && t % 10 == 0);
-                let tens = tens?;
                 let unit = combining(&pre[i..]).filter(|u| (1..10).contains(u))?;
+                let tens = lookup_plain(lang, &pre[..i]).filter(|t| (20..100).contains(t) && t % 10 == 0)?;
                 Some(tens + unit)
             })
         })
@@ -2683,14 +2684,15 @@ mod tests {
     }
 
     /// #121 in sentence mode: a trailing script mark is kept after the figure,
-    /// a piece opening with a bracket or quote is left as written.
+    /// and an opening bracket or quote stays in front of it (#69).
     #[test]
     fn sentence_mode_keeps_the_punctuation_normalize_drops() {
         let s = |t: &str, l: &str| w2n_sentence::words2num_sentence(t, l, "cardinal", false).unwrap();
         assert_eq!(s("मेरे पास पाँच। सेब", "hi"), "मेरे पास 5। सेब");
         assert_eq!(s("I have five) apples", "en"), "I have 5) apples");
-        assert_eq!(s("(five) apples", "en"), "(five) apples");
-        assert_eq!(s("«cinq» pommes", "fr"), "«cinq» pommes");
+        // #69: the bracket or quote is cut off and kept, the number converts.
+        assert_eq!(s("(five) apples", "en"), "(5) apples");
+        assert_eq!(s("«cinq» pommes", "fr"), "«5» pommes");
         assert_eq!(s("forty two.", "en"), "42.");
     }
 

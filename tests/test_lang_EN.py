@@ -209,15 +209,17 @@ def test_sentence_reads_spoken_years(sentence, expected):
         ("zero six one two", "0612"),
         ("one two three", "123"),
         ("one oh one", "101"),
-        ("seven eight", "78"),
+        # Two digit words without a leading zero are a range ("two three
+        # minutes" = 2 or 3 minutes), never one number (#51).
+        ("seven eight", "7 8"),
         # A lone digit word, and tens + unit, stay cardinals.
         ("press one", "press 1"),
         ("twenty five", "25"),
         ("one hundred twenty three", "123"),
         # unit + tens is two numbers, not 25 and not 520.
         ("five twenty", "5 20"),
-        # "oh" does not open a digit run.
-        ("oh seven", "0 7"),
+        # "oh" is 0 next to another digit word, a leading zero kept (#79).
+        ("oh seven", "07"),
     ],
 )
 def test_sentence_digit_runs_concatenate(sentence, expected):

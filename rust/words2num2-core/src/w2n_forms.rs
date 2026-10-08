@@ -718,8 +718,9 @@ mod tests {
         assert_eq!(card("ar", "مليون وواحد"), Some(1000001));
         assert_eq!(card("he", "עשרת אלפים ואחת"), Some(10001));
         assert_eq!(card("he", "מיליון ואחת"), Some(1000001));
-        // "and five" alone is no number, nor a digit of "three five".
-        assert_eq!(sent("ar", "وخمسة"), "وخمسة");
+        // "and five" is no digit of "three five"; alone, the conjunction is
+        // peeled off as a proclitic and kept in front of the figure.
+        assert_eq!(sent("ar", "وخمسة"), "و5");
         assert_eq!(sent("ar", "ثلاثة وخمسة"), "3 وخمسة");
     }
 

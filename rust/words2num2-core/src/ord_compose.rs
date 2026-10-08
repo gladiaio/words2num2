@@ -11,6 +11,8 @@
 //! number.
 
 use num_bigint::BigInt;
+use std::collections::HashMap;
+use std::sync::{Arc, OnceLock, RwLock};
 
 /// The value of the normalized ordinal `norm` composed from a cardinal head
 /// and an ordinal tail, or `None`.
@@ -18,7 +20,7 @@ pub(crate) fn compose(lang: &str, norm: &str) -> Option<i64> {
     let toks: Vec<&str> = norm.split(' ').collect();
     let last = *toks.last()?;
     let renderer = num2words2_core::get_lang_by_key(lang)?;
-    let scales = scale_morphemes(lang, renderer);
+    let scales = scale_morphemes(lang);
     let ordinal = |t: &str| {
         crate::lookup_norm(lang, t, true, &[])
             .ok()
@@ -95,7 +97,7 @@ pub(crate) fn compose(lang: &str, norm: &str) -> Option<i64> {
     }
     // Glued (de, nl, tr): cut the last word at a scale word inside it.
     let head = toks[..toks.len() - 1].join(" ");
-    for w in &scales {
+    for w in scales.iter() {
         for (pos, _) in last.match_indices(w.as_str()) {
             for cut in [pos, pos + w.len()] {
                 if cut == 0 || cut >= last.len() {
@@ -118,7 +120,25 @@ pub(crate) fn compose(lang: &str, norm: &str) -> Option<i64> {
 /// The scale words of `lang` and the scale morphemes glued inside a word:
 /// de renders 1000 as "eintausend" but 20000 as "zwanzigtausend", so the
 /// morpheme is the common tail of 1000 and 2000, "tausend".
-fn scale_morphemes(lang: &str, renderer: &(dyn num2words2_core::Lang + Sync)) -> Vec<String> {
+///
+/// Cached per language: the sentence walker tries an ordinal reading on every
+/// run extension the cardinal reader declines (#186).
+fn scale_morphemes(lang: &str) -> Arc<Vec<String>> {
+    static C: OnceLock<RwLock<HashMap<String, Arc<Vec<String>>>>> = OnceLock::new();
+    let cache = C.get_or_init(Default::default);
+    if let Some(v) = cache.read().unwrap().get(lang) {
+        return v.clone();
+    }
+    let v = Arc::new(
+        num2words2_core::get_lang_by_key(lang)
+            .map(|r| derive_scale_morphemes(lang, r))
+            .unwrap_or_default(),
+    );
+    cache.write().unwrap().insert(lang.to_string(), v.clone());
+    v
+}
+
+fn derive_scale_morphemes(lang: &str, renderer: &(dyn num2words2_core::Lang + Sync)) -> Vec<String> {
     let mut out: Vec<String> = crate::scale_words(lang)
         .into_iter()
         .map(|(w, _)| w)
