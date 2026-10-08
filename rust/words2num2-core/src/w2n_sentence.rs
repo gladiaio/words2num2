@@ -985,8 +985,13 @@ fn table_year(lang: &str, text: &str) -> Result<W2nValue, W2nError> {
         if let Some(y) = crate::lookup_year_norm(lang, v) {
             return Ok(W2nValue::Int(BigInt::from(y)));
         }
-        if let Ok(y) = base_convert(lang, v, false) {
-            return Ok(y);
+        // A negative cardinal with the year word stripped is not trusted:
+        // as/ba render a BC year as "<year word> <minus> <number>", and the
+        // table path's sign handling above the table is #61's to fix.
+        match base_convert(lang, v, false) {
+            Ok(W2nValue::Int(y)) if y.sign() == num_bigint::Sign::Minus => {}
+            Ok(y) => return Ok(y),
+            Err(_) => {}
         }
     }
     Err(err)
