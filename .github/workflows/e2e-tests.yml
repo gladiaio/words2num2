@@ -4,14 +4,22 @@ on:
   push:
     branches: [ master, main, develop ]
     paths:
+      # The parsing engine lives under rust/; words2num2/ is only the binder.
+      - 'rust/**'
       - 'words2num2/**'
       - 'tests/**'
+      - 'pyproject.toml'
+      - 'REFERENCE.md'
       - '.github/workflows/e2e-tests.yml'
   pull_request:
     branches: [ master, main ]
     paths:
+      - 'rust/**'
       - 'words2num2/**'
       - 'tests/**'
+      - 'pyproject.toml'
+      - 'REFERENCE.md'
+      - '.github/workflows/e2e-tests.yml'
   schedule:
     - cron: '0 2 * * *'
   workflow_dispatch:
@@ -25,7 +33,10 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
         python-version: ['3.10', '3.11', '3.12', '3.13', '3.14']
         include:
-          # pyo3 0.29 requires PyPy >= 3.11.
+          # pyo3 0.29 requires PyPy >= 3.11. Releases ship abi3 wheels only,
+          # which PyPy cannot load, so PyPy installs build from the sdist
+          # (Rust toolchain needed); this job is what keeps that path honest,
+          # so it gates like every other.
           - os: ubuntu-latest
             python-version: 'pypy-3.11'
 
@@ -39,15 +50,20 @@ jobs:
         allow-prereleases: true
         cache: 'pip'
 
+    # `pip install -e .` compiles the Rust core with maturin.
+    - uses: dtolnay/rust-toolchain@stable
+
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
         pip install pytest pytest-cov
+        # tests/test_multilang.py round-trips the published renderer through
+        # this parser; without it the whole file is skipped.
+        pip install num2words2
         pip install -e .
 
     - name: Run E2E suite
       run: pytest tests/ -v --tb=short
-      continue-on-error: ${{ startsWith(matrix.python-version, 'pypy') }}
 
     - name: Upload test results
       if: always()
