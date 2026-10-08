@@ -461,7 +461,7 @@ The `to=` parameter on `words2num` accepts:
 | `"ordinal"` | Position. | `"twenty-first"` → `21` |
 | `"ordinal_num"` | Digit-form ordinal. | `"21st"` → `21` |
 | `"year"` | Year-pair shorthand. | `"nineteen ninety nine"` → `1999` |
-| `"currency"` | Currency expression. | `"twelve dollars and fifty cents"` → varies by locale |
+| `"currency"` | An amount: `<number> <unit> [<connector>] [<number> [<subunit>]]` or `<number> <subunit>`, returned as a `Decimal` (unit + subunit). Text with no currency word is read as a cardinal; a currency word that is not an amount raises. | `"twelve dollars and fifty cents"` → `Decimal('12.50')`; `"zwei Euro"` (de) → `Decimal('2')` |
 
 Unsupported values raise `NotImplementedError`.
 

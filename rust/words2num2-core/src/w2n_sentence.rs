@@ -1017,9 +1017,17 @@ pub fn words2num(
     // `getattr(converter, "to_{to}")(text)`. The English grammar path returns
     // its native value directly; every other path is `int`/`float` and is
     // promoted to the English value type.
+    // An amount spoken in words: "twelve euros, thirty-four cents" -> 12.34.
+    // Text that names no currency is read as a cardinal below.
+    if to == "currency" {
+        if let Some(amount) = currency_amount(&converter, &resolved, text) {
+            return amount;
+        }
+    }
+
     match &converter {
         Converter::En => match to {
-            // `Words2Num_Base.to_currency` == `self.to_cardinal` (polymorphic).
+            // Without a currency word, to="currency" is the cardinal.
             "cardinal" | "currency" => {
                 crate::en_to_cardinal(text).map_err(|e| W2nError::Words2Num(e.msg))
             }
@@ -1040,6 +1048,29 @@ pub fn words2num(
             Ok(sentence_to_en_value(v))
         }
     }
+}
+
+/// `to="currency"`: the amount as a `Decimal`, unit plus subunit (`12.34`), via
+/// [`crate::w2n_currency::parse_amount`]. `None` when the text names no
+/// currency, so the caller keeps the plain cardinal reading.
+fn currency_amount(
+    converter: &Converter,
+    resolved: &str,
+    text: &str,
+) -> Option<Result<crate::w2n_lang_en::W2nValue, W2nError>> {
+    let cardinal = |words: &str| -> Option<BigDecimal> {
+        match converter.to_cardinal(words).ok()? {
+            W2nValue::Int(i) => Some(BigDecimal::from(i)),
+            W2nValue::Dec(d) => Some(d),
+            W2nValue::Float(f) => BigDecimal::from_str(&py_float_repr(f)).ok(),
+        }
+    };
+    let amount = crate::w2n_currency::parse_amount(text, resolved, &cardinal)?;
+    Some(
+        amount
+            .map(|d| crate::w2n_lang_en::W2nValue::Dec(crate::w2n_lang_en::PyDec::from_bigdecimal(&d)))
+            .map_err(W2nError::Words2Num),
+    )
 }
 
 /// Promote a reverse-table / `ordinal_num` result into the English grammar's
@@ -1852,6 +1883,11 @@ fn article_is_count(resolved: &str, parts: &[String], i: usize, next_is_number: 
         if unit_words(resolved).split_whitespace().any(|u| u == n) {
             return true;
         }
+        // "one yen", "un rouble", "um iene": any currency the fold knows (#103).
+        let base = resolved.split(&['_', '-'][..]).next().unwrap_or(resolved);
+        if crate::w2n_currency::is_currency_word(base, n, next2.as_deref()) {
+            return true;
+        }
         if percent_phrase(resolved)
             .is_some_and(|(prep, word)| n == prep && next2.as_deref() == Some(word))
         {
@@ -1930,12 +1966,21 @@ pub fn words2num_sentence_opts(
     has_kwargs: bool,
     currency: bool,
 ) -> Result<String, W2nError> {
-    let out = words2num_sentence_walk(sentence, lang, to, has_kwargs)?;
     if currency {
         let resolved = resolve_lang(lang)?;
+        // Walked piece by piece: fr "trente-quatre cents" after "dollars et"
+        // is 34 US cents, not 3400 (see `pieces_for_walk`).
+        let mut out = String::new();
+        for (piece, walk) in crate::w2n_currency::pieces_for_walk(sentence, &resolved) {
+            if walk {
+                out.push_str(&words2num_sentence_walk(&piece, lang, to, has_kwargs)?);
+            } else {
+                out.push_str(&piece);
+            }
+        }
         return Ok(crate::w2n_currency::fold_currency(&out, &resolved));
     }
-    Ok(out)
+    words2num_sentence_walk(sentence, lang, to, has_kwargs)
 }
 
 fn words2num_sentence_walk(

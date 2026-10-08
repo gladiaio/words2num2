@@ -307,7 +307,23 @@ front stays a word (``"des euros"``, ``"a couple of dollars"``), and so does an
 amount on a scale word (``"2.5 million dollars"``). Currencies: USD, EUR, GBP,
 JPY, CNY, CHF, CAD (fr ``5 $ CA``, the OQLF form), AUD, NZD, MXN and the
 unqualified peso (``$``), BRL, INR, KRW, RUB, TRY, PLN, SEK/NOK/DKK, XOF, MAD,
-ZAR, with their names and subunits in en, fr, es, de, it, pt, nl and ca.
+ZAR, with their names and subunits in en, fr, es, de, it, pt, nl and ca —
+every name num2words writes for them, plus the colloquial ones (``bucks``,
+``quid``). A subunit of 100 or more carries (``"one hundred fifty cents"`` ->
+``"$1.50"``); a spoken fraction longer than the currency's minor unit, or a
+subunit after an amount that was not folded, is left as said rather than
+truncated or given a currency nobody named. ``"pounds of"`` is a weight.
+
+``words2num(text, to="currency")`` returns the amount itself as a ``Decimal``,
+unit plus subunit, for any language whose num2words currency names it knows::
+
+    >>> words2num("twelve euros, thirty-four cents", to="currency")
+    Decimal('12.34')
+    >>> words2num("zwei Euro", lang="de", to="currency")
+    Decimal('2')
+
+Text with no currency word is read as a plain cardinal; text with one that is
+not an amount (``"twelve euros and change"``) raises ``Words2NumError``.
 
 Auto-parse mode
 ---------------

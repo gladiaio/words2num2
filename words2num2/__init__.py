@@ -75,7 +75,12 @@ def words2num(text, lang="en", to="cardinal", **kwargs):
             ``year``, or ``currency``.
 
     Returns:
-        ``int``, ``float``, or ``Decimal`` depending on the input.
+        ``int``, ``float`` or ``Decimal`` depending on the input. ``to="currency"``
+        returns the amount as a ``Decimal``, unit plus subunit
+        (``"twelve euros, thirty-four cents"`` -> ``Decimal("12.34")``); text
+        that names no currency is read as a plain cardinal. A number written
+        in figures is read with the language's separators (``"1,234"`` ->
+        1234 in en, ``"2,5"`` -> ``Decimal("2.5")`` in de).
 
     Raises:
         NotImplementedError: if ``lang`` or ``to`` is not supported.
