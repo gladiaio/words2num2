@@ -28,8 +28,10 @@ pub mod w2n_sentence;
 /// choice, and the `to` mode selection — lives in [`w2n_sentence`].
 pub use w2n_sentence::words2num;
 
-/// Python's `Words2Num_Base.LOOKUP_RANGE`.
-const LOOKUP_LO: i64 = -1;
+/// Python's `Words2Num_Base.LOOKUP_RANGE`, without its -1: a sign is stripped
+/// before any lookup (see [`strip_sign`]), and a table entry "minus one" made
+/// the scale composer read am "ሰልቢ አንድ ሺህ …" (-1234) as -1 × 1000 + 234 (#61).
+const LOOKUP_LO: i64 = 0;
 const LOOKUP_HI: i64 = 10001;
 
 /// Error from the reverse-table backend.
@@ -50,18 +52,50 @@ pub enum LookupError {
 /// text = re.sub(r"\.(?!\d)", " ", text)
 /// text = re.sub(r"\s+", " ", text).strip()
 /// ```
+///
+/// Beyond the Python shape, the typographic variants a word processor, an IME
+/// or a web page substitutes for the characters num2words writes are folded
+/// first, on the table side and the input side alike: dashes and the minus
+/// sign to `-` (#114), curly quotes and modifier-letter apostrophes to `'`
+/// (#115), tr/az dotless "ı" to "i" (uppercase "KIRK" lowercases to "kirk",
+/// #116), de "ß" to "ss" ("dreissig", #117), invisible format characters
+/// dropped (#118), and script-native punctuation treated like the ASCII set
+/// (danda, shad, Arabic comma, CJK full stop, guillemets, brackets, #121).
 pub fn normalize_tail(decomposed: &str) -> String {
-    let lowered = decomposed.to_lowercase().replace('_', " ");
-    let chars: Vec<char> = lowered.chars().collect();
-    let mut out = String::with_capacity(lowered.len());
+    let mut chars: Vec<char> = Vec::with_capacity(decomposed.len());
+    for c in decomposed.to_lowercase().chars() {
+        match c {
+            '_' => chars.push(' '),
+            // Turkish/Azerbaijani: "I" lowercases to "i" outside a Turkic
+            // locale, so "SIFIR" must meet the table's "sıfır" on "sifir".
+            '\u{131}' => chars.push('i'),
+            // Full case folding: Swiss German has no ß, and "DREISSIG" is its capital.
+            'ß' => chars.extend(['s', 's']),
+            // Hyphens, dashes and the minus sign a word processor substitutes for '-'.
+            '\u{2010}'..='\u{2015}' | '\u{2212}' | '\u{FE58}' | '\u{FE63}' | '\u{FF0D}' => {
+                chars.push('-')
+            }
+            // Zero-width space is a word break; the other format characters
+            // (soft hyphen, ZWNJ/ZWJ after a virama, word joiner, BOM) are
+            // invisible and carry no letter.
+            '\u{200B}' => chars.push(' '),
+            '\u{00AD}' | '\u{200C}' | '\u{200D}' | '\u{2060}' | '\u{FEFF}' => {}
+            c if is_apostrophe(c) || is_clause_punctuation(c) => chars.push(' '),
+            c => chars.push(c),
+        }
+    }
+    let mut out = String::with_capacity(chars.len());
 
     for (i, &c) in chars.iter().enumerate() {
         match c {
             // (?<=[a-z])-(?=[a-z]) — a hyphen joining two words becomes a
             // space, but a hyphen before a digit is a sign and must survive.
+            // "å" counts as [a-z]: it kept its ring only to tell no "åttende"
+            // from "attende" (see `normalize`), it is still a Latin letter.
             '-' => {
-                let prev_alpha = i > 0 && chars[i - 1].is_ascii_lowercase();
-                let next_alpha = chars.get(i + 1).is_some_and(|n| n.is_ascii_lowercase());
+                let latin = |n: &char| n.is_ascii_lowercase() || *n == 'å';
+                let prev_alpha = i > 0 && latin(&chars[i - 1]);
+                let next_alpha = chars.get(i + 1).is_some_and(latin);
                 out.push(if prev_alpha && next_alpha { ' ' } else { '-' });
             }
             ',' | ';' | ':' | '!' | '?' | '"' | '\'' => out.push(' '),
@@ -73,8 +107,52 @@ pub fn normalize_tail(decomposed: &str) -> String {
             _ => out.push(c),
         }
     }
-    // \s+ -> " ", then strip.
-    out.split_whitespace().collect::<Vec<_>>().join(" ")
+    // \s+ -> " ", then strip. bo: num2words ends every syllable with a tsheg,
+    // text drops the last one before a space, a shad or the end ("གཅིག" for
+    // "གཅིག་", #120), so a word-final tsheg is not part of the key. Nor is a
+    // word-initial one, which is what is left of "གཅིག་ཁྲི་གཅིག" once the scale
+    // composer has cut "ཁྲི" (10^4) out of it.
+    out.split_whitespace()
+        .map(|w| w.trim_matches(['\u{0F0B}', '\u{0F0C}']))
+        .filter(|w| !w.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// The marks typed for the ASCII apostrophe num2words writes (uk "п'ять",
+/// uz "to'rt", haw "'ekahi"): the curly quotes, the modifier letters
+/// apostrophe / turned comma (uk "пʼять", uz "toʻrt", the haw ʻokina) and the
+/// prime / backtick.
+pub fn is_apostrophe(c: char) -> bool {
+    matches!(c, '\u{2018}' | '\u{2019}' | '\u{201B}' | '\u{02BC}' | '\u{02BB}' | '\u{02B9}' | '`')
+}
+
+/// Sentence and clause marks, quotes and brackets that sit glued to a word the
+/// way ASCII ",.!?" do: "पाँच।", "خمسة،", "五。", "አምስት።", "«cinq»", "(five)".
+/// Word-internal marks are left alone (the Catalan "l·l" middle dot, the
+/// Armenian stress and question marks written over a vowel).
+pub fn is_clause_punctuation(c: char) -> bool {
+    matches!(c,
+        '(' | ')' | '[' | ']' | '{' | '}'
+        | '\u{00A1}' | '\u{00BF}'                   // ¡ ¿
+        | '\u{00AB}' | '\u{00BB}'                   // « »
+        | '\u{201A}' | '\u{201C}'..='\u{201F}'      // ‚ “ ” „ ‟
+        | '\u{2039}' | '\u{203A}'                   // ‹ ›
+        | '\u{0589}' | '\u{055D}'                   // Armenian full stop, comma
+        | '\u{05C3}'                                // Hebrew sof pasuq
+        | '\u{060C}' | '\u{061B}' | '\u{061F}' | '\u{06D4}' // Arabic ، ؛ ؟ ۔
+        | '\u{0964}' | '\u{0965}'                   // danda, double danda
+        | '\u{0DF4}'                                // Sinhala kunddaliya
+        | '\u{0E2F}' | '\u{0E5A}' | '\u{0E5B}'      // Thai paiyannoi, angkhankhu, khomut
+        | '\u{0F0D}'..='\u{0F12}'                   // Tibetan shads
+        | '\u{104A}' | '\u{104B}'                   // Myanmar section marks
+        | '\u{10FB}'                                // Georgian paragraph separator
+        | '\u{1361}'..='\u{1368}'                   // Ethiopic wordspace, full stop, commas
+        | '\u{17D4}'..='\u{17D6}'                   // Khmer khan
+        | '\u{3001}' | '\u{3002}'                   // CJK 、 。
+        | '\u{3008}'..='\u{3011}'                   // CJK angle / corner / lenticular brackets
+        | '\u{3014}'..='\u{301B}'
+    )
 }
 
 /// Pure-Rust port of `Words2Num_Base._normalize`.
@@ -95,17 +173,70 @@ pub fn normalize_tail(decomposed: &str) -> String {
 /// Tibetan and Thaana scripts, which are letters, not accents: hi "पचासी"
 /// (85) became "पचास" (50) and parsed as 50. Across the 0..=10000 tables
 /// that was 5310 silently wrong values in 7 languages.
+///
+/// Three spelling variants are unified on top: ml legacy chillus (consonant +
+/// virama + ZWJ, "ഒന്‍പത്") become the atomic chillu num2words writes (#119);
+/// the Devanagari chandrabindu becomes the anusvara everyday typing uses (hi
+/// "पांच" = "पाँच", #122) and the Bengali one is optional. The ring of "å" is
+/// kept: no/nb "åttende" is 8th and "attende" 18th (#44). The tables index
+/// every "å" key a second time without the ring (see [`build_table`]), so
+/// "atte" still reads 8.
 pub fn normalize(s: &str) -> String {
     use unicode_normalization::UnicodeNormalization;
     if s.is_ascii() {
         return normalize_tail(s); // NFKD and the combining-mark filter are no-ops on ASCII
     }
     let nfkd: String = s.nfkd().collect();
-    let stripped: String = nfkd
-        .chars()
-        .filter(|&c| !is_optional_diacritic(c))
-        .collect();
+    let nfkd = if nfkd.contains('\u{200D}') { ml_atomic_chillus(&nfkd) } else { nfkd };
+    let mut stripped = String::with_capacity(nfkd.len());
+    for c in nfkd.chars() {
+        match c {
+            '\u{030A}' if stripped.ends_with('a') => {
+                stripped.pop();
+                stripped.push('å');
+            }
+            '\u{030A}' if stripped.ends_with('A') => {
+                stripped.pop();
+                stripped.push('Å');
+            }
+            '\u{0901}' => stripped.push('\u{0902}'), // Devanagari chandrabindu -> anusvara
+            '\u{0981}' => {}                          // Bengali chandrabindu: optional
+            c if is_optional_diacritic(c) => {}
+            c => stripped.push(c),
+        }
+    }
     normalize_tail(&stripped)
+}
+
+/// ml: rewrite the pre-Unicode-5.1 chillu (consonant + virama + ZWJ) to the
+/// atomic chillu num2words2 renders. Dropping the ZWJ alone would leave
+/// consonant + virama, which is a different letter.
+fn ml_atomic_chillus(s: &str) -> String {
+    let chars: Vec<char> = s.chars().collect();
+    let mut out = String::with_capacity(s.len());
+    let mut i = 0;
+    while i < chars.len() {
+        let chillu = match chars[i] {
+            '\u{0D23}' => Some('\u{0D7A}'), // ണ -> ൺ
+            '\u{0D28}' => Some('\u{0D7B}'), // ന -> ൻ
+            '\u{0D30}' => Some('\u{0D7C}'), // ര -> ർ
+            '\u{0D32}' => Some('\u{0D7D}'), // ല -> ൽ
+            '\u{0D33}' => Some('\u{0D7E}'), // ള -> ൾ
+            '\u{0D15}' => Some('\u{0D7F}'), // ക -> ൿ
+            _ => None,
+        };
+        match chillu {
+            Some(ch) if chars.get(i + 1) == Some(&'\u{0D4D}') && chars.get(i + 2) == Some(&'\u{200D}') => {
+                out.push(ch);
+                i += 3;
+            }
+            _ => {
+                out.push(chars[i]);
+                i += 1;
+            }
+        }
+    }
+    out
 }
 
 /// A combining mark that a writer may omit without changing the word: the
@@ -152,11 +283,20 @@ fn build_table(lang: &str, ordinal: bool) -> Result<HashMap<String, i64>, Lookup
     let l = num2words2_core::get_lang_by_key(lang)
         .ok_or_else(|| LookupError::NotImplemented(lang.to_string()))?;
     let mut table = HashMap::new();
+    let mut ringless = Vec::new();
     for n in LOOKUP_LO..LOOKUP_HI {
         let v = BigInt::from(n);
         let words = if ordinal { l.to_ordinal(&v) } else { l.to_cardinal(&v) };
         let Ok(words) = words else { continue }; // Python swallows every raise
         let key = normalize(&words);
+        if key.contains('å') {
+            ringless.push((key.replace('å', "a"), n));
+        }
+        table.entry(key).or_insert(n);
+    }
+    // "å" typed without its ring ("atte" for "åtte") still reads, but only where
+    // no number is spelled that way: no/nb "attende" is 18th, not "åttende" (8th).
+    for (key, n) in ringless {
         table.entry(key).or_insert(n);
     }
     Ok(table)
@@ -215,6 +355,90 @@ pub fn lookup_norm(
     let got = table_get(&built, lang, normalized, ordinal).map(|v| sign * v);
     tables().write().unwrap().insert(key, built);
     Ok(got)
+}
+
+/// A word (or words) a language puts in front of a number to make it negative,
+/// normalized: fr "moins", zh "负", xh "ngaphantsi kwe", th "ติดลบ".
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SignPrefix {
+    pub text: String,
+    /// The renderer glues it to the number (th "ติดลบเจ็ด", tr "eksiyedi"), so
+    /// it also matches without a following space.
+    pub glued: bool,
+}
+
+/// The spoken minus words num2words2 does not render: kn/te write the symbol
+/// "(-)" (#243), English-style "minus"/"negative" are accepted everywhere as
+/// before, and a leading "-" glued to a word ("−five", #114) is a sign too.
+fn extra_sign_words(lang: &str) -> &'static [&'static str] {
+    match lang.split(&['_', '-'][..]).next().unwrap_or(lang) {
+        "kn" => &["ಋಣ", "ಮೈನಸ್"],
+        "te" => &["మైనస్", "ఋణ"],
+        _ => &[],
+    }
+}
+
+/// The negative prefixes of `lang`, longest first. Derived from the renderer:
+/// `render(-n)` is `prefix + render(n)` in every language that renders
+/// negatives (fr "moins sept", es "menos cuarenta y dos", am "ሰልቢ ሰባት"), so
+/// the prefix is read off rather than listed by hand (#123).
+pub fn sign_prefixes(lang: &str) -> Arc<Vec<SignPrefix>> {
+    static S: OnceLock<RwLock<HashMap<String, Arc<Vec<SignPrefix>>>>> = OnceLock::new();
+    let cache = S.get_or_init(|| RwLock::new(HashMap::new()));
+    if let Some(v) = cache.read().unwrap().get(lang) {
+        return v.clone();
+    }
+    let v = Arc::new(derive_sign_prefixes(lang));
+    cache.write().unwrap().insert(lang.to_string(), v.clone());
+    v
+}
+
+fn derive_sign_prefixes(lang: &str) -> Vec<SignPrefix> {
+    let mut out: Vec<SignPrefix> = Vec::new();
+    let mut add = |text: &str, glued: bool| {
+        let text = text.trim();
+        if text.is_empty() || text.chars().any(|c| c.is_ascii_digit()) {
+            return;
+        }
+        match out.iter_mut().find(|p| p.text == text) {
+            Some(p) => p.glued |= glued,
+            None => out.push(SignPrefix { text: text.to_string(), glued }),
+        }
+    };
+    if let Some(l) = num2words2_core::get_lang_by_key(lang) {
+        let render = |n: i64| l.to_cardinal(&BigInt::from(n)).ok().map(|w| normalize(&w));
+        for n in [7i64, 42, 1234] {
+            let (Some(neg), Some(pos)) = (render(-n), render(n)) else { continue };
+            if neg.len() > pos.len() && neg.ends_with(&pos) {
+                let prefix = &neg[..neg.len() - pos.len()];
+                add(prefix, !prefix.ends_with(' '));
+            }
+        }
+    }
+    for w in ["minus", "negative"].iter().chain(extra_sign_words(lang)) {
+        add(&normalize(w), false); // NFKD splits kn "ೈ": compare like the input
+    }
+    add("-", true);
+    out.sort_by(|a, b| b.text.len().cmp(&a.text.len()));
+    out
+}
+
+/// Split a leading negative prefix off normalized text: `Some((rest, glued))`,
+/// where `glued` says the prefix matched without a following space (the
+/// caller then also tries the unsigned reading of the whole). A bare prefix,
+/// or one followed by a digit when glued ("-17" is a literal), is `None`.
+pub fn strip_sign<'a>(lang: &str, normalized: &'a str) -> Option<(&'a str, bool)> {
+    for p in sign_prefixes(lang).iter() {
+        let Some(rest) = normalized.strip_prefix(p.text.as_str()) else { continue };
+        if let Some(rest) = rest.strip_prefix(' ') {
+            if !rest.is_empty() {
+                return Some((rest, false));
+            }
+        } else if p.glued && rest.chars().next().is_some_and(|c| c.is_alphabetic()) {
+            return Some((rest, true));
+        }
+    }
+    None
 }
 
 /// A table hit for `normalized`, or for one of its spoken variants: the fr
@@ -1366,5 +1590,145 @@ mod tests {
         // Regression: a canonical number is unaffected.
         assert_eq!(words2num("deux mille dix", "fr", "cardinal").unwrap(), int(2010));
         assert_eq!(words2num("vingt trois", "fr", "cardinal").unwrap(), int(23));
+    }
+
+    fn w2n(text: &str, lang: &str, to: &str) -> Option<i64> {
+        match w2n_sentence::words2num(text, lang, to) {
+            Ok(w2n_lang_en::W2nValue::Int(n)) => i64::try_from(n).ok(),
+            _ => None,
+        }
+    }
+
+    /// #61 #123 #124 #243: the sign prefix is derived per language and applied
+    /// to the whole composed value.
+    #[test]
+    fn negatives_take_the_renderer_prefix_and_the_whole_value() {
+        for (lang, text, n) in [
+            ("fr", "moins sept", -7),                                   // #123
+            ("es", "menos cuarenta y dos", -42),
+            ("zh", "负七", -7),
+            ("am", "ሰልቢ ሰባት", -7),
+            ("tr", "eksi yedi", -7),
+            ("xh", "ngaphantsi kwe sixhenxe", -7),
+            ("am", "ሰልቢ አንድ ሺህ ሁለት መቶ ሠላሳ አራት", -1234),        // #61: not -766
+            ("fr", "moins un million mille", -1001000),
+            ("fr", "moins un million cinq cents", -1000500),
+            ("de", "minus zwölftausenddreihundertfünfundvierzig", -12345),
+            ("sv", "minus tolvtusen trehundrafyrtiofem", -12345),
+            ("tr", "eksiyedi", -7),                                     // #124 glued
+            ("th", "ติดลบเจ็ด", -7),
+            ("th", "ติดลบหนึ่งพันสองร้อยสามสิบสี่", -1234),
+            ("kn", "ಮೈನಸ್ ಏಳು", -7),                                   // #243
+            ("kn", "ಋಣ ಏಳು", -7),
+            ("kn", "(-) ಏಳು", -7),
+            ("te", "మైనస్ ఏడు", -7),
+            ("en", "minus seven", -7),
+        ] {
+            assert_eq!(w2n(text, lang, "cardinal"), Some(n), "{lang} {text:?}");
+        }
+        // Every language: -n renders and parses back, below and above the table.
+        for lang in supported_langs() {
+            let l = num2words2_core::get_lang_by_key(lang).unwrap();
+            for n in [-7i64, -42, -1234] {
+                let Ok(w) = l.to_cardinal(&BigInt::from(n)) else { continue };
+                if w.chars().all(|c| c.is_ascii_digit() || c == '-') {
+                    continue;
+                }
+                let got = w2n(&w, lang, "cardinal");
+                assert!(got == Some(n) || got.is_none(), "{lang} {w:?} -> {got:?}, want {n}");
+            }
+        }
+        // A bare prefix is not a number.
+        assert_eq!(w2n("moins", "fr", "cardinal"), None);
+    }
+
+    /// #114 dashes, #115 apostrophes, #116 dotless ı, #117 ß, #118 format
+    /// characters, #119 ml chillus, #120 bo tsheg, #121 punctuation, #122 nasal
+    /// signs.
+    #[test]
+    fn normalize_folds_typographic_variants() {
+        assert_eq!(normalize("twenty\u{2013}one"), "twenty one");
+        assert_eq!(normalize("forty\u{2011}two"), normalize("forty-two"));
+        assert_eq!(normalize("\u{2212}42"), "-42");
+        assert_eq!(normalize("п\u{2019}ять"), normalize("п'ять"));
+        assert_eq!(normalize("п\u{02BC}ять"), normalize("п'ять"));
+        assert_eq!(normalize("to\u{02BB}rt"), normalize("to'rt"));
+        assert_eq!(normalize("SIFIR"), normalize("sıfır"));
+        assert_eq!(normalize("DREISSIG"), normalize("dreißig"));
+        assert_eq!(normalize("\u{FEFF}forty\u{200B}two"), "forty two");
+        // A soft hyphen is only a line-break hint: the word stays whole.
+        assert_eq!(normalize("twenty\u{00AD}one"), "twentyone");
+        assert_eq!(normalize("शून्\u{200C}य"), normalize("शून्य"));
+        assert_eq!(normalize("ഒന\u{0D4D}\u{200D}പത്"), normalize("ഒൻപത്"));
+        assert_eq!(normalize("གཅིག"), normalize("གཅིག་"));
+        assert_eq!(normalize("ལྔ།"), normalize("ལྔ་"));
+        for p in ["पाँच।", "«cinq»", "(five)", "五。", "خمسة،", "አምስት።"] {
+            assert!(!normalize(p).chars().any(|c| !c.is_alphanumeric() && !unicode_normalization::char::is_combining_mark(c)), "{p:?} -> {:?}", normalize(p));
+        }
+        assert_eq!(normalize("पांच"), normalize("पाँच"));
+        // Normalizing twice changes nothing.
+        for t in ["Forty-Two", "åttende", "ติดลบเจ็ด", "(-) ಏಳು", "dreißig"] {
+            assert_eq!(normalize(&normalize(t)), normalize(t));
+        }
+    }
+
+    #[test]
+    fn typographic_variants_parse() {
+        for (lang, text, n) in [
+            ("en", "twenty\u{2013}one", 21),
+            ("fr", "vingt\u{2011}et\u{2011}un", 21),
+            ("af", "een\u{2013}en\u{2013}twintig", 21),
+            ("en", "\u{2212}five", -5),
+            ("en", "\u{2212}42", -42),
+            ("uk", "п\u{2019}ять", 5),
+            ("uz", "to\u{02BB}rt", 4),
+            ("haw", "\u{02BB}ekahi", 1),
+            ("tr", "SIFIR", 0),
+            ("tr", "KIRK", 40),
+            ("az", "ALTI", 6),
+            ("de", "dreissig", 30),
+            ("de", "ZWEIUNDDREISSIG", 32),
+            ("en", "forty\u{200B}two", 42),
+            ("en", "\u{FEFF}forty two", 42),
+            ("hi", "शून्\u{200C}य", 0),
+            ("ml", "ഒന\u{0D4D}\u{200D}പത്", 9),
+            ("bo", "གཅིག", 1),
+            ("bo", "བཞི་བཅུ་གཉིས", 42),
+            ("bo", "ལྔ།", 5),
+            ("hi", "पाँच।", 5),
+            ("ar", "خمسة،", 5),
+            ("zh", "五。", 5),
+            ("am", "አምስት።", 5),
+            ("fr", "«cinq»", 5),
+            ("en", "(five)", 5),
+            ("hi", "पांच", 5),
+        ] {
+            assert_eq!(w2n(text, lang, "cardinal"), Some(n), "{lang} {text:?}");
+        }
+    }
+
+    /// #121 in sentence mode: a trailing script mark is kept after the figure,
+    /// a piece opening with a bracket or quote is left as written.
+    #[test]
+    fn sentence_mode_keeps_the_punctuation_normalize_drops() {
+        let s = |t: &str, l: &str| w2n_sentence::words2num_sentence(t, l, "cardinal", false).unwrap();
+        assert_eq!(s("मेरे पास पाँच। सेब", "hi"), "मेरे पास 5। सेब");
+        assert_eq!(s("I have five) apples", "en"), "I have 5) apples");
+        assert_eq!(s("(five) apples", "en"), "(five) apples");
+        assert_eq!(s("«cinq» pommes", "fr"), "«cinq» pommes");
+        assert_eq!(s("forty two.", "en"), "42.");
+    }
+
+    /// #44: no/nb "attende" is 18th, "åttende" 8th; a ringless "atte" still reads 8.
+    #[test]
+    fn nordic_ring_keeps_eighteenth_apart_from_eighth() {
+        for lang in ["no", "nb"] {
+            assert_eq!(w2n("attende", lang, "ordinal"), Some(18));
+            assert_eq!(w2n("åttende", lang, "ordinal"), Some(8));
+            assert_eq!(w2n("ett hundre og attende", lang, "ordinal"), Some(118));
+            assert_eq!(w2n("atte", lang, "cardinal"), Some(8));
+            assert_eq!(w2n("ÅTTE", lang, "cardinal"), Some(8));
+        }
+        assert_eq!(w2n("tva", "sv", "cardinal"), Some(2));
     }
 }

@@ -851,6 +851,13 @@ impl W2nLangEn {
             if self.negative_words.contains(*first) {
                 sign = -1;
                 toks.remove(0);
+            } else if let Some(word) = first
+                .strip_prefix('-')
+                .filter(|w| w.chars().next().is_some_and(char::is_alphabetic))
+            {
+                // A minus sign glued to the word: "−five" (U+2212 folds to '-', #114).
+                sign = -1;
+                toks[0] = word;
             }
         }
         if toks.is_empty() {
