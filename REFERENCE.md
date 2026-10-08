@@ -40,7 +40,7 @@ Parse `text` (a number written in words) into a numeric value.
 |---|---|---|---|
 | `text` | `str` | — | The words to parse (e.g. `"forty-two"`). |
 | `lang` | `str` | `"en"` | Locale code. Same set as `num2words2`. Hyphens (`en-US`) are normalized to underscores; unknown subtags fall back to the base language. |
-| `to` | `str` | `"cardinal"` | One of `"cardinal"`, `"ordinal"`, `"ordinal_num"`, `"year"`, `"currency"`. |
+| `to` | `str` | `"cardinal"` | One of `"cardinal"`, `"ordinal"`, `"ordinal_num"`, `"year"`, `"currency"`, `"digits"`. |
 
 **Returns**
 
@@ -436,8 +436,14 @@ The `to=` parameter on `words2num` accepts:
 | `"ordinal_num"` | Digit-form ordinal. | `"21st"` → `21` |
 | `"year"` | Year-pair shorthand. | `"nineteen ninety nine"` → `1999` |
 | `"currency"` | Currency expression. | `"twelve dollars and fifty cents"` → varies by locale |
+| `"digits"` | A number read one digit at a time (codes, phone numbers). | `"two seven five"` → `275` |
 
 Unsupported values raise `NotImplementedError`.
+
+`to="digits"` returns an `int`, so leading zeros are dropped: `"zero zero seven"`
+→ `7`. To keep them, convert the text as a sentence — `words2num_sentence("zero
+zero seven", to="digits")` returns `"007"`, and so does the default
+`to="cardinal"`. A run of any length is read (it is not limited to 64 bits).
 
 ---
 
