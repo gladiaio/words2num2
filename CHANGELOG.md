@@ -76,6 +76,23 @@ covered in `tests/test_sentence_realworld.py`.
 
 ### Fixed
 
+- **Numbers above 10000 no longer parse to a different number** (#36). A scale
+  word's magnitude is now read off num2words2's own rendering instead of being
+  assumed from the probed power:
+  - lakh / crore are 10^5 / 10^7, not 10^6 / 10^9 — as bn en_IN en_NE en_NP gu
+    hi kn ml mr ne pa si ta te ur (hi "दस लाख" was 10000000, en_IN "one
+    lakh" 1000000);
+  - a multiplier is never a scale word (eu "bat", ha "biyu", en_AERO "zero");
+  - multipliers after the scale word: ha / ff / sw "dubu biyu" = 2000, eu
+    "milioi bat" = 1000000 (was 10^12);
+  - scales glued to their multiplier: km / lo / th / my myriads and
+    hundred-thousands, zh / ja / ko 万 / 億, bo, dv;
+  - en_AERO and its aliases read digit by digit ("wun zero zero zero zero
+    zero" = 100000, was 4000).
+  On the round-trip ratchet (`rust/words2num2-core/tests/roundtrip.rs`),
+  wrong values go from 72 to 2 and raises from 153 to 71. The 2 left are ha
+  10000 / 100000, which num2words2 renders exactly like 1010 / 1100.
+
 - **Indic, Tibetan and Thaana numbers no longer parse to a different
   number.** `normalize()` stripped every combining mark, which erased the
   vowel signs of these scripts — they are letters, not accents. hi `"पचासी"`

@@ -16,7 +16,7 @@
 
 use num_bigint::BigInt;
 use std::collections::HashMap;
-use std::sync::{OnceLock, RwLock};
+use std::sync::{Arc, OnceLock, RwLock};
 
 pub mod w2n_currency;
 pub mod w2n_formats;
@@ -372,74 +372,201 @@ pub fn is_supported_lang(lang: &str) -> bool {
 // scale is glued into one token) find no split word and fall back to the table
 // unchanged — so this never regresses them.
 
-/// Cache of `(scale_word_normalized -> magnitude)` per language, biggest first.
-fn scale_cache() -> &'static RwLock<HashMap<String, Vec<(String, i64)>>> {
-    static S: OnceLock<RwLock<HashMap<String, Vec<(String, i64)>>>> = OnceLock::new();
+/// What the renderer tells us about a language's scale words.
+#[derive(Debug, Default)]
+struct Scales {
+    /// `(scale_word_normalized, magnitude)`, biggest magnitude first. Includes the
+    /// morphemes of glued renderings (km "ពីរពាន់" -> "ពាន់" = 10^3).
+    words: Vec<(String, i64)>,
+    /// Scale words whose multiplier FOLLOWS them: ha "dubu biyu" = 2000.
+    postfix: Vec<String>,
+    /// Scale words that take "one" after them while every other multiplier comes
+    /// first: eu "milioi bat" = 10^6 but "bi milioi" = 2·10^6. `(scale, one)`.
+    one_after: Vec<(String, String)>,
+    /// Forms of "one" heard only in front of a scale word, not table numbers on
+    /// their own: ta "ஒரு இலட்சம்" = 10^5, de "eine Million".
+    one_forms: Vec<String>,
+    /// Groups are separate tokens summed without a scale word between them:
+    /// km "មួយម៉ឺន ពីរពាន់" = 10000 + 2000.
+    additive_groups: bool,
+    /// Numbers are read one digit at a time: en_AERO "wun zero zero" = 100.
+    digit_by_digit: bool,
+}
+
+/// Cache of the derived [`Scales`] per language.
+fn scale_cache() -> &'static RwLock<HashMap<String, Arc<Scales>>> {
+    static S: OnceLock<RwLock<HashMap<String, Arc<Scales>>>> = OnceLock::new();
     S.get_or_init(|| RwLock::new(HashMap::new()))
 }
 
-/// Scale words for `lang`, biggest magnitude first. Derived by rendering the
-/// SINGULAR and PLURAL of 10^6 and 10^3 (n and 2n) via num2words and taking the
-/// last token of each: fr → {"millions"/"million" → 10^6, "mille" → 10^3}. Only
-/// 10^3 and 10^6 are probed — a language's 10^9 is often a *compound* of these
-/// ("mil millones", "mil milhões") and the recursion composes it from the parts,
-/// so probing 10^9 directly would mis-map its last token ("millones") to 10^9.
-pub fn scale_words(lang: &str) -> Vec<(String, i64)> {
+fn scales_of(lang: &str) -> Arc<Scales> {
     if let Some(v) = scale_cache().read().unwrap().get(lang) {
         return v.clone();
     }
-    let mut out: Vec<(String, i64)> = Vec::new();
-    if let Some(l) = num2words2_core::get_lang_by_key(lang) {
-        // (magnitude, [singulier, pluriel]) — le pluriel capte « millions » vs
-        // « million » (num2words rend 2×10^6 au pluriel).
-        // Échantillons n, 2n, 5n : capte les formes grammaticales du mot
-        // d'échelle — singulier (« mille »/« tysiąc »), petit pluriel (« millions »
-        // /« tysiące ») ET pluriel génitif slave 5+ (« tysięcy »/« тысяч »).
-        // Ordre PETIT → GRAND : le garde anti-collision fixe alors chaque token à
-        // sa PLUS PETITE magnitude. Essentiel en échelle longue (es « mil
-        // millones » = 10^9 réutilise « millones » = 10^6) : « millones » reste à
-        // 10^6, et 10^9 se compose par récursion (mil × millones).
-        for (mag, samples) in [
-            (1_000i64, [1_000i64, 2_000i64, 5_000i64]),
-            (1_000_000i64, [1_000_000i64, 2_000_000i64, 5_000_000i64]),
-            (1_000_000_000i64, [1_000_000_000i64, 2_000_000_000i64, 5_000_000_000i64]),
-        ] {
-            for s in samples {
-                if let Ok(words) = l.to_cardinal(&BigInt::from(s)) {
-                    let norm = normalize(&words);
-                    if let Some(last) = norm.split_whitespace().last() {
-                        let w = last.to_string();
-                        // Token d'échelle DISTINCT, ≥3 lettres, non numérique.
-                        if w.len() >= 3
-                            && !w.chars().any(|c| c.is_ascii_digit())
-                            && !out.iter().any(|(x, _)| *x == w)
-                        {
-                            out.push((w, mag));
+    let v = Arc::new(derive_scales(lang));
+    scale_cache()
+        .write()
+        .unwrap()
+        .insert(lang.to_string(), v.clone());
+    v
+}
+
+/// Scale words for `lang`, biggest magnitude first: fr → {"millions"/"million" →
+/// 10^6, "mille" → 10^3}, hi → {"करोड" → 10^7, "लाख" → 10^5, "हजार" → 10^3}.
+pub fn scale_words(lang: &str) -> Vec<(String, i64)> {
+    scales_of(lang).words.clone()
+}
+
+fn is_power_of_ten(mut n: i64) -> bool {
+    if n < 1 {
+        return false;
+    }
+    while n % 10 == 0 {
+        n /= 10;
+    }
+    n == 1
+}
+
+/// Derive [`Scales`] by rendering round numbers (1, 2 and 5 × 10^3..10^9) and
+/// reading the magnitude off each rendering instead of assuming it: in
+/// "दस लाख" (10^6) the multiplier "दस" is 10, so "लाख" is 10^5, not 10^6. A
+/// token that is itself a table number ("bat" = 1, "zero", "biyu" = 2) is a
+/// multiplier, never a scale word. The magnitude must be a power of ten ≥ 1000.
+///
+/// When a word is reached by several samples the first (smallest) one wins, so
+/// es "millones" stays 10^6 and "mil millones" composes 10^9 by recursion.
+fn derive_scales(lang: &str) -> Scales {
+    let mut sc = Scales::default();
+    let Some(l) = num2words2_core::get_lang_by_key(lang) else {
+        return sc;
+    };
+    let render = |n: i64| l.to_cardinal(&BigInt::from(n)).ok().map(|w| normalize(&w));
+    let conns = connector_words(lang);
+    let number = |t: &str| -> Option<i64> {
+        let t = trim_connectors(t, conns);
+        if t.is_empty() {
+            None
+        } else {
+            lookup_plain(lang, &t)
+        }
+    };
+    // Not a multiplier: no table value, or the bare scale itself (fr "mille").
+    let is_word = |t: &str| {
+        t.len() >= 3
+            && !t.chars().any(|c| c.is_ascii_digit())
+            && lookup_plain(lang, t).is_none_or(|v| v >= 1000 && is_power_of_ten(v))
+    };
+    fn add(out: &mut Vec<(String, i64)>, w: &str, mag: i64) {
+        if !out.iter().any(|(x, _)| x == w) {
+            out.push((w.to_string(), mag));
+        }
+    }
+    // A single token = table multiplier + scale morpheme (km "ពីរពាន់" = 2 ·
+    // "ពាន់"). Longest multiplier first, so the morpheme is the shortest tail.
+    let glued = |tok: &str, n: i64| -> Option<(String, i64)> {
+        let cuts: Vec<usize> = tok.char_indices().map(|(i, _)| i).filter(|&i| i > 0).collect();
+        cuts.into_iter().rev().find_map(|i| {
+            let (a, b) = tok.split_at(i);
+            let m = lookup_plain(lang, a).filter(|m| (1..1000).contains(m))?;
+            (n % m == 0 && is_power_of_ten(n / m) && n / m >= 1000 && is_word(b))
+                .then(|| (b.to_string(), n / m))
+        })
+    };
+    // Multipliers the table cannot read (ru "две тысячи", de "eine Million"):
+    // settled once every readable sample has fixed the magnitudes.
+    let mut unread: Vec<(String, u32, i64, String)> = Vec::new();
+    let mut glued_words: Vec<String> = Vec::new();
+    for p in [3u32, 4, 5, 6, 7, 9] {
+        for k in [1i64, 2, 5] {
+            let n = k * 10i64.pow(p);
+            let Some(text) = render(n) else { continue };
+            if text.chars().any(|c| c.is_ascii_digit()) {
+                continue;
+            }
+            let toks: Vec<&str> = text.split_whitespace().collect();
+            if let [tok] = toks[..] {
+                if let Some((w, mag)) = glued(tok, n) {
+                    add(&mut sc.words, &w, mag);
+                    glued_words.push(w);
+                    continue;
+                }
+            }
+            for (i, w) in toks.iter().enumerate() {
+                if !is_word(w) {
+                    continue;
+                }
+                let left = trim_connectors(&toks[..i].join(" "), conns);
+                let right = trim_connectors(&toks[i + 1..].join(" "), conns);
+                let (mult, after) = match (left.is_empty(), right.is_empty()) {
+                    (true, true) => (Some(1), false),
+                    (false, true) => (number(&left), false),
+                    (true, false) => (number(&right), true),
+                    (false, false) => continue,
+                };
+                match mult {
+                    Some(m) if m >= 1 && n % m == 0 && is_power_of_ten(n / m) && n / m >= 1000 => {
+                        add(&mut sc.words, w, n / m);
+                        if after && m == 1 {
+                            if !sc.one_after.iter().any(|(x, _)| x == w) {
+                                sc.one_after.push((w.to_string(), right.clone()));
+                            }
+                        } else if after && !sc.postfix.iter().any(|x| x == w) {
+                            sc.postfix.push(w.to_string());
                         }
                     }
+                    None if !after => unread.push((w.to_string(), p, n, left.clone())),
+                    _ => {}
                 }
             }
         }
     }
+    // An unread multiplier keeps the probed power as the magnitude — but only for
+    // 10^3/10^6/10^9, where the scale word is that power (he "עשרת אלפים" is
+    // 10 · 10^3, not 10^4).
+    for (w, p, _, _) in &unread {
+        if [3, 6, 9].contains(p) {
+            add(&mut sc.words, w, 10i64.pow(*p));
+        }
+    }
+    // The unread prefix of exactly one scale is "one": ta "ஒரு இலட்சம்" = 10^5.
+    for (w, _, n, one) in unread {
+        if !one.contains(' ')
+            && sc.words.iter().any(|(x, mag)| *x == w && *mag == n)
+            && !sc.one_forms.contains(&one)
+        {
+            sc.one_forms.push(one);
+        }
+    }
+    // sv "ettusen" glues "ett" + "tusen" on a shared t, leaving "usen": drop a
+    // glued morpheme that is the tail of a longer one of the same magnitude.
+    let words = sc.words.clone();
+    sc.words.retain(|(w, mag)| {
+        !(glued_words.contains(w)
+            && words.iter().any(|(x, m)| m == mag && x.len() > w.len() && x.ends_with(w.as_str())))
+    });
     // Plus grande magnitude d'abord : « million » se scinde avant « mille ».
-    out.sort_by(|a, b| b.1.cmp(&a.1));
-    scale_cache()
-        .write()
-        .unwrap()
-        .insert(lang.to_string(), out.clone());
-    out
+    sc.words.sort_by(|a, b| b.1.cmp(&a.1));
+    sc.digit_by_digit = match (render(10), render(1), render(0)) {
+        (Some(ten), Some(one), Some(zero)) => ten == format!("{one} {zero}"),
+        _ => false,
+    };
+    sc.additive_groups = render(12000).is_some_and(|text| {
+        let toks: Vec<&str> = text.split_whitespace().collect();
+        toks.len() >= 2
+            && toks
+                .iter()
+                .map(|t| lookup_plain(lang, t).or_else(|| split_glued_scale(lang, t, &sc.words)))
+                .sum::<Option<i64>>()
+                == Some(12000)
+    });
+    sc
 }
 
 /// Is `word` (normalized) a scale word of `lang` with magnitude >= `min`? Reads the
 /// cache in place — the sentence walker asks this for every run head.
 pub fn is_scale_word_of(lang: &str, word: &str, min: i64) -> bool {
-    {
-        let cache = scale_cache().read().unwrap();
-        if let Some(v) = cache.get(lang) {
-            return v.iter().any(|(w, mag)| w == word && *mag >= min);
-        }
-    }
-    scale_words(lang)
+    scales_of(lang)
+        .words
         .iter()
         .any(|(w, mag)| w == word && *mag >= min)
 }
@@ -476,11 +603,7 @@ pub fn token_may_be_number(lang: &str, norm: &str) -> bool {
 
 /// Run `f` on the cached scale words of `lang` without cloning them.
 fn with_scale_words<R>(lang: &str, f: impl FnOnce(&[(String, i64)]) -> R) -> R {
-    if scale_cache().read().unwrap().get(lang).is_none() {
-        scale_words(lang); // builds and caches
-    }
-    let cache = scale_cache().read().unwrap();
-    f(cache.get(lang).map(Vec::as_slice).unwrap_or(&[]))
+    f(&scales_of(lang).words)
 }
 
 /// Table hit for a fragment (no sign handling), i.e. a number ≤ 10001.
@@ -503,6 +626,8 @@ fn connector_words(lang: &str) -> &'static [&'static str] {
         "ro" => &["si", "și", "de"],
         "pl" => &["i"],
         "en" => &["and"],
+        "ff" => &["e"], // "ujunere sappo e ɗiɗi" = 12000
+        "sw" => &["na"], // "elfu kumi na mbili" = 12000
         _ => &[],
     }
 }
@@ -531,9 +656,7 @@ pub fn parse_scaled_norm(lang: &str, norm: &str) -> Option<i64> {
     if !is_supported_lang(lang) {
         return None;
     }
-    with_scale_words(lang, |scales| {
-        parse_scaled_inner(lang, norm, scales, connector_words(lang))
-    })
+    parse_scaled_inner(lang, norm, &scales_of(lang), connector_words(lang))
 }
 
 /// The article that is also "one" in front of a scale word, for languages whose table
@@ -590,7 +713,36 @@ fn split_glued_scale(lang: &str, tok: &str, scales: &[(String, i64)]) -> Option<
     None
 }
 
-fn parse_scaled_inner(lang: &str, text: &str, scales: &[(String, i64)], conns: &[&str]) -> Option<i64> {
+/// en_AERO "wun zero zero zero zero zero" = 100000: every token one digit.
+fn digit_run(lang: &str, toks: &[&str]) -> Option<i64> {
+    if toks.len() < 2 || toks.len() > 18 {
+        return None;
+    }
+    toks.iter().try_fold(0i64, |acc, t| {
+        lookup_plain(lang, t)
+            .filter(|d| (0..10).contains(d))
+            .map(|d| acc * 10 + d)
+    })
+}
+
+/// km "មួយម៉ឺន ពីរពាន់ បីរយ សែសិបប្រាំ" = 10000 + 2000 + 300 + 45: each token a
+/// group, strictly decreasing in place value so "two three" never sums.
+fn additive_groups(lang: &str, toks: &[&str], scales: &[(String, i64)]) -> Option<i64> {
+    let mut total = 0i64;
+    let mut cap = i64::MAX;
+    for t in toks {
+        let v = lookup_plain(lang, t).or_else(|| split_glued_scale(lang, t, scales))?;
+        if v <= 0 || v >= cap {
+            return None;
+        }
+        total += v;
+        cap = 10i64.pow(v.ilog10());
+    }
+    Some(total)
+}
+
+fn parse_scaled_inner(lang: &str, text: &str, sc: &Scales, conns: &[&str]) -> Option<i64> {
+    let scales = sc.words.as_slice();
     let text = trim_connectors(text.trim(), conns);
     let text = text.as_str();
     if text.is_empty() {
@@ -605,25 +757,72 @@ fn parse_scaled_inner(lang: &str, text: &str, scales: &[(String, i64)], conns: &
             return Some(v);
         }
     }
-    // Split on the largest scale word present (whole-token match).
     let toks: Vec<&str> = text.split_whitespace().collect();
+    if sc.digit_by_digit {
+        if let Some(v) = digit_run(lang, &toks) {
+            return Some(v);
+        }
+    }
+    // The remainder after a scale word: empty is 0, otherwise a number below it.
+    let rest = |toks: &[&str], mag: i64| -> Option<i64> {
+        let r = toks.join(" ");
+        if trim_connectors(&r, conns).is_empty() {
+            Some(0)
+        } else {
+            parse_scaled_inner(lang, &r, sc, conns).filter(|&r| r < mag)
+        }
+    };
+    // Split on the largest scale word present (whole-token match).
     for (word, mag) in scales {
         if let Some(pos) = toks.iter().position(|t| t == word) {
             let left = toks[..pos].join(" ");
             let right = toks[pos + 1..].join(" ");
-            // « mille » nu (pas de multiplicateur à gauche) = 1×mille ; de « eine Million ».
             let left_trim = trim_connectors(left.trim(), conns);
-            let l = if left_trim.is_empty() || article_one(lang, &left_trim) {
+            let after = &toks[pos + 1..];
+            if left_trim.is_empty() {
+                // eu "milioi bat ...": the "one" follows the scale word.
+                if let Some((_, one)) = sc.one_after.iter().find(|(w, _)| w == word) {
+                    let one: Vec<&str> = one.split_whitespace().collect();
+                    if after.starts_with(&one) {
+                        if let Some(r) = rest(&after[one.len()..], *mag) {
+                            return Some(mag + r);
+                        }
+                    }
+                }
+                // ha "dubu sha biyu ɗari uku ..." : the longest multiplier that
+                // leaves a remainder below the scale.
+                if sc.postfix.contains(word) {
+                    for j in (1..=after.len()).rev() {
+                        let m = trim_connectors(&after[..j].join(" "), conns);
+                        let Some(m) = lookup_plain(lang, &m).filter(|m| (1..1000).contains(m)) else {
+                            continue;
+                        };
+                        if let Some(r) = rest(&after[j..], *mag) {
+                            return Some(m * mag + r);
+                        }
+                    }
+                }
+            }
+            // « mille » nu (pas de multiplicateur à gauche) = 1×mille ; de « eine Million ».
+            let l = if left_trim.is_empty()
+                || article_one(lang, &left_trim)
+                || sc.one_forms.contains(&left_trim)
+            {
                 1
             } else {
-                parse_scaled_inner(lang, &left, scales, conns)?
+                parse_scaled_inner(lang, &left, sc, conns)?
             };
             let r = if trim_connectors(right.trim(), conns).is_empty() {
                 0
             } else {
-                parse_scaled_inner(lang, &right, scales, conns)?
+                parse_scaled_inner(lang, &right, sc, conns)?
             };
             return Some(l * mag + r);
+        }
+    }
+    if sc.additive_groups && toks.len() > 1 {
+        if let Some(v) = additive_groups(lang, &toks, scales) {
+            return Some(v);
         }
     }
     // Additive hundreds glued into one word ("novecento" = 900) followed by a
@@ -987,6 +1186,39 @@ mod tests {
             .unwrap(),
             "42 rue des freres lumiere 69008 lyon"
         );
+    }
+
+    /// gladiaio/words2num2#36: the magnitude of a scale word is read off the
+    /// rendering, never assumed from the probed power.
+    #[test]
+    fn scale_magnitudes_are_derived() {
+        // Lakh (10^5) and crore (10^7), not 10^6 / 10^9.
+        assert_eq!(parse_scaled("en_IN", "one lakh"), Some(100_000));
+        assert_eq!(parse_scaled("en_IN", "ten lakh"), Some(1_000_000));
+        assert_eq!(parse_scaled("en_IN", "one crore"), Some(10_000_000));
+        assert_eq!(
+            parse_scaled("hi", "बारह लाख चौंतीस हज़ार पाँच सौ सड़सठ"),
+            Some(1_234_567)
+        );
+        // ta "ஒரு" is "one" only in front of a scale word.
+        assert_eq!(parse_scaled("ta", "ஒரு இலட்சம்"), Some(100_000));
+        // eu takes "one" after the scale, every other multiplier before it.
+        assert_eq!(parse_scaled("eu", "milioi bat"), Some(1_000_000));
+        assert_eq!(parse_scaled("eu", "bi milioi"), Some(2_000_000));
+        // ha / ff put every multiplier after the scale word.
+        assert_eq!(parse_scaled("ha", "dubu biyu"), Some(2_000));
+        assert_eq!(parse_scaled("ha", "miliyan biyu"), Some(2_000_000));
+        assert_eq!(parse_scaled("ff", "ujunere teemerre"), Some(100_000));
+        // km myriad and hundred-thousand glued to their multiplier.
+        assert_eq!(parse_scaled("km", "មួយម៉ឺន ពីរពាន់ បីរយ សែសិបប្រាំ"), Some(12_345));
+        assert_eq!(parse_scaled("km", "មួយសែន"), Some(100_000));
+        // en_AERO reads digits one at a time.
+        assert_eq!(parse_scaled("en_AERO", "wun zero zero zero zero zero"), Some(100_000));
+        assert_eq!(parse_scaled("en_AERO", "wun too tree fower fife"), Some(12_345));
+        // Prefix languages never take a postfix multiplier or sum bare groups.
+        assert_eq!(parse_scaled("fr", "mille deux cents"), Some(1_200));
+        assert_eq!(parse_scaled("es", "mil doscientos"), Some(1_200));
+        assert_eq!(parse_scaled("fr", "deux trois"), None);
     }
 
     #[test]
