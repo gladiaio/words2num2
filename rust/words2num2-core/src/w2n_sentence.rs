@@ -1785,7 +1785,10 @@ fn ordinal_reading(converter: &Converter, parts: &[String], i: usize, run: &str)
     if let Ok(v) = converter.to_ordinal(run) {
         return Some(v);
     }
-    let Converter::Table(_) = converter else { return None };
+    let Converter::Table(lang) = converter else { return None };
+    if !ordinal_opens_with_particle(lang) {
+        return None;
+    }
     let raw = parts[..i].iter().rev().find(|t| !py_str_isspace(t))?;
     let prev = raw.to_lowercase();
     if prev.is_empty()
@@ -1796,6 +1799,20 @@ fn ordinal_reading(converter: &Converter, parts: &[String], i: usize, run: &str)
         return None;
     }
     converter.to_ordinal(&format!("{prev} {run}")).ok()
+}
+
+/// Does the renderer open its ordinals with a word that is not a number (ro
+/// "al doilea")? Probed on 2; only then may an ordinal reading take the word
+/// before a run.
+fn ordinal_opens_with_particle(lang: &str) -> bool {
+    let Some(l) = num2words2_core::get_lang_by_key(lang) else { return false };
+    let Some(two) = l.to_ordinal(&BigInt::from(2)).ok().map(|w| crate::normalize(&w)) else {
+        return false;
+    };
+    match two.split_once(' ') {
+        Some((first, _)) => !matches!(crate::lookup(lang, first, false, &[]), Ok(Some(_))),
+        None => false,
+    }
 }
 
 /// Does the renderer write a compound ordinal as words + the ordinal of the
@@ -1867,6 +1884,12 @@ fn agree_figures(n2w_key: &str, n: &BigInt, spoken: &str, figures: String) -> St
     }
     let k: String = k.iter().collect();
     let s: String = s.iter().collect();
+    // With nothing to swap (tr "ikinci" + "ye"), the ending is only appended
+    // to figures that end in a letter ("2'nci" -> "2'nciye"); hu "1." stays
+    // "1.", never "1.t".
+    if k.is_empty() && !figures.chars().last().is_some_and(char::is_alphabetic) {
+        return figures;
+    }
     match figures.strip_suffix(k.as_str()) {
         Some(stem) if !k.is_empty() || !s.is_empty() => format!("{stem}{s}"),
         _ => figures,
@@ -4036,5 +4059,8 @@ mod ordinal_tests {
         assert_eq!(s("પહેલી વાર", "gu"), "૧લી વાર");
         assert_eq!(s("ikinciye geldi", "tr"), "2'nciye geldi");
         assert_eq!(s("нэгдүгээр анги", "mn"), "1 дүгээр анги");
+        // Nothing is appended to figures that end in punctuation.
+        let one = num_bigint::BigInt::from(1);
+        assert_eq!(super::agree_figures("hu", &one, "elsőt", "1.".to_string()), "1.");
     }
 }
