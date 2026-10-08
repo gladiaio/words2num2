@@ -1,37 +1,54 @@
 # -*- coding: utf-8 -*-
-"""words2num2 CLI entrypoint."""
+"""words2num2 CLI entrypoint.
+
+    $ words2num2 forty two
+    42
+    $ words2num2 --lang fr trois cent quatre
+    304
+    $ words2num2 --lang=en --to=ordinal twenty-first
+    21
+"""
 from __future__ import unicode_literals
 
+import argparse
 import sys
 
-from . import __version__, words2num
+from . import CONVERTER_TYPES, Words2NumError, __version__, words2num
 
 
-def main():
-    args = sys.argv[1:]
-    if not args or args[0] in ("-h", "--help"):
-        print(
-            "usage: words2num2 <text> [--lang=LANG] [--to=TYPE]\n"
-            "  LANG defaults to 'en'\n"
-            "  TYPE is cardinal | ordinal | ordinal_num | year | currency"
-        )
-        return 0
-    if args[0] == "--version":
-        print("words2num2 {}".format(__version__))
-        return 0
+def _parser():
+    p = argparse.ArgumentParser(
+        prog="words2num2",
+        description="Parse a number written in words into its numeric value.",
+    )
+    p.add_argument("text", nargs="+", help="the words to parse, e.g. forty two")
+    p.add_argument(
+        "--lang", default="en", help="language code (default: en), e.g. fr, pt-BR"
+    )
+    p.add_argument(
+        "--to",
+        default="cardinal",
+        metavar="TYPE",
+        help="conversion type: {} (default: cardinal)".format(
+            " | ".join(CONVERTER_TYPES)
+        ),
+    )
+    p.add_argument(
+        "--version", action="version", version="words2num2 {}".format(__version__)
+    )
+    return p
 
-    lang = "en"
-    to = "cardinal"
-    text_parts = []
-    for arg in args:
-        if arg.startswith("--lang="):
-            lang = arg.split("=", 1)[1]
-        elif arg.startswith("--to="):
-            to = arg.split("=", 1)[1]
-        else:
-            text_parts.append(arg)
-    text = " ".join(text_parts)
-    print(words2num(text, lang=lang, to=to))
+
+def main(argv=None):
+    args = _parser().parse_args(argv)
+    try:
+        value = words2num(" ".join(args.text), lang=args.lang, to=args.to)
+    except (Words2NumError, NotImplementedError) as exc:
+        # An unparseable input or an unsupported --lang/--to is a user error:
+        # one line on stderr and a non-zero status, not a traceback.
+        print("words2num2: error: {}".format(exc), file=sys.stderr)
+        return 1
+    print(value)
     return 0
 
 

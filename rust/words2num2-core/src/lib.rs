@@ -419,6 +419,11 @@ fn scales_of(lang: &str) -> Arc<Scales> {
 /// Scale words for `lang`, biggest magnitude first: fr → {"millions"/"million" →
 /// 10^6, "mille" → 10^3}, hi → {"करोड" → 10^7, "लाख" → 10^5, "हजार" → 10^3}.
 pub fn scale_words(lang: &str) -> Vec<(String, i64)> {
+    // Unsupported codes are answered without touching the per-lang caches,
+    // which would otherwise keep an entry per distinct string (#216).
+    if !is_supported_lang(lang) {
+        return Vec::new();
+    }
     scales_of(lang).words.clone()
 }
 
@@ -583,6 +588,9 @@ fn derive_scales(lang: &str) -> Scales {
 /// Is `word` (normalized) a scale word of `lang` with magnitude >= `min`? Reads the
 /// cache in place — the sentence walker asks this for every run head.
 pub fn is_scale_word_of(lang: &str, word: &str, min: i64) -> bool {
+    if !is_supported_lang(lang) {
+        return false; // and no cache entry for an arbitrary string (#216)
+    }
     scales_of(lang)
         .words
         .iter()
@@ -595,6 +603,9 @@ pub fn is_scale_word_of(lang: &str, word: &str, min: i64) -> bool {
 /// walker asks this for every word of the text; the full `to_cardinal` (several
 /// normalisations and composition passes) only runs for the tokens that pass.
 pub fn token_may_be_number(lang: &str, norm: &str) -> bool {
+    if !is_supported_lang(lang) {
+        return false; // and no cache entry for an arbitrary string (#216)
+    }
     if norm.is_empty() || norm.contains(' ') {
         return true; // not a single token: let the full parse decide
     }
@@ -1176,6 +1187,23 @@ pub fn en_to_year(text: &str) -> Result<w2n_lang_en::W2nValue, w2n_lang_en::W2nE
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #216: the public per-lang helpers must not cache arbitrary strings.
+    #[test]
+    fn unsupported_lang_is_not_cached_issue_216() {
+        for i in 0..200 {
+            let lang = format!("not-a-lang-{i}");
+            assert!(!is_scale_word_of(&lang, "x", 0));
+            assert!(!token_may_be_number(&lang, "x"));
+            assert!(scale_words(&lang).is_empty());
+            assert!(!scale_cache().read().unwrap().contains_key(&lang));
+            assert!(!hundred_cache().read().unwrap().contains_key(&lang));
+            assert!(!hundred_prefix_cache().read().unwrap().contains_key(&lang));
+        }
+        // Supported languages are unaffected.
+        assert!(is_scale_word_of("fr", "mille", 1000));
+        assert!(token_may_be_number("fr", "mille"));
+    }
 
     #[test]
     fn normalize_matches_python_shape() {
