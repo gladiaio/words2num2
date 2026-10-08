@@ -499,7 +499,8 @@ fn suffix_sep(lang: &str) -> &'static str {
 /// seven); fi "sata" ("sataa": it rains). Normalised.
 fn lone_suffix_excluded(lang: &str, stem: &str, suffix: &str) -> bool {
     match (lang, stem) {
-        ("tr", "on" | "alti" | "yuz" | "bir") => true,
+        // `normalize` keeps the dotless ı.
+        ("tr", "on" | "altı" | "yuz" | "bir") => true,
         ("hu", "egy") => true,
         ("hu", "het") => suffix != "kor",
         ("fi", "sata") => true,

@@ -1561,15 +1561,17 @@ fn en_year_run(parts: &[String], i: usize) -> Option<(i64, usize)> {
 
 /// `SentenceConverter.INCLUDABLE` — tokens allowed *inside* a run though they
 /// are not numbers. Keyed by the **resolved** code, so only exactly `"en"`
-/// gets them: `words2num_sentence(..., lang="en_IN")` resolves to `"en_IN"`
-/// and therefore runs with an empty includable set.
+/// gets them; `"en_IN"` and the other English locales get the connector
+/// num2words2 writes ("and") through [`lexicon::derived_connectors`].
 const INCLUDABLE_EN: [&str; 7] = ["and", "point", "dot", "minus", "negative", "a", "an"];
 
 /// Connector words allowed INSIDE a number run for non-English locales — the
 /// analogue of English "and". Without them the walker breaks a run at the
 /// connector ("sesenta **y** nueve mil ocho" stopped at "sesenta"), so
 /// composed cardinals above the reverse table never reached the parser. Keyed
-/// by resolved language prefix; empty for locales that don't join with a word.
+/// by resolved language prefix. This hand list holds the decimal words and
+/// the eleven languages it always covered; the walker adds every connector
+/// the renderer writes ([`lexicon::derived_connectors`], #65).
 fn includable_for(resolved: &str) -> &'static [&'static str] {
     let base = resolved.split(&['_', '-'][..]).next().unwrap_or(resolved);
     match base {
@@ -2073,9 +2075,10 @@ fn unit_words(resolved: &str) -> &'static str {
         }
         "ca" => "euro euros dolar dolars centim centims hora hores minut minuts dia dies setmana setmanes mes mesos any anys",
         // #83. No "day" word: "bir gün", "egy nap", "एक दिन" are "one day"
-        // the article way ("once upon a time").
+        // the article way ("once upon a time"). Letters `normalize` cannot
+        // strip (tr ı, da/no ø, vi đ) are written as such.
         "tr" => {
-            "lira liralik kurus dolar euro avro sterlin saat dakika hafta yil sene kilo \
+            "lira liralık kurus dolar euro avro sterlin saat dakika hafta yıl sene kilo \
              kilogram gram metre kilometre litre derece yuzde"
         }
         "hu" => {
@@ -2083,15 +2086,15 @@ fn unit_words(resolved: &str) -> &'static str {
              fok szazalek"
         }
         "sv" => {
-            "krona kronor ore euro dollar timme timmar minut minuter vecka veckor manad \
+            "krona kronor öre euro dollar timme timmar minut minuter vecka veckor manad \
              manader ar kilo kilometer meter gram liter grad grader procent"
         }
         "da" | "dk" => {
-            "krone kroner ore euro dollar time timer minut minutter uge uger maned maneder ar \
+            "krone kroner øre euro dollar time timer minut minutter uge uger maned maneder ar \
              kilo kilometer meter gram liter grad grader procent"
         }
         "no" | "nb" | "nn" => {
-            "krone kroner ore euro dollar time timer minutt minutter uke uker maned maneder ar \
+            "krone kroner øre euro dollar time timer minutt minutter uke uker maned maneder ar \
              kilo kilometer meter gram liter grad grader prosent"
         }
         "el" => {
@@ -2104,7 +2107,7 @@ fn unit_words(resolved: &str) -> &'static str {
              लीटर प्रतिशत ग्राम"
         }
         "bn" => "টাকা ডলার ইউরো ঘণ্টা মিনিট সপ্তাহ মাস বছর কিলো মিটার কিলোমিটার লিটার শতাংশ গ্রাম",
-        "vi" => "dong do euro gio phut tuan thang nam ky kilo can met km lit phan",
+        "vi" => "đồng đô euro gio phut tuan thang nam ky kilo can met km lit phan",
         "ro" => "leu lei ban bani euro dolar ora ore minut minute saptamana luna an ani kilogram metru litru grad procent",
         _ => "",
     }
