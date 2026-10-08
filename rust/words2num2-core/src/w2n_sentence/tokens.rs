@@ -127,7 +127,8 @@ pub(super) fn split_parts(
                 Some(segs) => segs,
                 None => peel(converter, resolved, piece, prev_number),
             };
-            prev_number = pieces.iter().any(|(p, g)| *g == Glue::Free && number_like(converter, resolved, p));
+            prev_number = peels(resolved)
+                && pieces.iter().any(|(p, g)| *g == Glue::Free && number_like(converter, resolved, p));
             for (p, g) in pieces {
                 parts.push(p.to_string());
                 glue.push(g);
@@ -154,6 +155,11 @@ fn number_like(converter: &super::Converter, resolved: &str, word: &str) -> bool
         _ => None,
     };
     rest.is_some_and(|r| is_number(converter, r))
+}
+
+/// The languages whose words may carry a proclitic or a case ending.
+fn peels(resolved: &str) -> bool {
+    matches!(base(resolved), "ar" | "he" | "fr" | "it" | "ca" | "tr" | "hu" | "bn" | "fi")
 }
 
 fn base(resolved: &str) -> &str {
@@ -377,7 +383,7 @@ fn peel<'a>(
 ) -> Vec<(&'a str, Glue)> {
     let whole = vec![(piece, Glue::Free)];
     let lang = base(resolved);
-    if !matches!(lang, "ar" | "he" | "fr" | "it" | "ca" | "tr" | "hu" | "bn" | "fi") {
+    if !peels(resolved) {
         return whole;
     }
     let core = super::rstrip_punct(piece);
