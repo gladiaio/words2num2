@@ -22,6 +22,7 @@ mod ord_compose;
 pub mod ord_forms;
 pub mod w2n_currency;
 pub mod w2n_formats;
+pub mod w2n_forms;
 pub mod w2n_lang_en;
 pub mod w2n_sentence;
 
@@ -266,13 +267,27 @@ fn is_optional_diacritic(c: char) -> bool {
 
 /// One reverse table: `{normalized_words: number}`.
 type ReverseTable = HashMap<String, i64>;
-/// The per-(lang, kind) cache of reverse tables.
-type TableCache = RwLock<HashMap<(String, bool), ReverseTable>>;
+/// The per-(lang, kind) cache of reverse tables. Shared out as `Arc`s so a
+/// reader works on its table with no lock held.
+type TableCache = RwLock<HashMap<(String, bool), Arc<ReverseTable>>>;
 
 /// The reverse tables, built lazily per (lang, kind) exactly as Python does.
 fn tables() -> &'static TableCache {
     static T: OnceLock<TableCache> = OnceLock::new();
     T.get_or_init(|| RwLock::new(HashMap::new()))
+}
+
+/// The reverse table of (`lang`, `ordinal`), built on first use. The lock is
+/// only held to read or insert the `Arc`, never while the table is consulted:
+/// the spoken forms may issue lookups of their own (hy ordinals read the
+/// cardinal table, w2n_forms derives its forms from the renderer).
+fn table(lang: &str, ordinal: bool) -> Result<Arc<ReverseTable>, LookupError> {
+    let key = (lang.to_string(), ordinal);
+    if let Some(t) = tables().read().unwrap().get(&key) {
+        return Ok(t.clone());
+    }
+    let built = Arc::new(build_table(lang, ordinal)?);
+    Ok(tables().write().unwrap().entry(key).or_insert(built).clone())
 }
 
 /// Port of `Words2Num_Base._build_table`.
@@ -362,35 +377,21 @@ pub fn lookup_norm(
         }
     }
 
-    let key = (lang.to_string(), ordinal);
-    let cached = {
-        let t = tables().read().unwrap();
-        match t.get(&key) {
-            Some(tab) => match tab.get(normalized) {
-                Some(v) => return Ok(Some(sign * v)),
-                None => true,
-            },
-            None => false,
-        }
-    };
-    if !cached {
-        let built = build_table(lang, ordinal)?;
-        let direct = built.get(normalized).copied();
-        tables().write().unwrap().entry(key.clone()).or_insert(built);
-        if let Some(v) = direct {
-            return Ok(Some(sign * v));
-        }
+    let tab = table(lang, ordinal)?;
+    if let Some(v) = tab.get(normalized) {
+        return Ok(Some(sign * v));
     }
-    // The spoken variants are worked out with no lock held: a language's
-    // ordinal forms may consult another table (hy reads a glued cardinal).
+    // The fr plural -s, the gender / declension / apocope of an ordinal.
     let variants = spoken_variants(lang, normalized, ordinal);
-    if variants.is_empty() {
+    if let Some(v) = variants.iter().find_map(|v| tab.get(v)) {
+        return Ok(Some(sign * v));
+    }
+    if ordinal {
         return Ok(None);
     }
-    let t = tables().read().unwrap();
-    Ok(t.get(&key)
-        .and_then(|tab| variants.iter().find_map(|v| tab.get(v)))
-        .map(|v| sign * v))
+    // Gender / construct / attributive forms and glued connectors (ru "две",
+    // he "שני" before מיליון, ar "وواحد" after a scale word).
+    Ok(w2n_forms::fragment_value(lang, &tab, normalized).map(|(v, _)| sign * v))
 }
 
 /// A word (or words) a language puts in front of a number to make it negative,
@@ -475,6 +476,15 @@ pub fn strip_sign<'a>(lang: &str, normalized: &'a str) -> Option<(&'a str, bool)
         }
     }
     None
+}
+
+/// Run `f` on the cardinal reverse table of `lang`, building it first if needed.
+/// No lock is held while `f` runs.
+pub(crate) fn with_cardinal_table<R>(lang: &str, f: impl FnOnce(&ReverseTable) -> R) -> Option<R> {
+    if !is_supported_lang(lang) {
+        return None;
+    }
+    table(lang, false).ok().map(|t| f(&t))
 }
 
 /// The spoken variants of `normalized` worth a second table probe: the fr
@@ -1126,25 +1136,10 @@ fn lookup_plain(lang: &str, text: &str) -> Option<i64> {
     lookup(lang, text, false, &[]).ok().flatten()
 }
 
-/// Connector/particle words that may sit between number groups and must be
-/// stripped from a fragment's edges before lookup: es « y », pt/it « e »,
-/// ro « de » (« nouă **de** mii »), etc. Keyed by language prefix.
+/// Connector words stripped from a fragment's edges (es « y », fa « و »):
+/// see [`w2n_forms::connectors`].
 fn connector_words(lang: &str) -> &'static [&'static str] {
-    let base = lang.split(&['_', '-'][..]).next().unwrap_or(lang);
-    match base {
-        "es" | "gl" => &["y", "e"],
-        "pt" | "it" => &["e"],
-        "fr" => &["et"],
-        "ca" => &["i"],
-        "de" => &["und"],
-        "nl" | "af" => &["en"],
-        "ro" => &["si", "și", "de"],
-        "pl" => &["i"],
-        "en" => &["and"],
-        "ff" => &["e"], // "ujunere sappo e ɗiɗi" = 12000
-        "sw" => &["na"], // "elfu kumi na mbili" = 12000
-        _ => &[],
-    }
+    w2n_forms::connectors(lang)
 }
 
 /// Strip leading/trailing connector tokens from a fragment.
@@ -1191,6 +1186,9 @@ pub fn parse_scaled_norm(lang: &str, norm: &str) -> Option<i64> {
             (None, None) => return None,
         },
     };
+    if w2n_forms::has_rival_reading(lang, v, norm) {
+        return None; // bm "ba tan ni kelen": 10001 and 11000 render alike
+    }
     // Where the multiplier may follow the scale word (ha, ff, sw, sn, bm, tet,
     // eu), a spelling can split several ways and num2words2 sometimes renders
     // two values alike. Only a reading the renderer spells this way is kept:
@@ -1199,6 +1197,11 @@ pub fn parse_scaled_norm(lang: &str, norm: &str) -> Option<i64> {
         return None;
     }
     Some(v)
+}
+
+/// [`parse_scaled_norm`] without its ambiguity checks, for a fragment.
+pub(crate) fn parse_scaled_norm_unchecked(lang: &str, norm: &str) -> Option<i64> {
+    parse_scaled_inner(lang, norm, &scales_of(lang), connector_words(lang))
 }
 
 /// The article that is also "one" in front of a scale word, for languages whose table
@@ -1360,7 +1363,15 @@ fn glued_at(lang: &str, tok: &str, pos: usize, len: usize, mag: i64, sc: &Scales
             let one = lookup_plain(lang, "一").filter(|v| *v == 1).map(|_| "一")?;
             glued_number(lang, filled?.strip_prefix(one)?, sc).filter(|v| (10..20).contains(v))
         };
-        let low = glued_number(lang, filled.unwrap_or(suf), sc).or_else(tens_one)?;
+        // rm "dieschmilliedin" = 10001: the connector "ed" sits between the
+        // morpheme and "in", and only "milliedin" (1001) is a table word.
+        let with_morpheme = || {
+            filled.is_none().then_some(())?;
+            lookup_plain(lang, &tok[pos..]).map(|v| v - mag).filter(|v| *v > 0)
+        };
+        let low = glued_number(lang, filled.unwrap_or(suf), sc)
+            .or_else(tens_one)
+            .or_else(with_morpheme)?;
         if filled.is_some() && low >= mag / 10 {
             return None;
         }
@@ -1551,7 +1562,9 @@ fn parse_scaled_inner(lang: &str, text: &str, sc: &Scales, conns: &[&str]) -> Op
             // ha "dubu sha biyu ɗari uku ..." : the longest multiplier that
             // leaves a remainder below the scale. A multiplier of 1000 or more
             // only ends the number: tet "miliaun rihun ida" = 10^6 · 1000.
-            if sc.postfix.iter().any(|w| w == word) {
+            if sc.postfix.iter().any(|w| w == word)
+                && !w2n_forms::opens_with_connector(lang, after.first())
+            {
                 for j in (1..=after.len()).rev() {
                     let m = trim_connectors(&after[..j].join(" "), conns);
                     let ends = j == after.len();
