@@ -249,9 +249,16 @@ What it reads:
   ``"negentien negenennegentig"``) and **digit strings** read one digit at a
   time in every language (phone numbers, ZIP codes, ``"double zero
   seven"``), leading zeros kept.
-* **Decimals** with the language's separator word: en ``"point"``, fr
-  ``"virgule"``, es ``"coma"`` / ``"punto"``, de/nl ``"komma"``, written with
-  that separator (``"3,5"``).
+* **Decimals** the way num2words writes them in each language, read from its
+  own ``to_cardinal_float`` output: a separator word (en ``"point"``, fr
+  ``"virgule"``, es ``"coma"`` / ``"punto"``, sv ``"komma"``, hi ``"दशमलव"``,
+  ko ``"점"``), or a whole-word and a denominator (ru ``"три целых
+  четырнадцать сотых"``, hu ``"három egész tizennégy század"``), written with
+  the locale's decimal character (``"3,5"``). The fraction may be digits
+  read one by one or one number below 1000 (fr ``"trois virgule zéro
+  vingt-cinq"`` -> ``"3,025"``). ``words2num`` reads them too, as a
+  ``Decimal``, including separators glued into one word (ja ``"三点一四"``,
+  tr ``"üçvirgülondört"``).
 * **Ordinals**, written in the language's figures: ``21st``, fr ``1er`` /
   ``2e``, es ``3º`` / ``20ª``, de ``2.``, nl ``15e``.
 * **Percent phrases**: ``"vingt pour cent"`` -> ``"20 pour cent"`` (the
@@ -307,7 +314,23 @@ front stays a word (``"des euros"``, ``"a couple of dollars"``), and so does an
 amount on a scale word (``"2.5 million dollars"``). Currencies: USD, EUR, GBP,
 JPY, CNY, CHF, CAD (fr ``5 $ CA``, the OQLF form), AUD, NZD, MXN and the
 unqualified peso (``$``), BRL, INR, KRW, RUB, TRY, PLN, SEK/NOK/DKK, XOF, MAD,
-ZAR, with their names and subunits in en, fr, es, de, it, pt, nl and ca.
+ZAR, with their names and subunits in en, fr, es, de, it, pt, nl and ca —
+every name num2words writes for them, plus the colloquial ones (``bucks``,
+``quid``). A subunit of 100 or more carries (``"one hundred fifty cents"`` ->
+``"$1.50"``); a spoken fraction longer than the currency's minor unit, or a
+subunit after an amount that was not folded, is left as said rather than
+truncated or given a currency nobody named. ``"pounds of"`` is a weight.
+
+``words2num(text, to="currency")`` returns the amount itself as a ``Decimal``,
+unit plus subunit, for any language whose num2words currency names it knows::
+
+    >>> words2num("twelve euros, thirty-four cents", to="currency")
+    Decimal('12.34')
+    >>> words2num("zwei Euro", lang="de", to="currency")
+    Decimal('2')
+
+Text with no currency word is read as a plain cardinal; text with one that is
+not an amount (``"twelve euros and change"``) raises ``Words2NumError``.
 
 Auto-parse mode
 ---------------
@@ -324,11 +347,11 @@ SI/imperial units, percent, and disambiguation hints.
 
     # Currencies
     >>> auto_parse("$12,345.00")
-    Quantity(value=12345.0, unit='USD', kind='currency', confidence=1.0)
+    Quantity(value=Decimal('12345.00'), unit='USD', kind='currency', confidence=1.0)
     >>> auto_parse("$5m").value
     5000000
     >>> auto_parse("12,50 €", lang="de").value
-    12.5
+    Decimal('12.50')
 
     # Units
     >>> auto_parse("5cm")
@@ -340,9 +363,9 @@ SI/imperial units, percent, and disambiguation hints.
 
     # Configurable separators
     >>> auto_parse("1.234,56", lang="de").value
-    1234.56
+    Decimal('1234.56')
     >>> auto_parse("1 234,56", lang="fr").value
-    1234.56
+    Decimal('1234.56')
 
     # Disambiguation for ambiguous unit tokens
     >>> auto_parse("5m", prefer={"m": "mile"}).unit_long
@@ -372,29 +395,42 @@ or rely on per-locale CLDR-style defaults:
     >>> from words2num2 import parse_number_string
 
     >>> parse_number_string("12,345.67")                              # auto-detect
-    12345.67
+    Decimal('12345.67')
     >>> parse_number_string("12.345,67", lang="de")                   # German defaults
-    12345.67
+    Decimal('12345.67')
     >>> parse_number_string("1 234,56", lang="fr")                    # French defaults (NBSP)
-    1234.56
+    Decimal('1234.56')
+    >>> parse_number_string("3.14", lang="fr")                        # a dot decimal anywhere
+    Decimal('3.14')
     >>> parse_number_string("12'345.67", thousands_sep="'", decimal_sep=".")  # Swiss
-    12345.67
+    Decimal('12345.67')
     >>> parse_number_string("1_234.56", thousands_sep="_")            # programmer
-    1234.56
+    Decimal('1234.56')
+
+A decimal is an exact ``Decimal``; a whole number is an ``int``.
 
 The locale defaults table covers 50+ locales: English/CJK use comma
 thousands and period decimal; French uses non-breaking-space + comma;
 Swiss French uses apostrophe + period; German/Spanish/Italian/Portuguese/
 Dutch/Romanian use period + comma; Russian/Scandinavian/Slavic use space
-+ comma. See `words2num2/formats.py` for the full table.
++ comma. See ``NUMBER_FORMAT_DEFAULTS`` in
+``rust/words2num2-core/src/w2n_formats.rs`` for the full table. A locale
+is read strictly — its thousands separator only between groups of exactly
+three digits — and anything that does not fit is auto-detected.
 
-Auto-detection heuristic (when no override and no locale match):
+Auto-detection heuristic (when no override, no locale match, or the locale
+reading does not fit):
 
-1. If both ``.`` and ``,`` appear, the rightmost one is the decimal.
-2. If one separator appears multiple times, it is thousands.
-3. If one separator appears once with exactly 3 trailing digits, it is
-   thousands; otherwise it is decimal.
-4. Spaces, NBSP, apostrophe, and underscore are always thousands.
+1. Spaces, NBSP, apostrophes (``'``, ``’``) and underscore are always
+   thousands.
+2. If both ``.`` and ``,`` appear, the rightmost one is the decimal and the
+   other groups thousands in threes.
+3. If one separator appears several times, it is thousands — in groups of
+   three, or the string is not a number (``"1.5.2026"`` raises).
+4. If one separator appears once it is a decimal (``"3.14"``, ``"1,5"``,
+   ``"1234.567"``), except 1-3 digits + separator + exactly 3 digits
+   (``"1.234"``): there the locale's decimal separator decides, and with no
+   locale it is a decimal.
 
 Command line
 ------------

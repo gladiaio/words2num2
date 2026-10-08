@@ -114,19 +114,25 @@ or currency — and return a structured [`Quantity`](#quantity).
 |---|---|---|---|
 | `text` | `str` | — | Quantity expression. |
 | `lang` | `str` | `"en"` | Locale for word-form fallback and locale-default separators. |
-| `prefer` | `Optional[Dict[str, str]]` | `None` | Disambiguation hints for unit tokens. Example: `{"m": "mile"}`. |
-| `thousands_sep` | `Optional[str]` | `None` | Override locale default. |
+| `prefer` | `Optional[Dict[str, str]]` | `None` | Disambiguation hints for unit tokens, by long or short form. Example: `{"m": "mile"}`. The preferred unit replaces the whole reading (`unit`, `unit_long`, `kind`). Only a real alternative reading of the token is honoured (`m` → minute or mile, `°` → Celsius or Fahrenheit); any other target is ignored. |
+| `thousands_sep` | `Optional[str]` | `None` | Override locale default. Must differ from `decimal_sep`. |
 | `decimal_sep` | `Optional[str]` | `None` | Override locale default. |
 
-**Returns** — [`Quantity`](#quantity).
+**Returns** — [`Quantity`](#quantity). A digit-form decimal is an exact
+`decimal.Decimal`; a scale suffix shifts the decimal point
+(`"$4.1bn"` → `4100000000`).
 
-**Raises** — `Words2NumError` if the input cannot be parsed.
+**Raises** — `NotImplementedError` if `lang` is not supported;
+`Words2NumError` (a `ValueError`) if the input cannot be parsed or
+`thousands_sep == decimal_sep`. Scale suffixes are `k`, `m`, `b`, `t` in either
+case, and `mn`/`bn`/`tn` in any case; anything else (`"$5kn"`) is a
+`Words2NumError`.
 
 **Examples**
 
 ```python
 >>> auto_parse("$12,345.00")
-Quantity(value=12345.0, unit='USD', kind='currency', confidence=1.0)
+Quantity(value=Decimal('12345.00'), unit='USD', kind='currency', confidence=1.0)
 
 >>> auto_parse("$5m").value
 5000000
@@ -138,10 +144,13 @@ Quantity(value=5, unit='cm', kind='length', confidence=1.0)
 42
 
 >>> auto_parse("12,50 €", lang="de").value
-12.5
+Decimal('12.50')
 
 >>> auto_parse("5m", prefer={"m": "mile"}).unit_long
 'mile'
+
+>>> auto_parse("5m", prefer={"m": "minute"}).kind
+'time'
 ```
 
 ---
@@ -162,7 +171,9 @@ between matches is preserved.
 | `decimal_sep` | `Optional[str]` | `None` | Override locale default. |
 | `expand` | `bool` | `False` | If `True`, render the long unit form with English plural rules (`12.5 dollars`); otherwise render the canonical short form (`12.5 USD`). |
 
-**Returns** — `str`.
+**Returns** — `str`. Numbers are written without trailing fraction zeros
+(`12.5 USD`). A span that cannot be parsed is left verbatim; an unsupported
+`lang` or `thousands_sep == decimal_sep` raises before any span is read.
 
 **Examples**
 
@@ -191,19 +202,28 @@ Parse a digit-form numeric string with configurable separators.
 
 **Resolution order:**
 
-1. If `thousands_sep` and/or `decimal_sep` are given, use them.
-2. Otherwise if `lang` matches a known locale, use its defaults from
-   [`NUMBER_FORMAT_DEFAULTS`](#number_format_defaults).
-3. Otherwise auto-detect from the string itself.
+1. If `thousands_sep` and/or `decimal_sep` are given, use them. They must
+   differ, and neither may be a digit (`Words2NumError` otherwise).
+2. Otherwise if `lang` (or its base language: `pt-BR` → `pt_BR`, `es-MX` →
+   `es`) has a row in [`NUMBER_FORMAT_DEFAULTS`](#number_format_defaults),
+   read the string strictly in that locale: the thousands separator only
+   between groups of exactly three digits, the decimal separator at most once.
+3. Otherwise — an unknown `lang`, no `lang`, or a string the locale reading
+   does not fit — auto-detect from the string itself.
 
 **Auto-detect heuristic:**
 
-- If both `.` and `,` appear, the rightmost one is the decimal.
-- If one separator appears multiple times, it is thousands.
-- If one separator appears once with exactly 3 trailing digits, it
-  is thousands; otherwise it is decimal.
-- Spaces (incl. NBSP/NNBSP/THIN_SPACE), apostrophe, and underscore
+- Spaces (incl. NBSP/NNBSP/THIN_SPACE), apostrophes (`'`, `’`), and underscore
   are always thousands.
+- If both `.` and `,` appear, the rightmost one is the decimal; the other
+  must group thousands in threes.
+- If one separator appears several times, it is thousands — in groups of
+  three, or the string is not a number (`"1.5.2026"` raises).
+- If one separator appears once, it is a decimal (`"3.14"`, `"1,5"`,
+  `"1234.567"`), except 1–3 digits + separator + exactly 3 digits
+  (`"1.234"`), which is ambiguous: the locale's decimal separator decides
+  (`"1.234"` is 1234 in `fr`/`de`, 1.234 in `en`); with no locale it is a
+  decimal.
 
 **Parameters**
 
@@ -214,7 +234,9 @@ Parse a digit-form numeric string with configurable separators.
 | `decimal_sep` | `Optional[str]` | `None` | Explicit decimal separator. |
 | `lang` | `Optional[str]` | `None` | Locale for default separators. |
 
-**Returns** — `int` if the string represents an integer, `float` otherwise.
+**Returns** — `int` if the string represents an integer, an exact
+`decimal.Decimal` otherwise (the digits as written: `"12.50"` →
+`Decimal('12.50')`).
 
 **Raises** — `Words2NumError`.
 
@@ -222,17 +244,21 @@ Parse a digit-form numeric string with configurable separators.
 
 ```python
 >>> parse_number_string("12,345.67")
-12345.67
+Decimal('12345.67')
 >>> parse_number_string("12.345,67", lang="de")
-12345.67
+Decimal('12345.67')
 >>> parse_number_string("1 234,56", lang="fr")
-1234.56
+Decimal('1234.56')
+>>> parse_number_string("3.14", lang="fr")
+Decimal('3.14')
+>>> parse_number_string("1.234", lang="fr")
+1234
 >>> parse_number_string("12'345.67", thousands_sep="'", decimal_sep=".")
-12345.67
+Decimal('12345.67')
 >>> parse_number_string("1_234.56", thousands_sep="_")
-1234.56
+Decimal('1234.56')
 >>> parse_number_string("-12,345.67")
--12345.67
+Decimal('-12345.67')
 ```
 
 ---
@@ -435,7 +461,7 @@ The `to=` parameter on `words2num` accepts:
 | `"ordinal"` | Position. | `"twenty-first"` → `21` |
 | `"ordinal_num"` | Digit-form ordinal. | `"21st"` → `21` |
 | `"year"` | Year-pair shorthand. | `"nineteen ninety nine"` → `1999` |
-| `"currency"` | Currency expression. | `"twelve dollars and fifty cents"` → varies by locale |
+| `"currency"` | An amount: `<number> <unit> [<connector>] [<number> [<subunit>]]` or `<number> <subunit>`, returned as a `Decimal` (unit + subunit). Text with no currency word is read as a cardinal; a currency word that is not an amount raises. | `"twelve dollars and fifty cents"` → `Decimal('12.50')`; `"zwei Euro"` (de) → `Decimal('2')` |
 | `"digits"` | A number read one digit at a time (codes, phone numbers). | `"two seven five"` → `275` |
 
 Unsupported values raise `NotImplementedError`.

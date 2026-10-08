@@ -78,7 +78,13 @@ def test_year():
 def test_digits_passthrough():
     assert words2num("42") == 42
     assert words2num("-17") == -17
-    assert words2num("3.14") == 3.14
+    # A decimal in figures is an exact Decimal, like a spoken one (#71).
+    assert words2num("3.14") == Decimal("3.14")
+    # Thousands separators group, they do not split the number (#59).
+    assert words2num("1,234") == 1234
+    assert words2num("12,345", to="ordinal") == 12345
+    assert words2num("1 000") == 1000
+    assert words2num("2,000", to="year") == 2000
 
 
 def test_unknown_token_raises():

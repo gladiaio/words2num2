@@ -21,15 +21,63 @@ use std::sync::{Arc, OnceLock, RwLock};
 mod ord_compose;
 pub mod ord_forms;
 pub mod w2n_currency;
+pub mod w2n_decimal;
 pub mod w2n_formats;
 pub mod w2n_forms;
 pub mod w2n_lang_en;
 pub mod w2n_sentence;
 
-/// The public single-token entry point (`words2num2.words2num`), re-exported at
-/// the crate root. Its dispatch — `_resolve_lang`, the en-vs-reverse-table
-/// choice, and the `to` mode selection — lives in [`w2n_sentence`].
-pub use w2n_sentence::words2num;
+/// The public single-token entry point (`words2num2.words2num`). Its dispatch
+/// — `_resolve_lang`, the en-vs-reverse-table choice, and the `to` mode
+/// selection — lives in [`w2n_sentence::words2num`].
+///
+/// A number written in figures ("1,234", "1.234", "2,5", "1 000") is read here
+/// first, with the language's own separators ([`w2n_formats`]): the word
+/// grammars split it at the separator and summed the groups, so en "1,234"
+/// came out as 235 and de "1.234" as 1.234 (#59, #60). Decimals come back as
+/// an exact `Decimal`, the same type a spoken decimal gets (#71).
+pub fn words2num(
+    text: &str,
+    lang: &str,
+    to: &str,
+) -> Result<w2n_lang_en::W2nValue, w2n_sentence::W2nError> {
+    if matches!(to, "cardinal" | "ordinal" | "year" | "currency") && is_digit_literal(text) {
+        let resolved = w2n_sentence::resolve_lang(lang)?;
+        return match w2n_formats::parse_number_string(text, None, None, Some(&resolved)) {
+            Ok(w2n_formats::W2nValue::Int(i)) => Ok(w2n_lang_en::W2nValue::Int(i)),
+            Ok(w2n_formats::W2nValue::Dec(d)) => {
+                Ok(w2n_lang_en::W2nValue::Dec(w2n_lang_en::PyDec::from_bigdecimal(&d)))
+            }
+            Ok(w2n_formats::W2nValue::Float(f)) => Ok(w2n_lang_en::W2nValue::Float(f)),
+            Err(e) => Err(w2n_sentence::W2nError::Words2Num(e.0)),
+        };
+    }
+    w2n_sentence::words2num(text, lang, to)
+}
+
+/// Is `text` a number in figures and nothing else: an optional sign, then
+/// digits and the separators a number is written with (`.`, `,`, `'`, `’`,
+/// `_`, spaces), starting and ending on a digit? Space-separated groups must
+/// be thousands groups ("1 000", "1 234,5"), so "1 2" or "12 34" — two
+/// numbers side by side — is not one and is left to the word grammar.
+fn is_digit_literal(text: &str) -> bool {
+    let t = text.trim();
+    let body = t.strip_prefix(['-', '+']).map(str::trim_start).unwrap_or(t);
+    let is_digit = |c: char| c.is_numeric() && w2n_sentence::digit_value(c).is_some();
+    let is_sep = |c: char| matches!(c, '.' | ',' | '\'' | '\u{2019}' | '_') || c.is_whitespace();
+    let (Some(first), Some(last)) = (body.chars().next(), body.chars().last()) else {
+        return false;
+    };
+    if !is_digit(first) || !is_digit(last) || !body.chars().all(|c| is_digit(c) || is_sep(c)) {
+        return false;
+    }
+    let mut groups = body.split(char::is_whitespace).filter(|g| !g.is_empty());
+    groups.next();
+    groups.all(|g| {
+        let lead: usize = g.chars().take_while(|&c| is_digit(c)).count();
+        lead == 3 && g.chars().nth(3).is_none_or(|c| matches!(c, '.' | ','))
+    })
+}
 
 /// Python's `Words2Num_Base.LOOKUP_RANGE`, without its -1: a sign is stripped
 /// before any lookup (see [`strip_sign`]), and a table entry "minus one" made
@@ -2760,5 +2808,49 @@ mod year_mode_tests {
         assert_eq!(card("one million", "en_IN"), Some(1_000_000));
         assert_eq!(card("one lakh", "en_IN"), Some(100_000));
         assert_eq!(card("twelve lakh", "en_IN"), Some(1_200_000));
+    }
+}
+
+/// Numbers written in figures, read with the language's separators (#59, #60).
+#[cfg(test)]
+mod digit_literal_tests {
+    use super::words2num;
+    use crate::w2n_lang_en::W2nValue;
+    use num_bigint::BigInt;
+
+    fn int(n: i64) -> W2nValue {
+        W2nValue::Int(BigInt::from(n))
+    }
+    fn dec(v: &W2nValue) -> String {
+        match v {
+            W2nValue::Dec(d) => d.to_string(),
+            other => panic!("expected a Decimal, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn en_thousands_groups_are_not_summed() {
+        assert_eq!(words2num("1,234", "en", "cardinal").unwrap(), int(1234));
+        assert_eq!(words2num("12,345", "en", "ordinal").unwrap(), int(12345));
+        assert_eq!(words2num("1 000", "en", "cardinal").unwrap(), int(1000));
+        assert_eq!(words2num("2,000", "en", "year").unwrap(), int(2000));
+        assert_eq!(words2num("1,000,000", "en", "cardinal").unwrap(), int(1_000_000));
+        assert_eq!(words2num("-17", "en", "cardinal").unwrap(), int(-17));
+        assert_eq!(dec(&words2num("3.14", "en", "cardinal").unwrap()), "3.14");
+    }
+
+    #[test]
+    fn locale_separators() {
+        assert_eq!(words2num("1.234", "de", "cardinal").unwrap(), int(1234));
+        assert_eq!(words2num("1.234", "es", "cardinal").unwrap(), int(1234));
+        assert_eq!(dec(&words2num("2,5", "de", "cardinal").unwrap()), "2.5");
+        assert_eq!(dec(&words2num("1 234,5", "fr", "cardinal").unwrap()), "1234.5");
+    }
+
+    #[test]
+    fn two_numbers_side_by_side_are_not_one() {
+        // Not a grouped number: left to the word grammar, never 12 or 1234.
+        assert_ne!(words2num("12 34", "en", "cardinal").ok(), Some(int(1234)));
+        assert!(words2num("1.5.2026", "en", "cardinal").is_err());
     }
 }
