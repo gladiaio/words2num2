@@ -27,11 +27,14 @@
 //!   is not a run head. Same for `"a hundred and one dogs"` → `"a 101 dogs"`.
 //! * `words2num_sentence("point five")` → `"0.5"`. `to_cardinal("point")`
 //!   returns `Decimal(0)` rather than raising, so "point" *is* a valid head.
-//! * `words2num_sentence("\"forty-two\"")` → `"42\""`. Only *trailing*
-//!   punctuation is stripped, and the trailing quote is re-appended.
+//! * `words2num_sentence("\"forty-two\"")` used to be `"42\""`: only
+//!   *trailing* punctuation was stripped. Leading punctuation is now split off
+//!   and kept (`"\"42\""`, #69).
 //! * `words2num_sentence("zero point zero zero zero zero zero zero one")`
-//!   → `"1E-7"` — Python's `Decimal.__str__` flips to scientific notation
-//!   once the adjusted exponent drops below -6. See [`py_decimal_str`].
+//!   used to be `"1E-7"` — Python's `Decimal.__str__` flips to scientific
+//!   notation once the adjusted exponent drops below -6. Text output is now
+//!   positional (`"0.0000001"`, #202, [`W2nValue::text_str`]); the *value*
+//!   keeps Python's `str()` ([`py_decimal_str`]).
 //! * `auto_parse("$5kn")` raises **KeyError**, not `Words2NumError`: the
 //!   regex accepts `[kKmMbBtT][nN]?` but `SCALE_SUFFIXES` only holds
 //!   `k K m M b B bn t T tn`. It escapes `auto_parse_sentence` uncaught
@@ -44,6 +47,9 @@
 //!   the lookup token comes from `rsplit(None, 1)`, so it never contains one.
 //! * The `°[CF]?` alternative appears **twice** in `_try_digit_unit`'s regex.
 //!   Harmless; the second is dead. Kept in the comment, folded in the code.
+
+mod lexicon;
+mod tokens;
 
 use bigdecimal::num_traits::FromPrimitive;
 use bigdecimal::BigDecimal;
@@ -64,7 +70,9 @@ pub enum W2nError {
     Words2Num(String),
     /// `NotImplementedError` — raised by `_resolve_lang`.
     NotImplemented(String),
-    /// `KeyError` — `SCALE_SUFFIXES[scale_str]` misses (e.g. `"$5kn"`).
+    /// `KeyError`. No longer produced: an unknown scale suffix (`"$5kn"`) is a
+    /// `Words2Num` error, so `auto_parse_sentence` leaves the span verbatim
+    /// instead of aborting (#194). Kept so the binder's mapping stays total.
     /// Python's `KeyError` stringifies as `repr(key)`, hence the odd quoting.
     Key(String),
 }
@@ -110,6 +118,31 @@ impl W2nValue {
             W2nValue::Dec(d) => {
                 let (digits, scale) = d.as_bigint_and_exponent();
                 py_decimal_str(&digits, scale)
+            }
+        }
+    }
+
+    /// The value as it is written into running text: positional notation,
+    /// never an exponent (#202). `py_str` copies Python's `str()`, which turns
+    /// `Decimal("0.0000001")` into `"1E-7"` and `1e-07` for a float; a text
+    /// normaliser must write `0.0000001`. The value itself (`py_repr`) is
+    /// untouched.
+    pub fn text_str(&self) -> String {
+        match self {
+            W2nValue::Int(i) => i.to_string(),
+            W2nValue::Float(f) => {
+                let r = py_float_repr(*f);
+                if r.contains('e') {
+                    // Rust's `Display` is the shortest round-trip digits in
+                    // positional form (1e-7 -> "0.0000001").
+                    format!("{}", f)
+                } else {
+                    r
+                }
+            }
+            W2nValue::Dec(d) => {
+                let (digits, scale) = d.as_bigint_and_exponent();
+                decimal_positional_str(&digits, scale)
             }
         }
     }
@@ -312,6 +345,27 @@ pub fn py_decimal_str(digits: &BigInt, scale: i64) -> String {
     )
 }
 
+/// `format(Decimal, "f")`: the coefficient with the point placed by the
+/// exponent, never in scientific notation. Keeps the unnormalised scale, so
+/// `Decimal("2.50")` stays `"2.50"`.
+pub fn decimal_positional_str(digits: &BigInt, scale: i64) -> String {
+    let neg = digits.sign() == num_bigint::Sign::Minus;
+    let int_str = digits.magnitude().to_string();
+    let body = if scale <= 0 {
+        format!("{}{}", int_str, "0".repeat((-scale) as usize))
+    } else {
+        let scale = scale as usize;
+        let padded = if int_str.len() <= scale {
+            format!("{}{}", "0".repeat(scale + 1 - int_str.len()), int_str)
+        } else {
+            int_str
+        };
+        let cut = padded.len() - scale;
+        format!("{}.{}", &padded[..cut], &padded[cut..])
+    };
+    format!("{}{}", if neg { "-" } else { "" }, body)
+}
+
 // ===========================================================================
 // Unicode / Python text primitives
 // ===========================================================================
@@ -431,8 +485,23 @@ fn py_rstrip_char(s: &str, ch: char) -> &str {
 }
 
 /// `re.sub(r"[\.,;:!\?\"']+$", "", s)` — drop the trailing punctuation run.
+///
+/// Also the script-native marks and closing brackets/quotes `normalize` folds
+/// to a space (#121): "पाँच।" reads 5 and keeps its danda, "five)" its bracket.
 fn rstrip_punct(s: &str) -> &str {
-    s.trim_end_matches(['.', ',', ';', ':', '!', '?', '"', '\''])
+    s.trim_end_matches(|c: char| {
+        matches!(c, '.' | ',' | ';' | ':' | '!' | '?' | '"' | '\'' | '\u{2019}')
+            || crate::is_clause_punctuation(c)
+    })
+}
+
+/// The piece opens with a bracket, quote or other mark `normalize` drops
+/// ("(five)", "«six»", "‘seven’"). Re-emitting the value would lose it, so the
+/// walker leaves such a piece as written.
+fn opens_with_punct(s: &str) -> bool {
+    s.chars().next().is_some_and(|c| {
+        crate::is_clause_punctuation(c) || matches!(c, '\u{2018}' | '\u{201B}' | '`')
+    })
 }
 
 /// `re.search(r"[\.,;:!\?\"']+$", s)` → `m.group()`, or `""`.
@@ -530,24 +599,78 @@ fn is_known_lang(k: &str) -> bool {
     converter_langs().contains(&k)
 }
 
-/// Port of `words2num2._resolve_lang`.
+/// ISO 639-2 three-letter codes (bibliographic and terminological forms) of
+/// the two-letter keys, for callers that pass `"eng"`, `"fra"` or `"ger"`.
 ///
-/// ```python
-/// if lang in CONVERTER_CLASSES: return lang
-/// normalized = lang.replace("-", "_")
-/// if normalized in CONVERTER_CLASSES: return normalized
-/// parts = normalized.split("_")
-/// if len(parts) >= 2:
-///     candidate = "{}_{}".format(parts[0].lower(), parts[1].upper())
-///     if candidate in CONVERTER_CLASSES: return candidate
-///     if parts[0] in CONVERTER_CLASSES: return parts[0]
-/// if normalized[:2] in CONVERTER_CLASSES: return normalized[:2]
-/// raise NotImplementedError("language %r is not supported" % lang)
-/// ```
+/// This replaces the old "first two characters" fallback, which got `"eng"`
+/// right by accident and everything else wrong: `"swedish"` resolved to `sw`
+/// (Swahili), `"estonian"` to `es`, `"kazakh"` to `ka` (Georgian) and `"enx"`
+/// to `en`, so input in the language the caller meant raised, or a word of the
+/// accidental language was read as a number. An explicit table only answers
+/// for codes that really name the language.
+const ISO_639_2_ALIASES: &[(&str, &str)] = &[
+    ("afr", "af"), ("amh", "am"), ("ara", "ar"), ("asm", "as"), ("aze", "az"),
+    ("bak", "ba"), ("bel", "be"), ("bul", "bg"), ("bam", "bm"), ("ben", "bn"),
+    ("bod", "bo"), ("tib", "bo"), ("bre", "br"), ("bos", "bs"), ("cat", "ca"),
+    ("che", "ce"), ("ces", "cs"), ("cze", "cs"), ("cym", "cy"), ("wel", "cy"),
+    ("dan", "da"), ("deu", "de"), ("ger", "de"), ("div", "dv"), ("ell", "el"),
+    ("gre", "el"), ("eng", "en"), ("epo", "eo"), ("spa", "es"), ("est", "et"),
+    ("eus", "eu"), ("baq", "eu"), ("fas", "fa"), ("per", "fa"), ("ful", "ff"),
+    ("fin", "fi"), ("fao", "fo"), ("fra", "fr"), ("fre", "fr"), ("glg", "gl"),
+    ("guj", "gu"), ("hau", "ha"), ("heb", "he"), ("hin", "hi"), ("hrv", "hr"),
+    ("hat", "ht"), ("hun", "hu"), ("hye", "hy"), ("arm", "hy"), ("ind", "id"),
+    ("isl", "is"), ("ice", "is"), ("ita", "it"), ("jpn", "ja"), ("jav", "jv"),
+    ("kat", "ka"), ("geo", "ka"), ("kik", "ki"), ("kaz", "kk"), ("khm", "km"),
+    ("kan", "kn"), ("kor", "ko"), ("kur", "ku"), ("kir", "ky"), ("lat", "la"),
+    ("ltz", "lb"), ("lug", "lg"), ("lin", "ln"), ("lao", "lo"), ("lit", "lt"),
+    ("lav", "lv"), ("mlg", "mg"), ("mri", "mi"), ("mao", "mi"), ("mkd", "mk"),
+    ("mac", "mk"), ("mal", "ml"), ("mon", "mn"), ("mar", "mr"), ("msa", "ms"),
+    ("may", "ms"), ("mlt", "mt"), ("mya", "my"), ("bur", "my"), ("nob", "nb"),
+    ("nep", "ne"), ("nld", "nl"), ("dut", "nl"), ("nno", "nn"), ("nor", "no"),
+    ("oci", "oc"), ("orm", "om"), ("ori", "or"), ("pan", "pa"), ("pol", "pl"),
+    ("pus", "ps"), ("por", "pt"), ("roh", "rm"), ("ron", "ro"), ("rum", "ro"),
+    ("rus", "ru"), ("kin", "rw"), ("san", "sa"), ("snd", "sd"), ("sin", "si"),
+    ("slk", "sk"), ("slo", "sk"), ("slv", "sl"), ("sna", "sn"), ("som", "so"),
+    ("sqi", "sq"), ("alb", "sq"), ("srp", "sr"), ("sun", "su"), ("swe", "sv"),
+    ("swa", "sw"), ("tam", "ta"), ("tel", "te"), ("tgk", "tg"), ("tha", "th"),
+    ("tir", "ti"), ("tuk", "tk"), ("tgl", "tl"), ("tur", "tr"), ("tat", "tt"),
+    ("ukr", "uk"), ("urd", "ur"), ("uzb", "uz"), ("vie", "vi"), ("wol", "wo"),
+    ("xho", "xh"), ("yid", "yi"), ("yor", "yo"), ("zho", "zh"), ("chi", "zh"),
+    ("zul", "zu"),
+];
+
+/// The supported key `code` names, ignoring case, or its ISO 639-2 alias.
 ///
-/// `normalized[:2]` is a *character* slice and never panics on a short string
-/// — `_resolve_lang("e")` falls through to the raise, it does not blow up.
-/// That last rule is why `"eng"` resolves to `"en"` and `"en_US"` to `"en"`.
+/// Case-insensitive so `"EN"`, `"Fr"` and `"sr_latn"` resolve like `"en"`,
+/// `"fr"` and `"sr_Latn"`. Two keys differ only by case (`en_Aero_ICAO` and
+/// `en_aero_icao`); both name the same renderer, so taking the first is safe.
+fn known_lang_ci(code: &str) -> Option<&'static str> {
+    let lower = code.to_lowercase();
+    if let Some(k) = converter_langs()
+        .iter()
+        .copied()
+        .find(|k| k.to_lowercase() == lower)
+    {
+        return Some(k);
+    }
+    ISO_639_2_ALIASES
+        .iter()
+        .find(|(alias, _)| *alias == lower)
+        .and_then(|(_, key)| static_lang_key(key))
+}
+
+/// Resolve a caller's language code to a supported key.
+///
+/// 1. An exact key (`"en"`, `"sr_Latn"`, `"en_Aero_FAA"`).
+/// 2. The same with `-` read as `_` (`"pt-BR"`).
+/// 3. A key that matches ignoring case, or an ISO 639-2 code (`"EN"`,
+///    `"pt_br"`, `"eng"`, `"fra"`).
+/// 4. Unknown trailing subtags dropped one at a time, each retried as in 3:
+///    `"en-US"` -> `en`, `"EN_us"` -> `en`, `"sr-Latn-RS"` -> `sr_Latn`.
+///
+/// Anything else, including language *names* (`"swedish"`, `"german"`), is
+/// `NotImplementedError`. There is deliberately no "first two characters"
+/// guess: it turned `"swedish"` into Swahili and `"estonian"` into Spanish.
 pub fn resolve_lang(lang: &str) -> Result<String, W2nError> {
     if is_known_lang(lang) {
         return Ok(lang.to_string());
@@ -556,20 +679,14 @@ pub fn resolve_lang(lang: &str) -> Result<String, W2nError> {
     if is_known_lang(&normalized) {
         return Ok(normalized);
     }
-    // Python's str.split("_") keeps empty fields, unlike split(None).
     let parts: Vec<&str> = normalized.split('_').collect();
-    if parts.len() >= 2 {
-        let candidate = format!("{}_{}", parts[0].to_lowercase(), parts[1].to_uppercase());
-        if is_known_lang(&candidate) {
-            return Ok(candidate);
+    // Empty fields ("en__US", "_en") are not subtags: no guessing there.
+    if !parts.iter().any(|p| p.is_empty()) {
+        for n in (1..=parts.len()).rev() {
+            if let Some(k) = known_lang_ci(&parts[..n].join("_")) {
+                return Ok(k.to_string());
+            }
         }
-        if is_known_lang(parts[0]) {
-            return Ok(parts[0].to_string());
-        }
-    }
-    let two: String = normalized.chars().take(2).collect();
-    if is_known_lang(&two) {
-        return Ok(two);
     }
     Err(W2nError::NotImplemented(format!(
         "language {} is not supported",
@@ -612,6 +729,32 @@ fn converter_for(resolved: &str) -> Converter {
     }
 }
 
+/// Regional English with its own num2words2 table: en_IN (lakh, crore), en_NG,
+/// en_NE, en_NP. Their table holds only the canonical cardinal spelling, so on
+/// its own it misses everything the English grammar reads -- decimals ("three
+/// point one four"), year pairs ("nineteen ninety nine"), "a hundred", "oh",
+/// scales above the table (#193). The table is asked first, so the regional
+/// vocabulary keeps its reading (en_IN "one lakh" = 100000), and the English
+/// grammar takes what the table declines.
+pub(crate) fn en_variant(lang: &str) -> bool {
+    matches!(lang, "en_IN" | "en_NG" | "en_NE" | "en_NP")
+}
+
+/// The English grammar as a fallback for an [`en_variant`] table: `first` is
+/// the table's answer, returned when it parsed (or when `lang` is not a
+/// regional English); otherwise the grammar's, and the table's error when both
+/// decline.
+fn en_variant_fallback(
+    lang: &str,
+    first: Result<W2nValue, W2nError>,
+    grammar: impl FnOnce() -> Result<crate::w2n_lang_en::W2nValue, crate::w2n_lang_en::W2nError>,
+) -> Result<W2nValue, W2nError> {
+    match first {
+        Err(e) if en_variant(lang) => en_convert(grammar()).map_err(|_| e),
+        r => r,
+    }
+}
+
 impl Converter {
     /// `converter.to_cardinal(token)` did not raise? (`_token_is_number_word`).
     fn is_number_word(&self, token: &str) -> bool {
@@ -620,8 +763,38 @@ impl Converter {
             Converter::Table(lang) => {
                 let norm = crate::normalize(token);
                 // Cheap gate first: most words of a transcript are not numbers.
-                (self.apocope(&norm).is_some() || crate::token_may_be_number(lang, &norm))
+                (self.apocope(&norm).is_some()
+                    || crate::token_may_be_number(lang, &norm)
+                    || lexicon::is_alias_word(lang, &norm))
                     && self.to_cardinal(&norm).is_ok()
+                    // he "שני" is 2 only in front of מיליון, ar "وواحد" only after a scale.
+                    && (self.apocope(&norm).is_some()
+                        || crate::lookup_hundred_prefix_norm(lang, &norm).is_some()
+                        || !crate::w2n_forms::is_bound_form(lang, &norm))
+            }
+        }
+    }
+
+    /// A word read as a number only inside a longer one (see [`Self::is_number_part`]).
+    fn is_bound(&self, token: &str) -> bool {
+        match self {
+            Converter::En => false,
+            Converter::Table(lang) => {
+                let norm = crate::normalize(token);
+                self.apocope(&norm).is_none() && crate::w2n_forms::is_bound_form(lang, &norm)
+            }
+        }
+    }
+
+    /// A word that is a number only as part of a longer one: a multiplier form
+    /// (he "שני" מיליון), a combining form (kn "ನೂರ", mn "дөчин"), a glued "and"
+    /// (ar "وواحد"). It may carry a run on, never make one by itself.
+    fn is_number_part(&self, token: &str) -> bool {
+        match self {
+            Converter::En => false,
+            Converter::Table(lang) => {
+                let norm = crate::normalize(token);
+                crate::w2n_forms::is_number_part(lang, &norm) || crate::w2n_forms::is_bound_form(lang, &norm)
             }
         }
     }
@@ -639,14 +812,18 @@ impl Converter {
     fn to_cardinal(&self, text: &str) -> Result<W2nValue, W2nError> {
         match self {
             Converter::En => en_convert(crate::en_to_cardinal(text)),
-            Converter::Table(lang) => base_convert(lang, text, false),
+            Converter::Table(lang) => {
+                en_variant_fallback(lang, base_convert(lang, text, false), || crate::en_to_cardinal(text))
+            }
         }
     }
 
     fn to_ordinal(&self, text: &str) -> Result<W2nValue, W2nError> {
         match self {
             Converter::En => en_convert(crate::en_to_ordinal(text)),
-            Converter::Table(lang) => base_convert(lang, text, true),
+            Converter::Table(lang) => {
+                en_variant_fallback(lang, base_convert(lang, text, true), || crate::en_to_ordinal(text))
+            }
         }
     }
 
@@ -681,14 +858,32 @@ impl Converter {
     fn to_year(&self, text: &str) -> Result<W2nValue, W2nError> {
         match self {
             Converter::En => en_convert(crate::en_to_year(text)),
-            // `Words2Num_Base.to_year` == `self.to_cardinal`.
-            Converter::Table(lang) => base_convert(lang, text, false),
+            Converter::Table(lang) => {
+                en_variant_fallback(lang, table_year(lang, text), || crate::en_to_year(text))
+            }
         }
     }
 
     /// `Words2Num_Base.to_ordinal_num` — EN inherits it unchanged.
+    ///
+    /// A language whose renderer writes `ordinal_num` in Roman numerals (la)
+    /// or in words (ar, bn) also reads those forms back (#127, #246).
     fn to_ordinal_num(&self, text: &str) -> Result<W2nValue, W2nError> {
-        base_ordinal_num(text)
+        let key = self.n2w_key();
+        let err = match base_ordinal_num(text, key) {
+            Ok(v) => return Ok(v),
+            Err(e) => e,
+        };
+        if text.chars().any(is_unicode_digit) {
+            return Err(err);
+        }
+        match ordinal_num_shape(key) {
+            OrdinalNumShape::Roman => roman_value(text)
+                .map(|n| W2nValue::Int(BigInt::from(n)))
+                .ok_or(err),
+            OrdinalNumShape::Words => self.to_ordinal(text).map_err(|_| err),
+            OrdinalNumShape::Figures => Err(err),
+        }
     }
 
     /// `Words2Num_Base.to_currency` == `self.to_cardinal` (polymorphic, so EN
@@ -702,38 +897,91 @@ impl Converter {
     /// grammar mis-parses these (e.g. "two seven five" → 14); dictated house
     /// numbers, zip codes and phone-style runs are commonly spelled this way.
     ///
-    /// Every whitespace token of the run must be a single-digit number word
-    /// (0-9) in the target language; any non-digit (or 10+) makes this decline
-    /// with `Err`, so the sentence walker falls back to its longest cardinal
-    /// parse and never turns a real cardinal into a digit string.
+    /// The run is read left to right, one digit word (0-9 in the target
+    /// language) at a time:
     ///
-    /// Limitation: the sentence value type is numeric, so a leading zero
-    /// ("zero one" → 01) collapses to its integer (1). Runs whose concatenation
-    /// overflows `i64` also decline (left as words).
+    /// * a digit word may span several tokens -- lus/miz zero is "a awmlo"
+    ///   (#106) -- so up to three tokens are tried, shortest first;
+    /// * a hyphenated token is first read whole -- Wolof 6-9 are the single
+    ///   words "juróom-benn".."juróom-ñeent" (#50) -- and only split on its
+    ///   hyphens ("one-two-three") when that fails;
+    /// * English (and its regional variants) also takes "double"/"triple"
+    ///   before a digit ("double zero seven" → 007) and "o" as zero, as the
+    ///   sentence walker's digit runs do (#190).
+    ///
+    /// Anything else (a non-digit, or 10+) makes this decline with `Err`, so
+    /// the sentence walker falls back to its longest cardinal parse and never
+    /// turns a real cardinal into a digit string. A run of any length is read:
+    /// the digits are concatenated into a `BigInt`, so nothing overflows (#215).
+    ///
+    /// The result is an `int`, so leading zeros are dropped: "zero zero seven"
+    /// is 7 (#195, a deliberate choice -- the return type stays numeric). To
+    /// keep them, convert a sentence instead: `words2num_sentence` writes a
+    /// digit run as its digit string ("call 007").
     fn to_digits(&self, text: &str) -> Result<W2nValue, W2nError> {
-        let dehyphened = text.replace('-', " ");
-        let toks = py_split_whitespace(&dehyphened);
+        let toks = py_split_whitespace(text);
         if toks.is_empty() {
             return Err(W2nError::Words2Num("empty digit run".to_string()));
         }
-        let mut s = String::with_capacity(toks.len());
-        for t in &toks {
-            match self.to_cardinal(t)? {
+        let english = match self {
+            Converter::En => true,
+            Converter::Table(lang) => en_variant(lang),
+        };
+        let not_digit = || W2nError::Words2Num("not a single digit".to_string());
+        // One digit word -> its ASCII digit.
+        let digit = |word: &str| -> Option<char> {
+            if english && word.to_lowercase() == "o" {
+                return Some('0');
+            }
+            match self.to_cardinal(word) {
                 // A single decimal digit stringifies to exactly one ASCII digit
                 // (0-9); anything else (negatives, 10+, floats) declines.
-                W2nValue::Int(d) => {
+                Ok(W2nValue::Int(d)) => {
                     let ds = d.to_string();
                     let b = ds.as_bytes();
-                    if b.len() == 1 && b[0].is_ascii_digit() {
-                        s.push(b[0] as char);
-                    } else {
-                        return Err(W2nError::Words2Num("not a single digit".to_string()));
-                    }
+                    (b.len() == 1 && b[0].is_ascii_digit()).then(|| b[0] as char)
                 }
-                _ => return Err(W2nError::Words2Num("not a single digit".to_string())),
+                _ => None,
             }
+        };
+        let mut s = String::with_capacity(toks.len());
+        let mut repeat = 1usize;
+        let mut k = 0usize;
+        while k < toks.len() {
+            let tok = toks[k];
+            if english && matches!(tok.to_lowercase().as_str(), "double" | "triple") {
+                if repeat > 1 {
+                    return Err(not_digit()); // "double triple"
+                }
+                repeat = if tok.eq_ignore_ascii_case("double") { 2 } else { 3 };
+                k += 1;
+                continue;
+            }
+            let mut read: Option<(String, usize)> = None;
+            for len in 1..=3.min(toks.len() - k) {
+                if let Some(d) = digit(&toks[k..k + len].join(" ")) {
+                    read = Some((d.to_string(), len));
+                    break;
+                }
+            }
+            if read.is_none() && tok.contains('-') {
+                let subs: Vec<&str> = tok.split('-').filter(|t| !t.is_empty()).collect();
+                let ds: Option<String> = subs.iter().map(|t| digit(t)).collect();
+                read = ds.filter(|d| !d.is_empty()).map(|d| (d, 1));
+            }
+            let (ds, len) = read.ok_or_else(not_digit)?;
+            if repeat > 1 && ds.len() != 1 {
+                return Err(not_digit()); // "double one-two"
+            }
+            for _ in 0..repeat {
+                s.push_str(&ds);
+            }
+            repeat = 1;
+            k += len;
         }
-        // BigInt parse — no overflow. (Leading zeros collapse numerically.)
+        if repeat > 1 {
+            return Err(not_digit()); // a trailing "double"
+        }
         let n: BigInt = s
             .parse()
             .map_err(|_| W2nError::Words2Num("bad digit run".to_string()))?;
@@ -826,6 +1074,59 @@ fn base_convert(lang: &str, text: &str, ordinal: bool) -> Result<W2nValue, W2nEr
     // Normalized once here; every reading below works on `norm`.
     let norm = crate::normalize(text);
     let supported = crate::is_supported_lang(lang);
+    // The sign is stripped once, here, and applied to the whole value every
+    // reading composes: "moins un million mille" is -(1001000), not
+    // -1 × 10^6 + 1000, and "minus zwölftausend…" reaches the scale composer
+    // (#61). A glued prefix (th "ติดลบเจ็ด", tr "eksiyedi", #124) yields to an
+    // unsigned reading of the whole token, should one exist.
+    if supported {
+        if let Some((rest, glued)) = crate::strip_sign(lang, &norm) {
+            if glued {
+                if let Ok(v) = base_convert_unsigned(lang, &norm, ordinal) {
+                    return Ok(v);
+                }
+            }
+            if let Some(v) = base_convert_unsigned(lang, rest, ordinal).ok().and_then(negate) {
+                return Ok(v);
+            }
+        }
+    }
+    base_convert_unsigned(lang, &norm, ordinal)
+}
+
+/// `-v` for an int or float reading. The table path never yields a decimal;
+/// should one appear it is declined rather than returned unsigned.
+fn negate(v: W2nValue) -> Option<W2nValue> {
+    match v {
+        W2nValue::Int(i) => Some(W2nValue::Int(-i)),
+        W2nValue::Float(f) => Some(W2nValue::Float(-f)),
+        W2nValue::Dec(_) => None,
+    }
+}
+
+/// [`base_convert`] on normalized text with any sign already stripped.
+fn base_convert_unsigned(lang: &str, norm: &str, ordinal: bool) -> Result<W2nValue, W2nError> {
+    let first = base_convert_as_written(lang, norm, ordinal);
+    if first.is_ok() || ordinal || !crate::is_supported_lang(lang) {
+        return first;
+    }
+    // Declined forms and spelling variants the renderer does not write (ru
+    // "трёх", ar "عشرين", el "εννιά", ro "șaișpe", cs "pětadvacet", vi "ba
+    // mươi tư"): read through the language's aliases, only once every reading
+    // as written has failed (#74, #77, #78, #179, #180). The sign is already
+    // off ("minus трёх" is -3).
+    if let Some(rewritten) = lexicon::alias_rewrite(lang, norm) {
+        if let Ok(v) = base_convert_as_written(lang, &rewritten, false) {
+            return Ok(v);
+        }
+    }
+    first
+}
+
+/// [`base_convert_unsigned`] on the text exactly as written, no aliases.
+fn base_convert_as_written(lang: &str, norm: &str, ordinal: bool) -> Result<W2nValue, W2nError> {
+    let norm = norm.to_string();
+    let supported = crate::is_supported_lang(lang);
     if !ordinal && supported {
         if let Some(canon) = canonical_apocopes_norm(lang, &norm) {
             if let Ok(v) = base_convert(lang, &canon, false) {
@@ -836,8 +1137,29 @@ fn base_convert(lang: &str, text: &str, ordinal: bool) -> Result<W2nValue, W2nEr
     // `_rust_lookup`: guarded on `LANG in _RUST_LANGS`, and any error from the
     // core is swallowed to `None` (`except Exception: return None`).
     if supported {
-        if let Ok(Some(v)) = crate::lookup_norm(lang, &norm, ordinal, &BASE_NEGATIVE_WORDS) {
+        if let Ok(Some(v)) = crate::lookup_norm(lang, &norm, ordinal, &[]) {
             return Ok(W2nValue::Int(BigInt::from(v)));
+        }
+        if ordinal {
+            // A compound ordinal the renderer never writes (cs "dvacátý
+            // první"): every element read through the ordinal table.
+            if let Some(v) = crate::ord_forms::compose(lang, &norm) {
+                return Ok(W2nValue::Int(BigInt::from(v)));
+            }
+            // Above the table: a cardinal head + an ordinal tail, checked
+            // against the renderer (#125).
+            if let Some(v) = crate::ord_compose::compose(lang, &norm) {
+                return Ok(W2nValue::Int(BigInt::from(v)));
+            }
+            // A compound ordinal spoken in parts where num2words glues it:
+            // es "vigésimo cuarto" is "vigesimocuarto", tr "kırk ikinci" is
+            // "kırkikinci" (#70). Only a genuine table hit counts.
+            if norm.contains(' ') {
+                let despaced: String = norm.split_whitespace().collect();
+                if let Ok(Some(v)) = crate::lookup_norm(lang, &despaced, true, &[]) {
+                    return Ok(W2nValue::Int(BigInt::from(v)));
+                }
+            }
         }
         // Composition multi-échelle pour les valeurs hors table (> 10001) :
         // « soixante-neuf mille huit » → 69008. Uniquement en cardinal.
@@ -859,9 +1181,18 @@ fn base_convert(lang: &str, text: &str, ordinal: bool) -> Result<W2nValue, W2nEr
             if norm.contains(' ') {
                 let despaced: String = norm.split_whitespace().collect();
                 if let Ok(Some(v)) =
-                    crate::lookup_norm(lang, &despaced, false, &BASE_NEGATIVE_WORDS)
+                    crate::lookup_norm(lang, &despaced, false, &[])
                 {
                     return Ok(W2nValue::Int(BigInt::from(v)));
+                }
+                // Beyond the table: tr writes "üç yüz bin" spaced where
+                // num2words2 glues "üçyüzbin" (300000). Kept only when the
+                // glued form is exactly the renderer's spelling of the value
+                // (#75).
+                if let Some(v) = crate::parse_scaled_norm(lang, &despaced) {
+                    if lexicon::renders_as(lang, &BigInt::from(v), &despaced) {
+                        return Ok(W2nValue::Int(BigInt::from(v)));
+                    }
                 }
             }
             // Spoken "year" readings (two 2-digit groups, or an explicit/glued
@@ -869,9 +1200,55 @@ fn base_convert(lang: &str, text: &str, ordinal: bool) -> Result<W2nValue, W2nEr
             if let Some(v) = crate::parse_year_norm(lang, &norm) {
                 return Ok(W2nValue::Int(BigInt::from(v)));
             }
+            // Scale words in an oblique, dual or glued form (kn "ಸಾವಿರದ", ar
+            // "مليونان", da "tolvtusinde"), respelled for the scale split.
+            if let Some(respelled) = crate::w2n_forms::scale_spelling(lang, &norm) {
+                if let Ok(v) = base_convert_unsigned(lang, &respelled, false) {
+                    return Ok(v);
+                }
+            }
         }
     }
     parse_literal_norm(&norm)
+}
+
+/// `to="year"` for a reverse-table language. Python's `Words2Num_Base.to_year`
+/// is `to_cardinal`, but many renderers spell a year apart from the cardinal
+/// (a year word, digit by digit, an era: see `lib.rs`, "Year mode"). In
+/// order: the renderer's own year spelling; the cardinal; the cardinal with
+/// the year word dropped (ja "千九百五年"), or with ta's combining thousand;
+/// a digit-by-digit year (zh "一九〇五年"). The cardinal's error is kept
+/// when nothing reads.
+fn table_year(lang: &str, text: &str) -> Result<W2nValue, W2nError> {
+    let norm = crate::normalize(text);
+    if let Some(v) = crate::lookup_year_norm(lang, &norm) {
+        return Ok(W2nValue::Int(BigInt::from(v)));
+    }
+    let err = match base_convert(lang, text, false) {
+        Ok(v) => return Ok(v),
+        Err(e) => e,
+    };
+    let variants = crate::year_variants_norm(lang, &norm);
+    for v in std::iter::once(&norm).chain(variants.iter()) {
+        if let Some(y) = crate::year_digit_string_norm(lang, v) {
+            return Ok(W2nValue::Int(BigInt::from(y)));
+        }
+        if *v == norm {
+            continue;
+        }
+        if let Some(y) = crate::lookup_year_norm(lang, v) {
+            return Ok(W2nValue::Int(BigInt::from(y)));
+        }
+        // A negative cardinal with the year word stripped is not trusted:
+        // as/ba render a BC year as "<year word> <minus> <number>", and the
+        // table path's sign handling above the table is #61's to fix.
+        match base_convert(lang, v, false) {
+            Ok(W2nValue::Int(y)) if y.sign() == num_bigint::Sign::Minus => {}
+            Ok(y) => return Ok(y),
+            Err(_) => {}
+        }
+    }
+    Err(err)
 }
 
 /// Port of `Words2Num_Base._parse_literal` — a bare digit string, a leading
@@ -912,39 +1289,140 @@ fn finish_parse_literal(normalized: &str, sign: i64) -> Result<W2nValue, W2nErro
     )))
 }
 
-/// Port of `Words2Num_Base.to_ordinal_num`.
+/// Port of `Words2Num_Base.to_ordinal_num`, for the language `lang` (a
+/// num2words2 key).
 ///
 /// ```python
 /// m = re.search(r"-?\d+", text)
 /// if not m: raise Words2NumError("cannot parse %r as a number" % text)
 /// return int(m.group())
 /// ```
-fn base_ordinal_num(text: &str) -> Result<W2nValue, W2nError> {
+///
+/// The Python regex is too loose for the forms the renderers write:
+/// - a hyphen after a letter is a prefix, not a sign: id "ke-21", fil
+///   "ika-21", zu "we-100" are 21 / 21 / 100 (#63);
+/// - a thousands-grouped figure is one number: en "1,000th", de "1.000.",
+///   fr "1 000e" are all 1000; a decimal ("2.5th") has no rank and raises (#64);
+/// - figures glued to a Latin word ("covid19") are not a rank, unless the
+///   language writes its ordinal that way (xh "we21") (#64).
+fn base_ordinal_num(text: &str, lang: &str) -> Result<W2nValue, W2nError> {
+    let fail = || W2nError::Words2Num(unparseable_msg(text));
     let chars: Vec<char> = text.chars().collect();
-    for i in 0..chars.len() {
-        // `-?\d+`: a '-' counts only when a digit follows it.
-        if chars[i] == '-' && chars.get(i + 1).copied().is_some_and(is_unicode_digit) {
-            let mut j = i + 1;
-            while j < chars.len() && is_unicode_digit(chars[j]) {
-                j += 1;
+    let Some(start) = chars.iter().position(|&c| is_unicode_digit(c)) else {
+        return Err(fail());
+    };
+    // `-?`: a '-' is the sign only where a sign can stand — at the start or
+    // after a space / punctuation, never glued to a word.
+    let negative = start > 0
+        && chars[start - 1] == '-'
+        && (start == 1 || !chars[start - 2].is_alphanumeric());
+    let before = if negative { start.checked_sub(2) } else { start.checked_sub(1) };
+    if before.is_some_and(|b| chars[b].is_ascii_alphabetic()) && !glues_latin_prefix(lang) {
+        return Err(fail());
+    }
+    let mut j = start;
+    while j < chars.len() && is_unicode_digit(chars[j]) {
+        j += 1;
+    }
+    let mut digits: String = chars[start..j].iter().collect();
+    // Thousands groups: a separator followed by exactly three digits, only
+    // after a leading group of one to three digits.
+    if j - start <= 3 {
+        while j + 4 <= chars.len() {
+            let is_sep = matches!(
+                chars[j],
+                ',' | '.' | ' ' | '\'' | '\u{00A0}' | '\u{202F}' | '\u{2009}'
+            );
+            let group = chars[j + 1..j + 4].iter().all(|&c| is_unicode_digit(c));
+            let closed = chars.get(j + 4).is_none_or(|&c| !is_unicode_digit(c));
+            if !(is_sep && group && closed) {
+                break;
             }
-            let group: String = chars[i..j].iter().collect();
-            return py_int(&group)
-                .map(W2nValue::Int)
-                .ok_or_else(|| W2nError::Words2Num(unparseable_msg(text)));
-        }
-        if is_unicode_digit(chars[i]) {
-            let mut j = i;
-            while j < chars.len() && is_unicode_digit(chars[j]) {
-                j += 1;
-            }
-            let group: String = chars[i..j].iter().collect();
-            return py_int(&group)
-                .map(W2nValue::Int)
-                .ok_or_else(|| W2nError::Words2Num(unparseable_msg(text)));
+            digits.extend(&chars[j + 1..j + 4]);
+            j += 4;
         }
     }
-    Err(W2nError::Words2Num(unparseable_msg(text)))
+    // A decimal point or comma followed by a digit is a fraction: no rank.
+    if matches!(chars.get(j), Some(',' | '.')) && chars.get(j + 1).copied().is_some_and(is_unicode_digit) {
+        return Err(fail());
+    }
+    let value = py_int(&digits).ok_or_else(fail)?;
+    Ok(W2nValue::Int(if negative { -value } else { value }))
+}
+
+/// Does the renderer write this language's ordinal figures glued after a
+/// Latin-letter prefix (xh "we21")? Then a letter before the figures is the
+/// ordinal marker, not part of a word like "covid19".
+fn glues_latin_prefix(lang: &str) -> bool {
+    num2words2_core::get_lang_by_key(lang)
+        .and_then(|l| l.to_ordinal_num(&BigInt::from(21)).ok())
+        .and_then(|s| s.find("21").map(|at| s[..at].chars().last()))
+        .flatten()
+        .is_some_and(|c| c.is_ascii_alphabetic())
+}
+
+/// A Roman numeral (la renders its `ordinal_num` as "XXI", "MMXXIV"), read
+/// only in its canonical spelling: the value must re-render to the same
+/// letters, so "IIII" or "VX" raise.
+fn roman_value(text: &str) -> Option<i64> {
+    let t = text.trim().trim_end_matches('.').to_ascii_uppercase();
+    if t.is_empty() || t.len() > 15 || !t.chars().all(|c| "IVXLCDM".contains(c)) {
+        return None;
+    }
+    let val = |c: char| match c {
+        'I' => 1,
+        'V' => 5,
+        'X' => 10,
+        'L' => 50,
+        'C' => 100,
+        'D' => 500,
+        _ => 1000,
+    };
+    let cs: Vec<i64> = t.chars().map(val).collect();
+    let mut total = 0i64;
+    for (k, &v) in cs.iter().enumerate() {
+        if cs.get(k + 1).is_some_and(|&n| n > v) {
+            total -= v;
+        } else {
+            total += v;
+        }
+    }
+    (1..4000).contains(&total).then_some(total).filter(|&n| to_roman(n) == t)
+}
+
+fn to_roman(mut n: i64) -> String {
+    const R: [(i64, &str); 13] = [
+        (1000, "M"), (900, "CM"), (500, "D"), (400, "CD"), (100, "C"), (90, "XC"),
+        (50, "L"), (40, "XL"), (10, "X"), (9, "IX"), (5, "V"), (4, "IV"), (1, "I"),
+    ];
+    let mut out = String::new();
+    for (v, s) in R {
+        while n >= v {
+            out.push_str(s);
+            n -= v;
+        }
+    }
+    out
+}
+
+/// How the renderer writes `to_ordinal_num` for this language, probed on 21:
+/// in figures (the common case), in Roman numerals (la "XXI"), or in words
+/// (ar "الأول والعشرون", bn "একুশতম").
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum OrdinalNumShape {
+    Figures,
+    Roman,
+    Words,
+}
+
+fn ordinal_num_shape(lang: &str) -> OrdinalNumShape {
+    let rendered = num2words2_core::get_lang_by_key(lang)
+        .and_then(|l| l.to_ordinal_num(&BigInt::from(21)).ok());
+    match rendered {
+        Some(s) if s == "XXI" => OrdinalNumShape::Roman,
+        Some(s) if !s.chars().any(is_unicode_digit) => OrdinalNumShape::Words,
+        _ => OrdinalNumShape::Figures,
+    }
 }
 
 fn unparseable_msg(text: &str) -> String {
@@ -1007,23 +1485,22 @@ pub fn words2num(
     let resolved = resolve_lang(lang)?;
     let converter = converter_for(&resolved);
 
-    // `CONVERTER_TYPES` in `words2num2/__init__.py`. An unknown `to` is a
-    // `NotImplementedError`, distinct from the reverse table declining a word.
-    const CONVERTER_TYPES: [&str; 6] =
-        ["cardinal", "ordinal", "ordinal_num", "year", "currency", "digits"];
-    if !CONVERTER_TYPES.contains(&to) {
-        return Err(W2nError::NotImplemented(format!(
-            "conversion type {} unsupported",
-            py_repr_str(to)
-        )));
-    }
+    check_converter_type(to)?;
 
     // `getattr(converter, "to_{to}")(text)`. The English grammar path returns
     // its native value directly; every other path is `int`/`float` and is
     // promoted to the English value type.
+    // An amount spoken in words: "twelve euros, thirty-four cents" -> 12.34.
+    // Text that names no currency is read as a cardinal below.
+    if to == "currency" {
+        if let Some(amount) = currency_amount(&converter, &resolved, text) {
+            return amount;
+        }
+    }
+
     match &converter {
         Converter::En => match to {
-            // `Words2Num_Base.to_currency` == `self.to_cardinal` (polymorphic).
+            // Without a currency word, to="currency" is the cardinal.
             "cardinal" | "currency" => {
                 crate::en_to_cardinal(text).map_err(|e| W2nError::Words2Num(e.msg))
             }
@@ -1031,19 +1508,69 @@ pub fn words2num(
             "year" => crate::en_to_year(text).map_err(|e| W2nError::Words2Num(e.msg)),
             "digits" => converter.to_digits(text).map(sentence_to_en_value),
             // `Words2Num_EN` inherits `Words2Num_Base.to_ordinal_num`.
-            _ => base_ordinal_num(text).map(sentence_to_en_value),
+            _ => base_ordinal_num(text, "en").map(sentence_to_en_value),
         },
-        Converter::Table(_) => {
-            let v = match to {
-                // `Words2Num_Base.to_year`/`to_currency` == `self.to_cardinal`.
-                "cardinal" | "year" | "currency" => converter.to_cardinal(text),
-                "ordinal" => converter.to_ordinal(text),
+        Converter::Table(lang) => {
+            // Regional English (#193): the English grammar answers what the
+            // table declines, keeping its own value type (a `Decimal` for
+            // "three point one four").
+            let grammar = |e: W2nError| -> Result<crate::w2n_lang_en::W2nValue, W2nError> {
+                if !en_variant(lang) {
+                    return Err(e);
+                }
+                match to {
+                    "cardinal" | "currency" => crate::en_to_cardinal(text),
+                    "ordinal" => crate::en_to_ordinal(text),
+                    "year" => crate::en_to_year(text),
+                    _ => return Err(e),
+                }
+                .map_err(|_| e)
+            };
+            let table = match to {
+                // A decimal spoken in words, read as the sentence walker
+                // reads it: fr "trois virgule un quatre" -> 3.14 (#191).
+                "cardinal" => base_convert(lang, text, false).or_else(|e| {
+                    table_decimal(&converter, &resolved, text)
+                        .and_then(|(int, _, frac)| BigDecimal::from_str(&format!("{}.{}", int, frac)).ok())
+                        .map(W2nValue::Dec)
+                        .ok_or(e)
+                }),
+                // A currency amount was read above; what is left is the cardinal.
+                "currency" => base_convert(lang, text, false),
+                "year" => table_year(lang, text),
+                "ordinal" => base_convert(lang, text, true),
                 "digits" => converter.to_digits(text),
                 _ => converter.to_ordinal_num(text),
-            }?;
-            Ok(sentence_to_en_value(v))
+            };
+            match table {
+                Ok(v) => Ok(sentence_to_en_value(v)),
+                Err(e) => grammar(e),
+            }
         }
     }
+}
+
+/// `to="currency"`: the amount as a `Decimal`, unit plus subunit (`12.34`), via
+/// [`crate::w2n_currency::parse_amount`]. `None` when the text names no
+/// currency, so the caller keeps the plain cardinal reading.
+fn currency_amount(
+    converter: &Converter,
+    resolved: &str,
+    text: &str,
+) -> Option<Result<crate::w2n_lang_en::W2nValue, W2nError>> {
+    let cardinal = |words: &str| -> Option<BigDecimal> {
+        match converter.to_cardinal(words).ok()? {
+            W2nValue::Int(i) => Some(BigDecimal::from(i)),
+            W2nValue::Dec(d) => Some(d),
+            W2nValue::Float(f) => BigDecimal::from_str(&py_float_repr(f)).ok(),
+        }
+    };
+    let amount = crate::w2n_currency::parse_amount(text, resolved, &cardinal)?;
+    Some(
+        amount
+            .map(|d| crate::w2n_lang_en::W2nValue::Dec(crate::w2n_lang_en::PyDec::from_bigdecimal(&d)))
+            .map_err(W2nError::Words2Num),
+    )
 }
 
 /// Promote a reverse-table / `ordinal_num` result into the English grammar's
@@ -1107,7 +1634,7 @@ fn starts_run(converter: &Converter, token: &str, decimal_heads: &[&str]) -> boo
 /// English only: the non-English locales go through the reverse-table
 /// converter, whose separator handling this change does not touch.
 fn decimal_heads_for(resolved: &str) -> &'static [&'static str] {
-    if resolved == "en" {
+    if resolved == "en" || en_variant(resolved) {
         &["point", "dot"]
     } else {
         &[]
@@ -1119,13 +1646,20 @@ fn is_candidate(converter: &Converter, token: &str, includable: &[&str]) -> bool
     if token.is_empty() || holds_digit(token) {
         return false;
     }
-    if includable.contains(&token) || converter.apocope(token).is_some() {
+    if is_includable(token, includable) || converter.apocope(token).is_some() {
         return true;
+    }
+    // vi "tư" is 4 only after "mươi", ar "وعشرين" only after a unit: not
+    // number words on their own, but they may complete a run (#74, #77).
+    if let Converter::Table(lang) = converter {
+        if lexicon::is_alias_word(lang, &crate::normalize(token)) {
+            return true;
+        }
     }
     let dehyphened = token.replace('-', " ");
     py_split_whitespace(&dehyphened)
         .iter()
-        .any(|sub| converter.is_number_word(sub))
+        .any(|sub| converter.is_number_word(sub) || converter.is_number_part(sub))
 }
 
 /// May a run END on this token? A connector ("and", "a", "point", es "y",
@@ -1133,7 +1667,7 @@ fn is_candidate(converter: &Converter, token: &str, includable: &[&str]) -> bool
 /// run that stops on one leaves it out — the walker then emits the connector
 /// as a word instead of swallowing it.
 fn candidate_is_number(converter: &Converter, token: &str, includable: &[&str]) -> bool {
-    if !includable.contains(&token) {
+    if !is_includable(token, includable) {
         return true;
     }
     // en "point" parses as Decimal(0) on its own; still a connector here.
@@ -1141,6 +1675,87 @@ fn candidate_is_number(converter: &Converter, token: &str, includable: &[&str]) 
     py_split_whitespace(&dehyphened)
         .iter()
         .any(|sub| converter.is_number_word(sub) && !includable.contains(sub))
+}
+
+/// Is `token` one of the run-internal words? The derived connectors are
+/// normalised (ro "si", vi "le"), the hand list is not (ro "și").
+fn is_includable(token: &str, includable: &[&str]) -> bool {
+    includable.contains(&token) || {
+        let norm = crate::normalize(token);
+        includable.contains(&norm.as_str())
+    }
+}
+
+/// A run that crosses a connector only the renderer lists ([`lexicon::
+/// derived_connectors`]) must read as one number the way the renderer joins
+/// them: "fjörutíu og tveir" is 40 + 2, "douăzeci de mii" 20 × 1000, and
+/// num2words2 spells either. "fem og seks" (five and six) and sw "mbili na
+/// tatu" (two and three) are two numbers, and stay two (#65). The hand-listed
+/// connectors keep their behaviour.
+fn connector_join_ok(converter: &Converter, stripped: &str, total: &W2nValue, hand: &[&str]) -> bool {
+    let Converter::Table(lang) = converter else { return true };
+    let derived = lexicon::derived_connectors(lang);
+    let norm = crate::normalize(stripped).replace('-', " ");
+    let words: Vec<&str> = norm.split_whitespace().collect();
+    let Some(p) = words
+        .iter()
+        .rposition(|w| derived.iter().any(|d| d == w) && !hand.contains(w))
+    else {
+        return true;
+    };
+    if p == 0 || p + 1 == words.len() {
+        return true;
+    }
+    let W2nValue::Int(t) = total else { return true };
+    if lexicon::renders_as(lang, t, &norm) {
+        return true;
+    }
+    let int = |ws: &[&str]| match converter.to_cardinal(&ws.join(" ")) {
+        Ok(W2nValue::Int(v)) => Some(v),
+        _ => None,
+    };
+    let (Some(l), Some(r)) = (int(&words[..p]), int(&words[p + 1..])) else {
+        return false;
+    };
+    let zero = BigInt::from(0);
+    (*t == &l + &r && r < l && &l % BigInt::from(10) == zero) || *t == &l * &r
+}
+
+/// The scale a token closes with a comma: "thousand," -> 1000, "million," ->
+/// 1000000, pt "mil," -> 1000. `None` for any other token or punctuation.
+fn comma_after_scale(converter: &Converter, tok: &str) -> Option<BigInt> {
+    if trailing_punct(tok) != "," {
+        return None;
+    }
+    let clean = rstrip_punct(tok).to_lowercase().replace('-', " ");
+    let last = *py_split_whitespace(&clean).last()?;
+    if !is_scale_word(converter, last, 1_000) {
+        return None;
+    }
+    match converter.to_cardinal(last).ok()? {
+        W2nValue::Int(v) => Some(v),
+        _ => None,
+    }
+}
+
+/// After each comma the run crossed, the words up to the next comma (or the
+/// run end `j`) must be one group of the number: at least a hundred and below
+/// the scale before the comma. "twelve thousand, three hundred" is 12300 the
+/// way num2words2 writes it; "in two thousand, five people came" keeps 2000
+/// and 5 apart (#67).
+fn comma_groups_ok(converter: &Converter, parts: &[String], j: usize, commas: &[(usize, BigInt)]) -> bool {
+    for (k, (at, scale)) in commas.iter().enumerate() {
+        let end = commas.get(k + 1).map_or(j, |(next, _)| *next);
+        if end <= *at {
+            continue; // the run ends on this comma: nothing after it yet
+        }
+        let group = rstrip_punct(py_strip(&parts[at + 1..=end].concat())).to_string();
+        match converter.to_cardinal(&group) {
+            Ok(W2nValue::Int(v)) if v >= BigInt::from(100) && v < *scale => {}
+            _ => return false,
+        }
+    }
+    true
 }
 
 /// One word of an English number run: the word itself (lowercased, hyphens
@@ -1161,7 +1776,9 @@ fn en_number_words(parts: &[String], i: usize) -> Vec<EnWord> {
     use crate::w2n_lang_en::{tens_value, unit_value};
     let mut words = Vec::new();
     let mut j = i;
-    while j < parts.len() {
+    // Called at every run start: without a bound, a text made of number words
+    // is rescanned to its end from each position (#186).
+    while j < parts.len() && words.len() < MAX_DIGIT_RUN_WORDS {
         let tok = &parts[j];
         if py_str_isspace(tok) {
             j += 1;
@@ -1196,14 +1813,18 @@ fn en_number_words(parts: &[String], i: usize) -> Vec<EnWord> {
 
 /// A digit string read one digit at a time — an account number, ZIP code or
 /// phone number: "four five six seven" -> "4567", "zero six one two" ->
-/// "0612". Two or more consecutive single-digit words (zero, one..nine), no
-/// tens or scale word among them; "oh"/"o" count as 0 only *inside* such a
-/// run, never as its first word; "double"/"triple" repeat the digit after
-/// them ("double zero seven" -> "007"). A lone digit word ("press one") is
-/// left to the cardinal grammar, as is "twenty five". The digits are
-/// concatenated, never summed, and a leading zero is kept — which is why
-/// this returns the string rather than a value. Also returns the last part
-/// index covered.
+/// "0612". Consecutive single-digit words (zero, one..nine), no tens or scale
+/// word among them; "double"/"triple" repeat the digit after them ("double
+/// zero seven" -> "007"). A lone digit word ("press one") is left to the
+/// cardinal grammar, as is "twenty five". The digits are concatenated, never
+/// summed, and a leading zero is kept — which is why this returns the string
+/// rather than a value. Also returns the last part index covered.
+///
+/// Three digits at least, or two with a leading zero ("zero six", "oh
+/// seven"): two digit words are how a speaker gives a range, "two three
+/// minutes" is 2 or 3 minutes, never 23 (#51). "oh"/"o" is 0 only next to
+/// another digit word ("room oh seven" -> "room 07"); on its own it is the
+/// interjection (#79), which the walker leaves alone.
 fn en_digit_run(parts: &[String], i: usize) -> Option<(String, usize)> {
     use crate::w2n_lang_en::unit_value;
     let mut digits = String::new();
@@ -1211,8 +1832,8 @@ fn en_digit_run(parts: &[String], i: usize) -> Option<(String, usize)> {
     let mut repeat = 1usize;
     for (k, w) in en_number_words(parts, i).iter().enumerate() {
         let d = match w.word.as_str() {
-            "oh" | "o" if k > 0 => 0,
-            "oh" | "o" | "nought" | "naught" => break,
+            "oh" | "o" => 0,
+            "nought" | "naught" if k == 0 => break,
             "double" | "triple" => {
                 if repeat > 1 {
                     break;
@@ -1234,12 +1855,39 @@ fn en_digit_run(parts: &[String], i: usize) -> Option<(String, usize)> {
         }
     }
     let (len, part) = end?;
-    if len < 2 {
+    digits.truncate(len);
+    if !is_digit_string(&digits) {
         return None;
     }
-    digits.truncate(len);
     Some((digits, part))
 }
+
+/// Is a string of concatenated digit words a dictated digit string? Three
+/// digits or more, or two with a leading zero ("06"). Two digit words without
+/// one are a range ("deux trois minutes", "two three minutes"): 2 or 3, not
+/// 23 (#51).
+fn is_digit_string(digits: &str) -> bool {
+    digits.len() >= 3 || (digits.len() == 2 && digits.starts_with('0'))
+}
+
+/// A run never grows past this many words. No real cardinal comes close
+/// ("one million, two hundred and thirty-four thousand, five hundred and
+/// sixty-seven" is 13); without the bound, a text made of number words that do
+/// not combine ("zweitausend zweitausend ...") re-parsed an ever-longer run from
+/// every start, cubic in its length (#186).
+const MAX_RUN_WORDS: usize = 40;
+
+/// A run stops growing after this many consecutive words that did not make
+/// the run parse (#186). A connector or a "cents"-type word needs one or two;
+/// where the multiplier follows the scale word (ha "miliyan dubu ɗari biyu
+/// talatin da huɗu ...") the partial runs fail for up to six words before the
+/// group closes.
+const MAX_FAILED_EXTENSIONS: usize = 8;
+
+/// The longest digit dictation read at once (an IBAN is 34 characters). A
+/// longer one is cut into consecutive strings rather than rescanned from
+/// every position (#186).
+const MAX_DIGIT_RUN_WORDS: usize = 64;
 
 /// The digit-string reading for a reverse-table language: fr "sept cinq
 /// zéro un zéro" -> "75010", es "seis uno nueve ocho cero" -> "61980", fr
@@ -1258,17 +1906,26 @@ fn table_digit_run(
     let mut end: Option<(usize, usize)> = None;
     let mut j = i;
     let mut article_head = false;
-    while j < parts.len() {
+    while j < parts.len() && digits.len() < MAX_DIGIT_RUN_WORDS {
         let tok = &parts[j];
         if py_str_isspace(tok) {
             j += 1;
             continue;
         }
         let clean = rstrip_punct(tok).to_lowercase();
-        if clean.contains('-') {
+        // "cinq 5": a token in figures is a literal, not a digit word (#68).
+        // ko native numerals count, they are never dictated (#178).
+        if clean.contains('-')
+            || holds_digit(&clean)
+            || (resolved == "ko" && lexicon::ko_native(&clean).is_some())
+        {
             break;
         }
         let article = is_article_word(resolved, &clean);
+        // ar "ثلاثة وخمسة" is "three and five", not the digits 3 5.
+        if !article && converter.is_bound(&clean) {
+            break;
+        }
         let d = match converter.to_cardinal(&clean) {
             Ok(W2nValue::Int(v)) if v >= BigInt::from(0) && v <= BigInt::from(9) => v.to_string(),
             // es "un", fr "une": not in the table on their own, but 1 here.
@@ -1286,11 +1943,30 @@ fn table_digit_run(
         j += 1;
     }
     let (len, part) = end?;
-    if len < 2 || (article_head && len < 3) {
+    digits.truncate(len);
+    if !is_digit_string(&digits) || (article_head && len < 3) {
         return None;
     }
-    digits.truncate(len);
     Some((digits, part))
+}
+
+/// Is `run` exactly two words, each a single digit (0-9) on its own, without a
+/// leading zero? Then it is a range ("deux trois minutes"), and the run must
+/// not read it as one number (#51).
+fn two_digit_words(converter: &Converter, run: &[String]) -> bool {
+    let words: Vec<String> = run
+        .iter()
+        .filter(|t| !py_str_isspace(t))
+        .map(|t| rstrip_punct(t).to_lowercase())
+        .collect();
+    if words.len() != 2 {
+        return false;
+    }
+    let digit = |w: &str| match converter.to_cardinal(w) {
+        Ok(W2nValue::Int(v)) if v >= BigInt::from(0) && v <= BigInt::from(9) => v.to_string().parse::<u8>().ok(),
+        _ => None,
+    };
+    matches!((digit(&words[0]), digit(&words[1])), (Some(a), Some(_)) if a != 0)
 }
 
 /// A spoken year that is not one English cardinal: "nineteen" or "twenty"
@@ -1335,16 +2011,42 @@ fn en_year_run(parts: &[String], i: usize) -> Option<(i64, usize)> {
 
 /// `SentenceConverter.INCLUDABLE` — tokens allowed *inside* a run though they
 /// are not numbers. Keyed by the **resolved** code, so only exactly `"en"`
-/// gets them: `words2num_sentence(..., lang="en_IN")` resolves to `"en_IN"`
-/// and therefore runs with an empty includable set.
+/// gets them; `"en_IN"` and the other English locales get the connector
+/// num2words2 writes ("and") through [`lexicon::derived_connectors`].
 const INCLUDABLE_EN: [&str; 7] = ["and", "point", "dot", "minus", "negative", "a", "an"];
 
 /// Connector words allowed INSIDE a number run for non-English locales — the
 /// analogue of English "and". Without them the walker breaks a run at the
 /// connector ("sesenta **y** nueve mil ocho" stopped at "sesenta"), so
 /// composed cardinals above the reverse table never reached the parser. Keyed
-/// by resolved language prefix; empty for locales that don't join with a word.
+/// by resolved language prefix. This hand list holds the decimal words and
+/// the eleven languages it always covered; the walker adds every connector
+/// the renderer writes ([`lexicon::derived_connectors`], #65).
+///
+/// The words of a spoken decimal are added from the renderer
+/// ([`crate::w2n_decimal::run_words`]): sv "komma", ko "점", hi "दशमलव", ru
+/// "целых" — so the run grows across the separator (#107, #108).
 fn includable_for(resolved: &str) -> &'static [&'static str] {
+    static CACHE: std::sync::OnceLock<std::sync::RwLock<HashMap<String, &'static [&'static str]>>> =
+        std::sync::OnceLock::new();
+    let cache = CACHE.get_or_init(Default::default);
+    if let Some(l) = cache.read().ok().and_then(|m| m.get(resolved).copied()) {
+        return l;
+    }
+    let mut words: Vec<&'static str> = hand_includable(resolved).to_vec();
+    for w in crate::w2n_decimal::run_words(converter_for(resolved).n2w_key()) {
+        if !words.contains(&w) {
+            words.push(w);
+        }
+    }
+    let built: &'static [&'static str] = Box::leak(words.into_boxed_slice());
+    if let Ok(mut m) = cache.write() {
+        m.entry(resolved.to_string()).or_insert(built);
+    }
+    built
+}
+
+fn hand_includable(resolved: &str) -> &'static [&'static str] {
     let base = resolved.split(&['_', '-'][..]).next().unwrap_or(resolved);
     match base {
         "es" | "gl" => &["y", "e", "coma", "punto"],
@@ -1354,15 +2056,20 @@ fn includable_for(resolved: &str) -> &'static [&'static str] {
         "ca" => &["i", "coma"],
         "de" => &["und", "komma"],
         "nl" | "af" => &["en", "komma"],
-        "ro" => &["si", "și", "virgulă", "virgula"],
+        // ro "două mii de lei": "de" stays with the noun, never ends the number.
+        "ro" => &["si", "și", "de", "virgulă", "virgula"],
         "pl" => &["i", "przecinek"],
-        _ => &[],
+        // fa "و", da/nb "og", ha "da": a run may hold the connector but not end on it.
+        _ => crate::w2n_forms::connectors(resolved),
     }
 }
 
 /// The spoken decimal separator of a language and the character it stands
 /// for: fr "virgule" → ",", es "punto" → ".", "coma" → ",". English "point"
-/// belongs to its own grammar.
+/// belongs to its own grammar. Every other language's separator is derived
+/// from the renderer ([`crate::w2n_decimal`]) and writes the locale's decimal
+/// character; this table only says which character a word stands for where
+/// a language has two (es "punto" and "coma").
 fn decimal_word(resolved: &str, word: &str) -> Option<char> {
     let base = resolved.split(&['_', '-'][..]).next().unwrap_or(resolved);
     match (base, word) {
@@ -1379,53 +2086,30 @@ fn decimal_word(resolved: &str, word: &str) -> Option<char> {
 }
 
 /// A decimal spoken in a reverse-table language: "trois virgule cinq" →
-/// ("3", ',', "5"), "dos coma cero cinco" → ("2", ',', "05"), "deux virgule
-/// cinquante" → ("2", ',', "50"). The fraction is single-digit words read
-/// one by one, or one number below 100. `None` when it is not one.
+/// ("3", ',', "5"), "dos coma cero cinco" → ("2", ',', "05"), "trois virgule
+/// cent vingt-cinq" → ("3", ',', "125"), ru "три целых четырнадцать сотых" →
+/// ("3", ',', "14"). The shapes are derived from the renderer, see
+/// [`crate::w2n_decimal::read`]; a derived separator writes the locale's
+/// decimal character. `None` when it is not one.
 fn table_decimal(
     converter: &Converter,
     resolved: &str,
     text: &str,
 ) -> Option<(String, char, String)> {
-    let norm = crate::normalize(text);
-    let toks: Vec<&str> = norm.split_whitespace().collect();
-    let pos = toks
-        .iter()
-        .position(|t| decimal_word(resolved, t).is_some())?;
-    let sep = decimal_word(resolved, toks[pos])?;
-    let int_part = if pos == 0 {
-        "0".to_string()
-    } else {
-        match converter.to_cardinal(&toks[..pos].join(" ")).ok()? {
-            W2nValue::Int(i) => i.to_string(),
-            _ => return None,
-        }
+    let default_sep = crate::w2n_formats::locale_format(resolved)
+        .and_then(|f| f.decimal.chars().next())
+        .unwrap_or('.');
+    let cardinal = |words: &str| match converter.to_cardinal(words).ok()? {
+        W2nValue::Int(i) => Some(i),
+        _ => None,
     };
-    let frac = &toks[pos + 1..];
-    if frac.is_empty() {
-        return None;
-    }
-    let mut digits = String::new();
-    for t in frac {
-        match converter.to_cardinal(t).ok()? {
-            W2nValue::Int(d) if d >= BigInt::from(0) && d <= BigInt::from(9) => {
-                digits.push_str(&d.to_string())
-            }
-            _ => {
-                digits.clear();
-                break;
-            }
-        }
-    }
-    if digits.is_empty() {
-        match converter.to_cardinal(&frac.join(" ")).ok()? {
-            W2nValue::Int(n) if n >= BigInt::from(0) && n < BigInt::from(100) => {
-                digits = n.to_string()
-            }
-            _ => return None,
-        }
-    }
-    Some((int_part, sep, digits))
+    crate::w2n_decimal::read(
+        converter.n2w_key(),
+        text,
+        &|w| decimal_word(resolved, w),
+        default_sep,
+        &cardinal,
+    )
 }
 
 /// "pour cent" / "por ciento" / "per cent": the second word is the number 100
@@ -1441,6 +2125,10 @@ fn percent_phrase(resolved: &str) -> Option<(&'static str, &'static str)> {
         "it" => Some(("per", "cento")),
         "en" => Some(("per", "cent")),
         "ca" => Some(("per", "cent")),
+        // el "τοις εκατό", vi "phần trăm": the everyday words for percent (#82).
+        // Normalised, as the walker compares them.
+        "el" => Some(("τοις", "εκατο")),
+        "vi" => Some(("phan", "tram")),
         _ => None,
     }
 }
@@ -1537,13 +2225,41 @@ fn is_ambiguous_ordinal(resolved: &str, word: &str) -> bool {
     }
     let list: &[&str] = match base {
         "en" => &["first", "second"],
-        "fr" => &["premier", "premiere", "second", "seconde"],
         "es" | "gl" => &["primero", "primer", "primera", "segundo", "segunda"],
         "it" => &["primo", "prima", "secondo", "seconda"],
         "pt" => &["primeiro", "primeira", "segundo", "segunda"],
         "de" => &["erste", "ersten", "erster", "erstes", "erstem"],
         "nl" => &["eerste"],
-        "ca" => &["primer", "primera", "segon", "segona"],
+        "ca" => &[
+            "primer", "primera", "segon", "segona",
+            // Also the collective nouns "a ten / dozen / hundred / thousand".
+            "desena", "desenes", "dotzena", "dotzenes", "centena", "centenes", "milena", "milenes",
+            // And the time unit "seconds", the fraction "quarters".
+            "segons", "segones", "quarts", "quartes",
+        ],
+        // The weekdays Monday-Thursday are the feminine ordinals 2nd-5th.
+        "el" => &[
+            // "πρώτα" is also "first(ly)", "δεύτερο" the time unit.
+            "πρωτα", "δευτερο",
+            "δευτερα", "δευτερας", "τριτη", "τριτης", "τεταρτη", "τεταρτης", "πεμπτη", "πεμπτης",
+        ],
+        // "secondes" is also the time unit ("quelques secondes").
+        "fr" => &["premier", "premiere", "second", "seconde", "secondes", "seconds"],
+        // "(wait a) second"
+        "he" => &["שנייה", "שניה"],
+        // "annað" / "önnur" are also "other".
+        "is" => &[
+            "onnur", "annað", "annan", "annarri", "annars", "aðra", "aðrir", "aðrar", "oðrum", "oðru",
+        ],
+        // "kwanza" is also the adverb "first(ly)".
+        "sw" => &["kwanza", "pili"],
+        // The inflected 2nd that is also the everyday "other": da "noget andet",
+        // nb "en annen", sv "de andre", et "teise", fi "toisen".
+        "da" => &["andet"],
+        "nb" | "no" => &["annen", "annet"],
+        "sv" => &["andre"],
+        "et" => &["teise", "teist", "teised", "teisel", "teisele", "teises", "teiseks"],
+        "fi" => &["toisen", "toista", "toisena", "toiset", "toisessa", "toiseen", "toisella"],
         _ => &[],
     };
     list.contains(&w.as_str())
@@ -1624,9 +2340,19 @@ fn fraction_follows(converter: &Converter, resolved: &str, word: Option<&str>) -
         }),
         // A plural ordinal ("cinquièmes", "quintos"): the ordinal table holds
         // the singular.
-        Converter::Table(lang) => norm.strip_suffix('s').is_some_and(|stem| {
-            matches!(base_convert(lang, stem, true), Ok(W2nValue::Int(n)) if n >= BigInt::from(3))
-        }),
+        Converter::Table(lang) => {
+            let denominator = |t: &str| {
+                matches!(base_convert(lang, t, true), Ok(W2nValue::Int(n)) if n >= BigInt::from(3))
+            };
+            // bg "две стотни", el "δύο τρίτα": an inflected ordinal after a
+            // cardinal is a fraction's denominator, as in `ordinal_rendering`.
+            norm.strip_suffix('s').is_some_and(denominator)
+                // bg plural "стотни", "трети": the feminine singular is "стотна", "трета".
+                || (base == "bg" && norm.strip_suffix('и').is_some_and(|t| denominator(&format!("{t}а"))))
+                || (matches!(base, "fr" | "ca" | "el" | "bg")
+                    && !is_canonical_ordinal(converter, w)
+                    && denominator(&norm))
+        }
     }
 }
 
@@ -1641,6 +2367,125 @@ fn next_word2(parts: &[String], i: usize) -> Option<String> {
     let mut it = parts[i + 1..].iter().filter(|t| !py_str_isspace(t));
     it.next()?;
     it.next().map(|t| rstrip_punct(t).to_lowercase())
+}
+
+/// The ordinal reading of a run in plain mode. A table language whose
+/// ordinal opens with a particle (ro "al douăzeci și unulea") has it just
+/// before the run, so the reading may take that word along (#70); the
+/// rendering then drops it from the figures ("al 21-lea").
+fn ordinal_reading(converter: &Converter, parts: &[String], i: usize, run: &str) -> Option<W2nValue> {
+    if let Ok(v) = converter.to_ordinal(run) {
+        return Some(v);
+    }
+    let Converter::Table(lang) = converter else { return None };
+    if !ordinal_opens_with_particle(lang) {
+        return None;
+    }
+    let raw = parts[..i].iter().rev().find(|t| !py_str_isspace(t))?;
+    let prev = raw.to_lowercase();
+    if prev.is_empty()
+        || !trailing_punct(raw).is_empty()
+        || holds_digit(&prev)
+        || converter.is_number_word(&prev)
+    {
+        return None;
+    }
+    converter.to_ordinal(&format!("{prev} {run}")).ok()
+}
+
+/// Does the renderer open its ordinals with a word that is not a number (ro
+/// "al doilea")? Probed on 2; only then may an ordinal reading take the word
+/// before a run.
+fn ordinal_opens_with_particle(lang: &str) -> bool {
+    let Some(l) = num2words2_core::get_lang_by_key(lang) else { return false };
+    let Some(two) = l.to_ordinal(&BigInt::from(2)).ok().map(|w| crate::normalize(&w)) else {
+        return false;
+    };
+    match two.split_once(' ') {
+        Some((first, _)) => !matches!(crate::lookup(lang, first, false, &[]), Ok(Some(_))),
+        None => false,
+    }
+}
+
+/// Does the renderer write a compound ordinal as words + the ordinal of the
+/// unit ("двадцать первый", "dwudziesty pierwszy")? Probed on 21.
+fn unit_ordinal_compounds(lang: &str) -> bool {
+    let Some(l) = num2words2_core::get_lang_by_key(lang) else { return false };
+    let render = |n: i64| l.to_ordinal(&BigInt::from(n)).ok().map(|w| crate::normalize(&w));
+    match (render(21), render(1)) {
+        (Some(r21), Some(r1)) => !r1.is_empty() && r21.ends_with(&format!(" {r1}")),
+        _ => false,
+    }
+}
+
+/// The part index of an ordinal word right after the cardinal run ending at
+/// `end` that makes the two one compound ordinal ("двадцать" + "первый":
+/// the unit 1 is below the 10s of 20), in a language that composes its
+/// ordinals that way. `None` otherwise.
+fn split_compound_ordinal(
+    converter: &Converter,
+    parts: &[String],
+    end: usize,
+    value: Option<&W2nValue>,
+) -> Option<usize> {
+    let Converter::Table(lang) = converter else { return None };
+    let Some(W2nValue::Int(c)) = value else { return None };
+    if ends_with_terminal_punct(&parts[end]) || *c <= BigInt::from(0) {
+        return None;
+    }
+    let k = (end + 1..parts.len()).find(|&k| !py_str_isspace(&parts[k]))?;
+    let word = rstrip_punct(&parts[k]).to_lowercase();
+    if !converter.is_ordinal_word(&word) {
+        return None;
+    }
+    let Ok(W2nValue::Int(o)) = converter.to_ordinal(&word) else { return None };
+    // The largest power of ten dividing the cardinal: 20 -> 10, 300 -> 100.
+    let mut place = BigInt::from(1);
+    while c % (&place * 10) == BigInt::from(0) {
+        place *= 10;
+    }
+    (o > BigInt::from(0) && o < place && unit_ordinal_compounds(lang)).then_some(k)
+}
+
+/// The spoken ordinal agreed with its noun (hi "पहली", tr "ikinciye") where
+/// the renderer writes one form: carry that ending over to the figures, so
+/// "पहली बार" is "१ली बार" and not the masculine "१ला बार" (#153). Only a
+/// short ending swap on a shared stem is carried over; anything else keeps
+/// the renderer's figures.
+fn agree_figures(n2w_key: &str, n: &BigInt, spoken: &str, figures: String) -> String {
+    use unicode_normalization::UnicodeNormalization;
+    if !figures.chars().any(is_unicode_digit) {
+        return figures;
+    }
+    let Some(canonical) = num2words2_core::get_lang_by_key(n2w_key)
+        .and_then(|l| l.to_ordinal(n).ok())
+        .map(|w| crate::normalize(&w))
+    else {
+        return figures;
+    };
+    let canon: Vec<char> = canonical.rsplit(' ').next().unwrap_or("").chars().collect();
+    let norm: Vec<char> = crate::normalize(spoken).chars().collect();
+    let raw: Vec<char> = spoken.nfc().collect::<String>().to_lowercase().chars().collect();
+    if raw.len() != norm.len() {
+        return figures; // the normalized spelling does not line up with the raw one
+    }
+    let common = canon.iter().zip(&norm).take_while(|(a, b)| a == b).count();
+    let (k, s) = (&canon[common..], &raw[common..]);
+    if common < 2 || k.len() > 3 || s.len() > 3 || k == &norm[common..] {
+        return figures;
+    }
+    let k: String = k.iter().collect();
+    let s: String = s.iter().collect();
+    // With nothing to swap (tr "ikinci" + "ye"), the ending is only appended
+    // to figures that end in a letter ("2'nci" -> "2'nciye"); hu "1." stays
+    // "1.", never "1.t".
+    if k.is_empty() && !figures.chars().last().is_some_and(char::is_alphabetic) {
+        return figures;
+    }
+    match figures.strip_suffix(k.as_str()) {
+        Some(stem) if !k.is_empty() || !s.is_empty() => format!("{stem}{s}"),
+        _ => figures,
+    }
 }
 
 /// The figures for an ordinal run (`parts[i..=end]`, value `v`), or `None`
@@ -1708,13 +2553,103 @@ fn ordinal_rendering(
             return None;
         }
     }
+    // fr "trois cinquièmes", ca "tres quarts", el "δύο τρίτα", bg "две стотни": an
+    // inflected ordinal right after a number is a fraction's denominator.
+    if single
+        && matches!(base, "fr" | "ca" | "el" | "bg")
+        && !is_canonical_ordinal(converter, words[0])
+        && prev.as_deref().is_some_and(|p| {
+            p.chars().next().is_some_and(|c| c.is_ascii_digit()) || converter.is_number_word(p)
+        })
+    {
+        return None;
+    }
     let last = crate::normalize(words[words.len() - 1]);
     let feminine = match base {
-        "fr" => last == "premiere",
-        "es" | "pt" | "it" | "gl" => last.ends_with('a') || last.ends_with("as"),
+        "fr" => last == "premiere" || last == "premieres",
+        "es" | "pt" | "gl" => last.ends_with('a') || last.ends_with("as"),
+        // it: the feminine plural ends in -e ("le prime volte"), the masculine in -i.
+        "it" => last.ends_with('a') || last.ends_with('e'),
         _ => false,
     };
-    ordinal_figures(resolved, converter.n2w_key(), n, feminine)
+    let figures = ordinal_figures(resolved, converter.n2w_key(), n, feminine)?;
+    // ro "al douăzeci și unulea" read with the "al" before the run: the
+    // figures "al 21-lea" must not repeat it.
+    let figures = match prev.as_deref() {
+        Some(p) if !p.is_empty() => figures
+            .strip_prefix(&format!("{p} "))
+            .map(str::to_string)
+            .unwrap_or(figures),
+        _ => figures,
+    };
+    match base {
+        // these spell their own agreement above
+        "en" | "es" | "pt" | "it" | "gl" | "de" | "nl" => Some(figures),
+        // hand-written agreement: fr plural "2es", ca "5a", el "1η", bg "1-ва"
+        "fr" | "ca" | "el" | "bg" => Some(agree_figure(base, &last, figures)),
+        _ => Some(agree_figures(converter.n2w_key(), n, words[words.len() - 1], figures)),
+    }
+}
+
+/// Is `word` the ordinal exactly as num2words2 renders it (fr "cinquième",
+/// not the plural "cinquièmes")? The inflected forms reach the table through
+/// `ord_forms`; the rendered form is the one a renderer would print back.
+fn is_canonical_ordinal(converter: &Converter, word: &str) -> bool {
+    let Converter::Table(lang) = converter else { return true };
+    let Some(r) = num2words2_core::get_lang_by_key(lang) else { return true };
+    let norm = crate::normalize(word);
+    match crate::lookup(lang, &norm, true, &[]) {
+        Ok(Some(v)) => r
+            .to_ordinal(&BigInt::from(v))
+            .is_ok_and(|w| crate::normalize(&w) == norm),
+        _ => true,
+    }
+}
+
+/// The figures of an ordinal agree with the spoken form where the language
+/// marks it: fr plural "2es" / "1ers", ca "5a" / "1a" for the feminine, el
+/// "1η" / "1ο" (the abbreviation is the figure + the word's ending), bg
+/// "1-ва" / "1-во" / "1-вия". `fig` is the masculine singular figure.
+fn agree_figure(base: &str, last: &str, fig: String) -> String {
+    match base {
+        "fr" if last.ends_with('s') => format!("{fig}s"),
+        "ca" => {
+            let n: String = fig.chars().take_while(char::is_ascii_digit).collect();
+            if last.ends_with("es") {
+                format!("{n}es") // primeres, cinquenes
+            } else if last.ends_with('a') {
+                format!("{n}a") // primera, cinquena
+            } else if last.ends_with("ens") {
+                format!("{n}ns") // cinquens
+            } else if last.ends_with('s') {
+                format!("{fig}s") // primers -> 1rs, segons -> 2ns
+            } else {
+                fig
+            }
+        }
+        "el" => {
+            let n: String = fig.chars().take_while(char::is_ascii_digit).collect();
+            let ending = ["ους", "ος", "ου", "ον", "οι", "ες", "ης", "ων", "η", "ο", "α"]
+                .into_iter()
+                .find(|e| last.ends_with(e));
+            match ending {
+                Some(e) => format!("{n}{e}"),
+                None => fig,
+            }
+        }
+        "bg" => {
+            // The masculine figure is "N-" + the last two letters ("1-ви"); swap its
+            // final -и for the spoken ending.
+            let ending = ["ият", "ия", "ата", "ото", "ите", "а", "о"]
+                .into_iter()
+                .find(|e| last.ends_with(e));
+            match (ending, fig.strip_suffix('и')) {
+                (Some(e), Some(stem)) if fig.contains('-') => format!("{stem}{e}"),
+                _ => fig,
+            }
+        }
+        _ => fig,
+    }
 }
 
 /// The words that are both the number 1 and an article or pronoun: en "one"
@@ -1732,14 +2667,72 @@ fn article_words(resolved: &str) -> &'static str {
         "pt" => "um uma",
         "nl" => "een",
         "de" => "ein eine einen einem einer eines",
+        // The indefinite article is the word for one (#83): tr "bir gün", hu
+        // "egy nap", sv "ett par", da/no "en dag", el "ένα παιδί"; fa / hi /
+        // bn / vi use the numeral as the indefinite determiner ("یک روز",
+        // "एक दिन", "một người"). ro "un" / "o" (#183). Normalised.
+        "tr" => "bir",
+        "hu" => "egy",
+        "sv" => "en ett",
+        "da" | "dk" => "en et",
+        "no" | "nb" | "nn" => "en ei et ett",
+        "el" => "ενας ενα μια μιας ενος εναν",
+        "fa" => "یک",
+        "hi" => "एक",
+        "bn" => "এক",
+        "vi" => "mot",
+        "ro" => "un o",
         _ => "",
     }
 }
 
-fn is_article_word(resolved: &str, word: &str) -> bool {
+pub(super) fn is_article_word(resolved: &str, word: &str) -> bool {
+    let norm = crate::normalize(word);
     article_words(resolved)
         .split_whitespace()
-        .any(|w| w == word)
+        .any(|w| w == word || w == norm)
+}
+
+/// Number words that are also a common word of the language, and whose
+/// number reading needs another number word next to them (the maintainer's
+/// policy, #80): it "sei" (you are), fr "neuf" (new), nl "acht" (attention,
+/// "acht geven"), ca "nou" (new), ro "nouă" (new), tr "yedi" (ate) and "yüz"
+/// (face). "dix neuf", "sei e trenta" still convert; "tu sei bravo",
+/// "quoi de neuf" stay words. Normalised.
+fn homograph_words(resolved: &str) -> &'static str {
+    let base = resolved.split(&['_', '-'][..]).next().unwrap_or(resolved);
+    match base {
+        "it" => "sei",
+        "fr" => "neuf",
+        "nl" | "af" => "acht",
+        "ca" => "nou",
+        "ro" => "noua",
+        "tr" => "yedi yuz",
+        _ => "",
+    }
+}
+
+/// Is the word at `i` (as written, `piece`) a homograph of a number word? de
+/// "Acht" capitalised is the noun ("in Acht nehmen", "Acht geben"), the
+/// number is lower case.
+fn is_homograph(resolved: &str, parts: &[String], i: usize, piece: &str) -> bool {
+    let base = resolved.split(&['_', '-'][..]).next().unwrap_or(resolved);
+    let word = rstrip_punct(piece);
+    if base == "ko" {
+        // 만일 ("if") also reads as the glued Sino 10001 (만 일).
+        return lexicon::ko_native_needs_counter(word) || word == "만일";
+    }
+    if base == "de" {
+        let sentence_start = prev_word(parts, i).is_none()
+            || parts[..i]
+                .iter()
+                .rev()
+                .find(|t| !py_str_isspace(t))
+                .is_some_and(|t| matches!(t.chars().last(), Some('.' | '!' | '?' | ':')));
+        return word == "Acht" && !sentence_start;
+    }
+    let norm = crate::normalize(word);
+    homograph_words(resolved).split_whitespace().any(|w| w == norm)
 }
 
 /// Units, currencies and time words a lone article-number counts: "one
@@ -1785,6 +2778,41 @@ fn unit_words(resolved: &str) -> &'static str {
              monat monate jahr jahre kilo kilometer meter gramm liter grad"
         }
         "ca" => "euro euros dolar dolars centim centims hora hores minut minuts dia dies setmana setmanes mes mesos any anys",
+        // #83. No "day" word: "bir gün", "egy nap", "एक दिन" are "one day"
+        // the article way ("once upon a time"). Letters `normalize` cannot
+        // strip (tr ı, da/no ø, vi đ) are written as such.
+        "tr" => {
+            "lira liralık kurus dolar euro avro sterlin saat dakika hafta yıl sene kilo \
+             kilogram gram metre kilometre litre derece yuzde"
+        }
+        "hu" => {
+            "forint euro dollar ora perc ev honap kilo kilogramm gramm meter kilometer liter \
+             fok szazalek"
+        }
+        "sv" => {
+            "krona kronor öre euro dollar timme timmar minut minuter vecka veckor manad \
+             manader ar kilo kilometer meter gram liter grad grader procent"
+        }
+        "da" | "dk" => {
+            "krone kroner øre euro dollar time timer minut minutter uge uger maned maneder ar \
+             kilo kilometer meter gram liter grad grader procent"
+        }
+        "no" | "nb" | "nn" => {
+            "krone kroner øre euro dollar time timer minutt minutter uke uker maned maneder ar \
+             kilo kilometer meter gram liter grad grader prosent"
+        }
+        "el" => {
+            "ευρω δολαριο δολαρια λεπτο λεπτα ωρα ωρες εβδομαδα μηνα μηνας χρονο χρονια ετος \
+             κιλο κιλα μετρο χιλιομετρο λιτρο βαθμο τοις"
+        }
+        "fa" => "تومان ریال دلار یورو ساعت دقیقه هفته ماه سال کیلو متر کیلومتر لیتر درصد گرم",
+        "hi" => {
+            "रुपये रुपया रुपए डॉलर यूरो घंटा घंटे मिनट हफ्ता हफ़्ता महीना साल किलो मीटर किलोमीटर \
+             लीटर प्रतिशत ग्राम"
+        }
+        "bn" => "টাকা ডলার ইউরো ঘণ্টা মিনিট সপ্তাহ মাস বছর কিলো মিটার কিলোমিটার লিটার শতাংশ গ্রাম",
+        "vi" => "đồng đô euro gio phut tuan thang nam ky kilo can met km lit phan",
+        "ro" => "leu lei ban bani euro dolar ora ore minut minute saptamana luna an ani kilogram metru litru grad procent",
         _ => "",
     }
 }
@@ -1853,7 +2881,10 @@ fn article_is_count(resolved: &str, parts: &[String], i: usize, next_is_number: 
         return true;
     }
     if let Some(n) = next.as_deref() {
-        if unit_words(resolved).split_whitespace().any(|u| u == n) {
+        if unit_words(resolved)
+            .split_whitespace()
+            .any(|u| u == n || crate::normalize(u) == n)
+        {
             return true;
         }
         if percent_phrase(resolved)
@@ -1906,6 +2937,25 @@ fn en_decade(word: Option<&str>) -> bool {
     })
 }
 
+/// The `to=` modes [`words2num`] and [`words2num_sentence`] accept.
+pub const CONVERTER_TYPES: [&str; 6] =
+    ["cardinal", "ordinal", "ordinal_num", "year", "currency", "digits"];
+
+/// An unknown `to` is a `NotImplementedError`, distinct from the reverse table
+/// declining a word. Shared by the single-token and the sentence entry points
+/// so a typo (`to="cardnal"`) raises in both, rather than the sentence walker
+/// treating every run as "not a number" and handing the text back unchanged.
+fn check_converter_type(to: &str) -> Result<(), W2nError> {
+    if CONVERTER_TYPES.contains(&to) {
+        Ok(())
+    } else {
+        Err(W2nError::NotImplemented(format!(
+            "conversion type {} unsupported",
+            py_repr_str(to)
+        )))
+    }
+}
+
 /// Port of `words2num2.words2num_sentence` → `SentenceConverter.convert`.
 ///
 /// Walks the sentence and, at each position that opens with a real number
@@ -1934,12 +2984,25 @@ pub fn words2num_sentence_opts(
     has_kwargs: bool,
     currency: bool,
 ) -> Result<String, W2nError> {
-    let out = words2num_sentence_walk(sentence, lang, to, has_kwargs)?;
+    // Validate up front (#201): the walk swallows every per-run error, so an
+    // unsupported `lang` or `to` would otherwise come back as the input text.
+    resolve_lang(lang)?;
+    check_converter_type(to)?;
     if currency {
         let resolved = resolve_lang(lang)?;
+        // Walked piece by piece: fr "trente-quatre cents" after "dollars et"
+        // is 34 US cents, not 3400 (see `pieces_for_walk`).
+        let mut out = String::new();
+        for (piece, walk) in crate::w2n_currency::pieces_for_walk(sentence, &resolved) {
+            if walk {
+                out.push_str(&words2num_sentence_walk(&piece, lang, to, has_kwargs)?);
+            } else {
+                out.push_str(&piece);
+            }
+        }
         return Ok(crate::w2n_currency::fold_currency(&out, &resolved));
     }
-    Ok(out)
+    words2num_sentence_walk(sentence, lang, to, has_kwargs)
 }
 
 fn words2num_sentence_walk(
@@ -1950,24 +3013,53 @@ fn words2num_sentence_walk(
 ) -> Result<String, W2nError> {
     let resolved = resolve_lang(lang)?;
     let converter = converter_for(&resolved);
-    let includable: &[&str] = if resolved == "en" {
+    // Regional English reads with the English grammar where its table
+    // declines (#193), so it takes the English run rules too.
+    let en_grammar = matches!(converter, Converter::En) || en_variant(&resolved);
+    let hand_includable: &[&str] = if en_grammar {
         &INCLUDABLE_EN
     } else {
         includable_for(&resolved)
     };
+    // The hand list (decimal words, the English "a"/"minus") plus every
+    // connector the renderer writes between number words (#65).
+    let mut includable_owned: Vec<&str> = hand_includable.to_vec();
+    if let Converter::Table(lang) = converter {
+        for w in lexicon::derived_connectors(lang) {
+            if !includable_owned.contains(&w.as_str()) {
+                includable_owned.push(w.as_str());
+            }
+        }
+    }
+    let includable: &[&str] = &includable_owned;
     let decimal_heads = decimal_heads_for(&resolved);
 
     // The digit-string and spoken-year readings are English-only and belong
     // to the cardinal walk: `to="year"` keeps its own pair reading, and any
     // extra keyword argument fails every conversion (see `has_kwargs`).
-    let en_cardinal = matches!(converter, Converter::En) && to == "cardinal" && !has_kwargs;
+    let en_cardinal = en_grammar && to == "cardinal" && !has_kwargs;
+    // `to="digits"` writes a digit run as its digit string too, leading zeros
+    // and "double"/"triple" included ("call double zero seven" -> "call
+    // 007"), where the single-token `to_digits` can only return an int (#190, #195).
+    let digits_mode = to == "digits" && !has_kwargs;
+    let en_digits = en_cardinal || (en_grammar && digits_mode);
     // Plain cardinal mode (any language): ordinals are read too, and written
     // in figures ("15th", "1er", "2e") when they are ranks.
     let plain = to == "cardinal" && !has_kwargs;
 
     let percent = percent_phrase(&resolved);
 
-    let parts = tokenize(sentence);
+    let (parts, glue) = tokens::split_parts(sentence, &converter, &resolved);
+    // The separator to write before a number that follows a proclitic part
+    // (he "ב-1999") and after one that precedes a case ending (tr "3'te").
+    let sep_before = |i: usize| match i.checked_sub(1).map(|k| glue[k]) {
+        Some(tokens::Glue::Prefix(sep)) => sep,
+        _ => "",
+    };
+    let sep_after = |end: usize| match glue.get(end + 1) {
+        Some(tokens::Glue::Suffix(sep)) => *sep,
+        _ => "",
+    };
     let n = parts.len();
     let mut out = String::new();
     let mut i = 0usize;
@@ -1977,7 +3069,13 @@ fn words2num_sentence_walk(
 
     while i < n {
         let piece = &parts[i];
-        if py_str_isspace(piece) {
+        if py_str_isspace(piece) || glue[i] != tokens::Glue::Free {
+            // A proclitic or case ending cut off a word is never a number.
+            out.push_str(piece);
+            i += 1;
+            continue;
+        }
+        if opens_with_punct(piece) {
             out.push_str(piece);
             i += 1;
             continue;
@@ -1985,13 +3083,27 @@ fn words2num_sentence_walk(
         let head = rstrip_punct(piece).to_lowercase();
         // Most words of a transcript are not numbers: decide that with one cheap
         // check before anything that looks at the neighbours or the ordinal table.
-        let head_is_number = starts_run(&converter, &head, decimal_heads);
+        // en "oh" / "o": the interjection, a number only next to another digit
+        // word ("room oh seven"), which the digit run reads (#79).
+        let head_is_oh = en_grammar && matches!(head.as_str(), "oh" | "o");
+        let starts = starts_run(&converter, &head, decimal_heads)
+            && !(head_is_oh && !(en_cardinal && en_digit_run(&parts, i).is_some()));
+        // kn "ನೂರ", he "שני", mn "дөчин": a number only with what follows, so it
+        // opens a run only in front of another number word, and alone stays a word.
+        let part_head = !starts
+            && !ends_with_terminal_punct(piece)
+            && !includable.contains(&head.as_str())
+            && converter.is_number_part(&head)
+            && next_word(&parts, i).is_some_and(|t| {
+                !includable.contains(&t.as_str()) && is_candidate(&converter, &t, includable)
+            });
+        let head_is_number = starts || part_head;
         let article_number = plain && is_article_word(&resolved, &head);
         let head_is_apocope = converter.apocope(&head).is_some();
         let head_is_article = en_cardinal && matches!(head.as_str(), "a" | "an");
-        let head_is_repeat = en_cardinal && matches!(head.as_str(), "double" | "triple");
+        let head_is_repeat = en_digits && matches!(head.as_str(), "double" | "triple");
         let head_is_scale = after_decimal && is_scale_word(&converter, &head, 1_000);
-        let head_is_percent = percent.is_some_and(|(_, word)| head == word);
+        let head_is_percent = percent.is_some_and(|(_, word)| crate::normalize(&head) == word);
         let ordinal_head = plain && !head_is_number && converter.is_ordinal_word(&head);
         after_decimal = false;
         if !head_is_number
@@ -2019,16 +3131,25 @@ fn words2num_sentence_walk(
         // ("un" in es "un mil") followed by one, or — in English — with
         // "a"/"an" in front of a scale word ("a hundred dollars").
         let apocope_head = head_is_apocope && next_starts_run;
-        let article_head = head_is_article
+        let article_head = (head_is_article
             && !ends_with_terminal_punct(piece)
             && next
                 .as_deref()
                 .is_some_and(crate::w2n_lang_en::is_scale_word)
             // "half a million", "a quarter of a million": a quantity, kept in words.
-            && !matches!(prev_word(&parts, i).as_deref(), Some("half" | "quarter"));
+            && !matches!(prev_word(&parts, i).as_deref(), Some("half" | "quarter")))
+            // The article-one in front of a scale word is the number: sv "en
+            // miljon", no "ett tusen", ro "o mie", "un milion" (#183).
+            || (article_number
+                && !head_is_apocope
+                && !matches!(converter, Converter::En)
+                && !ends_with_terminal_punct(piece)
+                && next.as_deref().is_some_and(|t| is_scale_word(&converter, t, 100)));
         // "vingt pour cent": "cent" after "pour" is the percent sign, not 100.
         let percent_tail = head_is_percent
-            && percent.is_some_and(|(prep, _)| prev_word(&parts, i).as_deref() == Some(prep));
+            && percent.is_some_and(|(prep, _)| {
+                prev_word(&parts, i).is_some_and(|p| crate::normalize(&p) == prep)
+            });
         // "two point five million", "deux virgule cinq millions": the scale word stays a word.
         let decimal_scale = head_is_scale && !next_starts_run;
         // en "double zero seven".
@@ -2054,17 +3175,19 @@ fn words2num_sentence_walk(
 
         // A digit string read one digit at a time is concatenated, not
         // summed: "four five six seven" is 4567, never 22.
-        let digit_run = if en_cardinal {
+        let digit_run = if en_digits {
             en_digit_run(&parts, i)
-        } else if plain {
+        } else if plain || digits_mode {
             table_digit_run(&converter, &resolved, &parts, i)
         } else {
             None
         };
         if let Some((digits, end)) = digit_run {
             let run = parts[i..=end].concat();
+            out.push_str(sep_before(i));
             out.push_str(&digits);
             out.push_str(trailing_punct(&run));
+            out.push_str(sep_after(end));
             i = end + 1;
             continue;
         }
@@ -2076,6 +3199,10 @@ fn words2num_sentence_walk(
         // The spoken decimal separator of a table-language decimal run.
         let mut best_sep: Option<char> = None;
         let mut j = i;
+        let mut words = 0usize;
+        let mut failed = 0usize;
+        // The commas the run crossed after a scale word, with that scale (#67).
+        let mut commas: Vec<(usize, BigInt)> = Vec::new();
         while j < n {
             let tok = &parts[j];
             if py_str_isspace(tok) {
@@ -2083,13 +3210,39 @@ fn words2num_sentence_walk(
                 continue;
             }
             let clean = rstrip_punct(tok).to_lowercase();
-            if clean.is_empty() {
-                break; // a lone punctuation part ("quarante-deux ?") never extends a run
+            if clean.is_empty()
+                || opens_with_punct(tok)
+                || tokens::is_punct_part(&clean)
+                || glue[j] != tokens::Glue::Free
+            {
+                // a lone punctuation part ("quarante-deux ?", the ")" of
+                // "two)") never extends a run
+                break;
+            }
+            // A token in figures is a literal: "nineteen 90" is not 109, "fifty
+            // 50" not 100 (#68). The parse would accept it through the literal
+            // tail, so this cannot be left to the parse.
+            if holds_digit(&clean) {
+                break;
+            }
+            words += 1;
+            if words > MAX_RUN_WORDS || failed >= MAX_FAILED_EXTENSIONS {
+                break; // #186
+            }
+            // A native Korean numeral is one word: "하나 둘 셋" counts 1 2 3,
+            // and "삼십오 세" is 35 and the age counter (#178).
+            if j > i
+                && resolved == "ko"
+                && (lexicon::ko_native(&clean).is_some() || lexicon::ko_native(&head).is_some())
+            {
+                break;
             }
             // A token that is not a number word on its own may still complete
             // the run: fr "cents" / "vingts" only exist inside "deux cents" /
             // "quatre vingts". So the run is tried *with* it before giving up.
-            let candidate = is_candidate(&converter, &clean, includable);
+            // The head was already accepted (an article in front of a scale
+            // word is not a number word on its own: sv "en miljon").
+            let candidate = j == i || is_candidate(&converter, &clean, includable);
             let run = parts[i..=j].concat();
             let stripped = rstrip_punct(py_strip(&run)).to_string();
             // The standard converters never return `None`, so a successful
@@ -2100,7 +3253,15 @@ fn words2num_sentence_walk(
             // one ("vingt-troisième", "fifteenth"). The English grammar reads
             // a trailing ordinal as its cardinal, so the last word tells.
             let hit = match converter.convert(to, &stripped, has_kwargs) {
-                Ok(v) => Some((v, plain && converter.is_ordinal_word(&clean))),
+                // cs "tři sta": "sta" is also an inflected ordinal ("stá"), but
+                // the run reads as an ordinal only if its ordinal reading agrees.
+                Ok(v) => {
+                    let ordinal = plain
+                        && converter.is_ordinal_word(&clean)
+                        && (matches!(converter, Converter::En)
+                            || converter.to_ordinal(&stripped).is_ok_and(|o| o == v));
+                    Some((v, ordinal))
+                }
                 Err(_) if plain && !en_cardinal => {
                     // "trois virgule cinq": a decimal spoken in a table language.
                     let dec = table_decimal(&converter, &resolved, &stripped).and_then(
@@ -2115,12 +3276,17 @@ fn words2num_sentence_walk(
                             best_sep = Some(sep);
                             Some((v, false))
                         }
-                        None => converter.to_ordinal(&stripped).ok().map(|v| (v, true)),
+                        None => ordinal_reading(&converter, &parts, i, &stripped).map(|v| (v, true)),
                     }
                 }
-                Err(_) if plain => converter.to_ordinal(&stripped).ok().map(|v| (v, true)),
+                Err(_) if plain => ordinal_reading(&converter, &parts, i, &stripped).map(|v| (v, true)),
                 Err(_) => None,
             };
+            // "deux trois", "two three": two digit words are a range, not one
+            // number (#51). A dictated string goes through the digit run.
+            let hit = hit.filter(|_| !two_digit_words(&converter, &parts[i..=j]));
+            let hit = hit.filter(|(v, _)| connector_join_ok(&converter, &stripped, v, hand_includable));
+            let hit = hit.filter(|_| comma_groups_ok(&converter, &parts, j, &commas));
             match hit {
                 // A run never ends on a connector: "one and a half" is "1 and
                 // a half", not "1 half"; "five point" keeps its "point".
@@ -2128,14 +3294,21 @@ fn words2num_sentence_walk(
                     best_value = Some(v);
                     best_end = j;
                     best_ordinal = ordinal;
+                    failed = 0;
                 }
-                Some(_) => {}
+                Some(_) => failed += 1,
                 None if !candidate => break,
-                None => {}
+                None => failed += 1,
             }
-            // A token ending in terminal punctuation closes the run.
+            // A token ending in terminal punctuation closes the run — except
+            // the comma num2words2 itself writes after a scale word ("twelve
+            // thousand, three hundred and forty-five"), which the run may cross
+            // if what follows is the next lower group (#67).
             if ends_with_terminal_punct(tok) {
-                break;
+                match comma_after_scale(&converter, tok) {
+                    Some(scale) if j > i => commas.push((j, scale)),
+                    _ => break,
+                }
             }
             j += 1;
         }
@@ -2149,6 +3322,18 @@ fn words2num_sentence_walk(
                     best_value = Some(W2nValue::Int(BigInt::from(year)));
                     best_end = end;
                 }
+            }
+        }
+
+        // ru "двадцать первый", pl "dwadzieścia pierwszy": a cardinal followed
+        // by the ordinal of a smaller unit is one compound ordinal. When it
+        // did not read as one, converting the cardinal alone would split it
+        // into "20 первый"; the whole compound stays in words (#70).
+        if plain && !best_ordinal {
+            if let Some(k) = split_compound_ordinal(&converter, &parts, best_end, best_value.as_ref()) {
+                out.push_str(&parts[i..=k].concat());
+                i = k + 1;
+                continue;
             }
         }
 
@@ -2174,6 +3359,26 @@ fn words2num_sentence_walk(
             {
                 // A lone "one" / "un" / "um" is an article or a pronoun.
                 None
+            } else if part_head && best_end == i {
+                None
+            } else if plain
+                && best_end == i
+                && resolved == "ko"
+                && is_homograph(&resolved, &parts, i, piece)
+            {
+                // ko 세 개 (three things) but 네 (yes), 삼십오 세 (35 years old).
+                (lexicon::ko_counter_follows(&head, next.as_deref())).then(|| v.text_str())
+            } else if plain
+                && best_end == i
+                && is_homograph(&resolved, &parts, i, piece)
+                && !next_is_number
+                // "sei e trenta": a connector, then a number.
+                && !(next.as_deref().is_some_and(|t| is_includable(t, includable))
+                    && next_word2(&parts, i).is_some_and(|t| starts_run(&converter, &t, decimal_heads)))
+                && !prev_word(&parts, i).is_some_and(|p| starts_run(&converter, &p, decimal_heads))
+            {
+                // "tu sei bravo", "quoi de neuf": a lone homograph is the word (#80).
+                None
             } else if plain && best_end == i && lone_scale_word(&converter, &head) {
                 // "a couple of thousand", "des millions": a quantity, not a number.
                 None
@@ -2181,15 +3386,17 @@ fn words2num_sentence_walk(
                 // "the nineteen nineties".
                 None
             } else if let (W2nValue::Dec(_), Some(sep)) = (&v, best_sep) {
-                Some(v.py_str().replacen('.', &sep.to_string(), 1))
+                Some(v.text_str().replacen('.', &sep.to_string(), 1))
             } else {
-                Some(v.py_str())
+                Some(v.text_str())
             };
             match rendered {
                 Some(text) => {
                     after_decimal = matches!(v, W2nValue::Dec(_)) && trailing.is_empty();
+                    out.push_str(sep_before(i));
                     out.push_str(&text);
                     out.push_str(trailing);
+                    out.push_str(sep_after(best_end));
                 }
                 None => out.push_str(&run),
             }
@@ -2370,16 +3577,24 @@ fn is_currency_symbol(c: char) -> bool {
     CURRENCY_SYMBOLS.contains(&c)
 }
 
-/// `converters.auto.SCALE_SUFFIXES`. Returns the multiplier, or `None` for a
-/// `KeyError` — the regex admits combinations this table does not hold
-/// (`"kn"`, `"BN"`, `"Tn"`, `"bN"` …), and Python genuinely raises there.
-fn scale_suffix(s: &str) -> Option<BigInt> {
-    let pow = |n: u32| BigInt::from(10u8).pow(n);
-    match s {
-        "k" | "K" => Some(pow(3)),
-        "m" | "M" => Some(pow(6)),
-        "b" | "B" | "bn" => Some(pow(9)),
-        "t" | "T" | "tn" => Some(pow(12)),
+/// `converters.auto.SCALE_SUFFIXES`, as a power of ten. The regex admits
+/// `[kKmMbBtT][nN]?`; the `n` is the financial-press spelling of the large
+/// scales in any case (`$5Mn`, `$4.1bn`, `$2TN`), so it is accepted on m/b/t.
+/// `"kn"` is not an abbreviation of thousand (it is the kuna): `None`, which
+/// the caller turns into a `Words2NumError` (#194).
+fn scale_suffix(s: &str) -> Option<u32> {
+    let mut it = s.chars();
+    let head = it.next()?;
+    let n = match it.next() {
+        None => false,
+        Some('n' | 'N') if it.next().is_none() => true,
+        Some(_) => return None,
+    };
+    match head.to_ascii_lowercase() {
+        'k' if !n => Some(3),
+        'm' => Some(6),
+        'b' => Some(9),
+        't' => Some(12),
         _ => None,
     }
 }
@@ -2439,286 +3654,30 @@ impl Quantity {
 }
 
 // ===========================================================================
-// `formats.py` — DUPLICATED HERE ON PURPOSE
+// `parse_number_string` — one implementation, in `crate::w2n_formats`
 // ===========================================================================
-//
-// `auto_parse` cannot run without `parse_number_string`. These private helpers
-// are a self-contained copy that stays byte-consistent with this module's own
-// Unicode digit set ([`ND_BLOCKS`]); the canonical crate-level port lives in
-// [`crate::w2n_formats`]. Both are verified against the interpreter.
 
-/// `formats.NUMBER_FORMAT_DEFAULTS` — (lang, thousands, decimal).
-const NUMBER_FORMAT_DEFAULTS: &[(&str, &str, &str)] = &[
-    ("_default", ",", "."),
-    ("en", ",", "."),
-    ("en_GB", ",", "."),
-    ("en_IN", ",", "."),
-    ("en_NG", ",", "."),
-    ("zh", ",", "."),
-    ("zh_CN", ",", "."),
-    ("zh_HK", ",", "."),
-    ("zh_TW", ",", "."),
-    ("ja", ",", "."),
-    ("ko", ",", "."),
-    ("th", ",", "."),
-    ("vi", ".", ","),
-    ("fr", " ", ","),
-    ("fr_BE", " ", ","),
-    ("fr_DZ", " ", ","),
-    ("fr_CH", "'", "."),
-    ("de", ".", ","),
-    ("es", ".", ","),
-    ("es_CO", ".", ","),
-    ("es_CR", ".", ","),
-    ("es_GT", ".", ","),
-    ("es_NI", ".", ","),
-    ("es_VE", ".", ","),
-    ("it", ".", ","),
-    ("pt", ".", ","),
-    ("pt_BR", ".", ","),
-    ("nl", ".", ","),
-    ("ro", ".", ","),
-    ("hr", ".", ","),
-    ("sl", ".", ","),
-    ("sr", ".", ","),
-    ("tr", ".", ","),
-    ("el", ".", ","),
-    ("ru", " ", ","),
-    ("uk", " ", ","),
-    ("be", " ", ","),
-    ("bg", " ", ","),
-    ("pl", " ", ","),
-    ("cs", " ", ","),
-    ("sk", " ", ","),
-    ("hu", " ", ","),
-    ("sv", " ", ","),
-    ("no", " ", ","),
-    ("nn", " ", ","),
-    ("da", ".", ","),
-    ("fi", " ", ","),
-    ("et", " ", ","),
-    ("lt", " ", ","),
-    ("lv", " ", ","),
-    ("is", ".", ","),
-    ("fo", ".", ","),
-    ("ar", ",", "."),
-    ("fa", ",", "."),
-    ("he", ",", "."),
-];
-
-/// `formats.get_format`.
-fn get_format(lang: &str) -> (&'static str, &'static str) {
-    let find = |k: &str| {
-        NUMBER_FORMAT_DEFAULTS
-            .iter()
-            .find(|(n, _, _)| *n == k)
-            .map(|(_, t, d)| (*t, *d))
-    };
-    if let Some(f) = find(lang) {
-        return f;
-    }
-    // `lang.split("_")[0] if lang else ""` — `lang` is never None here.
-    let base = lang.split('_').next().unwrap_or("");
-    if !lang.is_empty() {
-        if let Some(f) = find(base) {
-            return f;
-        }
-    }
-    find("_default").expect("_default is always present")
-}
-
-/// `formats._to_number` — the only place an int/float distinction is made.
-fn to_number(s: &str) -> Result<W2nValue, W2nError> {
-    // re.fullmatch(r"\d+(?:\.\d+)?", s)
-    let ok = {
-        let mut it = s.chars().peekable();
-        let mut n_int = 0usize;
-        while it.peek().copied().is_some_and(is_unicode_digit) {
-            it.next();
-            n_int += 1;
-        }
-        let mut good = n_int > 0;
-        if good && it.peek() == Some(&'.') {
-            it.next();
-            let mut n_frac = 0usize;
-            while it.peek().copied().is_some_and(is_unicode_digit) {
-                it.next();
-                n_frac += 1;
-            }
-            good = n_frac > 0;
-        }
-        good && it.next().is_none()
-    };
-    if !ok {
-        return Err(W2nError::Words2Num(format!(
-            "not a parseable number: {}",
-            py_repr_str(s)
-        )));
-    }
-    // int()/float() fold Nd digits to their decimal value.
-    let ascii = to_ascii_digits(s);
-    if ascii.contains('.') {
-        Ok(W2nValue::Float(ascii.parse::<f64>().map_err(|e| {
-            W2nError::Words2Num(e.to_string())
-        })?))
-    } else {
-        Ok(W2nValue::Int(BigInt::from_str(&ascii).map_err(|e| {
-            W2nError::Words2Num(e.to_string())
-        })?))
-    }
-}
-
-/// `re.sub(r"[\s\xa0  ]", "", s)` — `\s` already covers all three
-/// named spaces, so this is `\s` plus belt-and-braces.
-fn strip_space_like(s: &str) -> String {
-    s.chars()
-        .filter(|c| !(py_is_space(*c) || matches!(c, '\u{a0}' | '\u{202f}' | '\u{2009}')))
-        .collect()
-}
-
-/// `formats._parse_with_explicit`.
-fn parse_with_explicit(
-    s: &str,
-    thousands_sep: Option<&str>,
-    decimal_sep: Option<&str>,
-) -> Result<W2nValue, W2nError> {
-    let mut s = s.to_string();
-    // `if thousands_sep:` — truthiness, so an empty separator is skipped.
-    if let Some(t) = thousands_sep.filter(|t| !t.is_empty()) {
-        if matches!(t, " " | "\u{a0}" | "\u{202f}" | "\u{2009}") {
-            s = strip_space_like(&s);
-        } else {
-            s = s.replace(t, "");
-        }
-    }
-    if let Some(d) = decimal_sep.filter(|d| !d.is_empty()) {
-        if d != "." {
-            if s.contains('.') {
-                // A non-dot decimal was configured but dots are present —
-                // Python drops them as stray separators. This is why
-                // parse_number_string("0.5", lang="fr") == 5.
-                s = s.replace('.', "");
-            }
-            s = s.replace(d, ".");
-        }
-    }
-    to_number(&s)
-}
-
-/// `formats._resolve_single_sep`.
-fn resolve_single_sep(s: &str, sep: char) -> String {
-    let parts: Vec<&str> = s.split(sep).collect();
-    if parts.len() > 2 {
-        return s.replace(sep, "");
-    }
-    let after = parts[1]; // len(parts) >= 2 — the caller only calls when sep is present
-    let n_after = after.chars().count();
-    if n_after == 3 && !parts[0].is_empty() && parts[0].chars().count() <= 3 {
-        if sep == '.' {
-            return s.to_string();
-        }
-        return s.replace(',', ".");
-    }
-    if n_after != 3 {
-        return if sep == '.' {
-            s.to_string()
-        } else {
-            s.replace(',', ".")
-        };
-    }
-    s.replace(sep, "")
-}
-
-/// `formats._auto_detect_parse`.
-fn auto_detect_parse(s: &str) -> Result<W2nValue, W2nError> {
-    // re.sub(r"[\s\xa0  '_]", "", s)
-    let s2: String = s
-        .chars()
-        .filter(|c| {
-            !(py_is_space(*c) || matches!(c, '\u{a0}' | '\u{202f}' | '\u{2009}' | '\'' | '_'))
-        })
-        .collect();
-    let has_comma = s2.contains(',');
-    let has_dot = s2.contains('.');
-
-    if has_comma && has_dot {
-        // Both present — the rightmost is the decimal.
-        let last_comma = s2.rfind(',');
-        let last_dot = s2.rfind('.');
-        let s3 = if last_comma > last_dot {
-            s2.replace('.', "").replace(',', ".")
-        } else {
-            s2.replace(',', "")
-        };
-        return to_number(&s3);
-    }
-    if has_comma {
-        return to_number(&resolve_single_sep(&s2, ','));
-    }
-    if has_dot {
-        return to_number(&resolve_single_sep(&s2, '.'));
-    }
-    to_number(&s2)
-}
-
-/// `sign * value`, where `sign` is Python's `int` 1 or -1.
-/// `int * int -> int`; `int * float -> float`.
-fn apply_sign(sign: i32, v: W2nValue) -> W2nValue {
-    if sign == 1 {
-        return v;
-    }
-    match v {
-        W2nValue::Int(i) => W2nValue::Int(-i),
-        W2nValue::Float(f) => W2nValue::Float(-f),
-        W2nValue::Dec(d) => W2nValue::Dec(-d),
-    }
-}
-
-/// `formats.parse_number_string`.
+/// [`crate::w2n_formats::parse_number_string`] in this module's value and error
+/// types. There used to be a private copy of the whole `formats.py` port here;
+/// two copies meant two places to fix every separator rule.
 fn parse_number_string(
     s: &str,
     thousands_sep: Option<&str>,
     decimal_sep: Option<&str>,
     lang: Option<&str>,
 ) -> Result<W2nValue, W2nError> {
-    let s = py_strip(s);
-    if s.is_empty() {
-        return Err(W2nError::Words2Num("empty numeric string".to_string()));
-    }
-    let mut sign = 1i32;
-    let mut rest = s;
-    let first = s.chars().next().unwrap();
-    if first == '+' || first == '-' {
-        if first == '-' {
-            sign = -1;
-        }
-        rest = py_strip_start(&s[first.len_utf8()..]);
-    }
-    if rest.is_empty() {
-        return Err(W2nError::Words2Num(
-            "empty numeric string after sign".to_string(),
-        ));
-    }
-    if thousands_sep.is_some() || decimal_sep.is_some() {
-        return Ok(apply_sign(
-            sign,
-            parse_with_explicit(rest, thousands_sep, decimal_sep)?,
-        ));
-    }
-    if let Some(l) = lang {
-        let (t, d) = get_format(l);
-        match parse_with_explicit(rest, Some(t), Some(d)) {
-            Ok(v) => return Ok(apply_sign(sign, v)),
-            Err(W2nError::Words2Num(_)) => {} // fall through to auto-detect
-            Err(e) => return Err(e),
-        }
-    }
-    Ok(apply_sign(sign, auto_detect_parse(rest)?))
+    crate::w2n_formats::parse_number_string(s, thousands_sep, decimal_sep, lang)
+        .map(formats_value)
+        .map_err(|e| W2nError::Words2Num(e.0))
 }
 
-/// Python's `str.lstrip()`.
-fn py_strip_start(s: &str) -> &str {
-    s.trim_start_matches(py_is_space)
+fn formats_value(v: crate::w2n_formats::W2nValue) -> W2nValue {
+    use crate::w2n_formats::W2nValue as F;
+    match v {
+        F::Int(i) => W2nValue::Int(i),
+        F::Float(f) => W2nValue::Float(f),
+        F::Dec(d) => W2nValue::Dec(d),
+    }
 }
 
 // ===========================================================================
@@ -2915,56 +3874,70 @@ fn quantity_currency(value: W2nValue, sym: &str, raw: &str) -> Quantity {
     }
 }
 
-/// `converters.auto._apply_scale`
-///
-/// ```python
-/// multiplier = SCALE_SUFFIXES[scale_str]   # KeyError escapes auto_parse
-/// if isinstance(value, int): return value * multiplier
-/// return float(value) * multiplier
-/// ```
+/// `converters.auto._apply_scale`, exact: the decimal point is shifted, never
+/// multiplied in binary floating point, so `$4.1bn` is 4100000000 and not
+/// 4099999999.9999995 (#71). A whole result is an `int`; `$1.2345k` stays the
+/// `Decimal` 1234.5.
 fn apply_scale(value: W2nValue, scale_str: &str) -> Result<W2nValue, W2nError> {
-    let multiplier =
-        scale_suffix(scale_str).ok_or_else(|| W2nError::Key(scale_str.to_string()))?;
+    let exp = scale_suffix(scale_str).ok_or_else(|| {
+        W2nError::Words2Num(format!("unknown scale suffix {}", py_repr_str(scale_str)))
+    })?;
+    let pow = |n: u32| BigInt::from(10u8).pow(n);
     match value {
-        W2nValue::Int(i) => Ok(W2nValue::Int(i * multiplier)),
-        // float(value) * multiplier — Python widens the int multiplier.
-        W2nValue::Float(f) => Ok(W2nValue::Float(f * bigint_to_f64(&multiplier))),
-        W2nValue::Dec(d) => Ok(W2nValue::Float(
-            bigdecimal_to_f64(&d) * bigint_to_f64(&multiplier),
-        )),
+        W2nValue::Int(i) => Ok(W2nValue::Int(i * pow(exp))),
+        // Unreachable: digit decimals parse to `Dec`. Kept total.
+        W2nValue::Float(f) => Ok(W2nValue::Float(f * 10f64.powi(exp as i32))),
+        W2nValue::Dec(d) => {
+            let (digits, scale) = d.normalized().as_bigint_and_exponent();
+            let scale = scale - i64::from(exp);
+            Ok(if scale <= 0 {
+                W2nValue::Int(digits * pow(u32::try_from(-scale).unwrap_or(0)))
+            } else {
+                W2nValue::Dec(BigDecimal::new(digits, scale))
+            })
+        }
     }
 }
 
-fn bigint_to_f64(i: &BigInt) -> f64 {
-    i.to_string().parse::<f64>().unwrap_or(f64::INFINITY)
-}
-
-fn bigdecimal_to_f64(d: &BigDecimal) -> f64 {
-    d.to_string().parse::<f64>().unwrap_or(f64::INFINITY)
+/// The other units a short token can stand for, as [`UNITS`] keys: "m" is a
+/// metre, a minute ("5m" on a timer) or a mile; a bare "°" is Celsius or
+/// Fahrenheit. Only these readings can be chosen with `prefer`.
+fn alternative_readings(token: &str) -> &'static [&'static str] {
+    match token {
+        "m" | "M" => &["min", "mi"],
+        "\u{b0}" => &["\u{b0}C", "\u{b0}F"],
+        _ => &[],
+    }
 }
 
 /// `converters.auto._resolve_unit`
 ///
-/// Returns `(info, override_long, confidence)`; `None` means the token is not
-/// a unit at all.
-fn resolve_unit(
-    unit_str: &str,
-    prefer: &HashMap<String, String>,
-) -> Option<(&'static UnitInfo, Option<&'static str>, f64)> {
+/// Returns `(info, confidence)`; `None` means the token is not a unit at all.
+///
+/// `prefer` maps a token to the unit the caller means by it
+/// (`{"m": "minute"}`, by long or short form). When that unit is a reading of
+/// the token (see [`alternative_readings`]) the whole preferred unit is
+/// returned — short form, long form and kind, so `"5m"` becomes `5 min`, a
+/// time (#203). A target that is not a reading of the token (`{"m": "kg"}`) or
+/// not a unit at all is ignored.
+fn resolve_unit(unit_str: &str, prefer: &HashMap<String, String>) -> Option<(&'static UnitInfo, f64)> {
     // Direct hit, then a lowercased retry (so "°C"/"K" keep their casing).
     let info = units_get(unit_str).or_else(|| units_get(&unit_str.to_lowercase()))?;
 
     // prefer-override is keyed on the ORIGINAL token, not the lowercased one.
     if let Some(target) = prefer.get(unit_str).filter(|t| !t.is_empty()) {
-        for (_, u) in UNITS.iter() {
-            if u.long == target || u.short == target {
-                // Keep the original short token, flip the long form, and clamp
-                // confidence to reflect the caller stepping in.
-                return Some((info, Some(u.long), info.confidence.max(0.9)));
+        let wanted = UNITS
+            .iter()
+            .find(|(_, u)| u.long == target || u.short == target);
+        if let Some((key, u)) = wanted {
+            let reading = u.short == info.short || alternative_readings(unit_str).contains(key);
+            if reading {
+                // Confidence reflects the caller stepping in.
+                return Some((u, info.confidence.max(0.9)));
             }
         }
     }
-    Some((info, None, info.confidence))
+    Some((info, info.confidence))
 }
 
 /// `converters.auto._try_digit_unit`
@@ -3016,7 +3989,7 @@ fn try_digit_unit(
     let num_str = py_strip(&num).to_string();
     let unit_str = py_strip(&unit).to_string();
 
-    let Some((info, alt_long, conf)) = resolve_unit(&unit_str, prefer) else {
+    let Some((info, conf)) = resolve_unit(&unit_str, prefer) else {
         return Ok(None);
     };
     let value = match parse_number_string(&num_str, thousands_sep, decimal_sep, Some(lang)) {
@@ -3027,7 +4000,7 @@ fn try_digit_unit(
     Ok(Some(Quantity {
         value,
         unit: Some(info.short.to_string()),
-        unit_long: Some(alt_long.unwrap_or(info.long).to_string()),
+        unit_long: Some(info.long.to_string()),
         kind: Some(info.kind.to_string()),
         confidence: conf,
         raw: String::new(),
@@ -3105,7 +4078,7 @@ fn try_word_unit(
             // ORIGINAL tail, not the lowercased/rstripped one — which is why
             // "five lbs" works (UNITS has "lbs") but "forty-two kgs" does not.
             match resolve_unit(raw_tail, prefer) {
-                Some((info, _alt, _conf)) => (info.short, info.kind),
+                Some((info, _conf)) => (info.short, info.kind),
                 None => return Ok(None),
             }
         }
@@ -3158,6 +4131,11 @@ fn try_word_unit(
 /// The `isinstance(text, str)` guard has no analogue here — `text` is `&str`.
 /// A binding that accepts `PyAny` must reproduce
 /// `Words2NumError("expected str, got %r" % type(text).__name__)` itself.
+///
+/// The language and the separator overrides are checked before anything is
+/// parsed: an unsupported `lang` raises `NotImplementedError` like
+/// `words2num` does (#204), and `thousands_sep == decimal_sep` is refused
+/// (#188). Digit decimals are exact `Decimal`s (#71).
 pub fn auto_parse(
     text: &str,
     lang: &str,
@@ -3165,6 +4143,10 @@ pub fn auto_parse(
     thousands_sep: Option<&str>,
     decimal_sep: Option<&str>,
 ) -> Result<Quantity, W2nError> {
+    let resolved = resolve_lang(lang)?;
+    crate::w2n_formats::check_separators(thousands_sep, decimal_sep)
+        .map_err(|e| W2nError::Words2Num(e.0))?;
+    let lang = resolved.as_str();
     let raw = text;
     let text = py_strip(text);
     if text.is_empty() {
@@ -3336,7 +4318,17 @@ fn match_quantity_at(chars: &[char], pos: usize) -> Option<usize> {
 /// if isinstance(value, float) and value.is_integer(): return str(int(value))
 /// return str(value)
 /// ```
+///
+/// A `Decimal` is written plainly, without trailing fraction zeros or an
+/// exponent: `12.50` → `12.5`, `12345.00` → `12345` — what the float this
+/// used to be printed.
+///
+/// A float is written positionally too: Python's `str()` writes `1e-07`, which
+/// has no place in rewritten text (#202).
 fn format_number(value: &W2nValue) -> String {
+    if let W2nValue::Dec(d) = value {
+        return d.normalized().to_plain_string();
+    }
     if let W2nValue::Float(f) = value {
         // float.is_integer() is False for inf/nan.
         if f.is_finite() && f.fract() == 0.0 {
@@ -3348,7 +4340,7 @@ fn format_number(value: &W2nValue) -> String {
             }
         }
     }
-    value.py_str()
+    value.text_str()
 }
 
 /// `converters.auto._IRREGULAR_PLURALS`
@@ -3426,9 +4418,10 @@ fn format_quantity(q: &Quantity, expand: bool) -> String {
 /// Port of `converters.auto.auto_parse_sentence`.
 ///
 /// Walks free text and rewrites every quantity expression in place. A match
-/// that `auto_parse` rejects with `Words2NumError` is left verbatim — but a
-/// `KeyError` (see [`W2nError::Key`]) propagates, exactly as in Python, where
-/// `_replace` only catches `Words2NumError`.
+/// that `auto_parse` rejects with `Words2NumError` is left verbatim. The
+/// language and the separator overrides are checked once, up front, so an
+/// unsupported `lang` or `thousands_sep == decimal_sep` raises instead of
+/// leaving every span untouched (#188, #204).
 pub fn auto_parse_sentence(
     text: &str,
     lang: &str,
@@ -3437,6 +4430,9 @@ pub fn auto_parse_sentence(
     decimal_sep: Option<&str>,
     expand: bool,
 ) -> Result<String, W2nError> {
+    resolve_lang(lang)?;
+    crate::w2n_formats::check_separators(thousands_sep, decimal_sep)
+        .map_err(|e| W2nError::Words2Num(e.0))?;
     let chars: Vec<char> = text.chars().collect();
     let mut out = String::new();
     let mut i = 0usize;
@@ -3468,6 +4464,76 @@ mod tests {
 
     fn int(n: i64) -> W2nValue {
         W2nValue::Int(BigInt::from(n))
+    }
+
+    /// #192: codes are case-insensitive, with `-` or `_`, and unknown
+    /// region subtags fall back to the base language.
+    #[test]
+    fn resolve_lang_ignores_case_issue_192() {
+        for (code, key) in [
+            ("EN", "en"),
+            ("FR", "fr"),
+            ("En", "en"),
+            ("EN-US", "en"),
+            ("en_us", "en"),
+            ("en-us", "en"),
+            ("PT-BR", "pt_BR"),
+            ("pt_br", "pt_BR"),
+            ("SR_LATN", "sr_Latn"),
+            ("sr-Latn-RS", "sr_Latn"),
+            ("ZH-tw", "zh_TW"),
+            ("en_Aero_FAA", "en_Aero_FAA"),
+            ("en_aero_icao", "en_aero_icao"),
+        ] {
+            assert_eq!(resolve_lang(code).unwrap(), key, "{code}");
+        }
+        assert_eq!(
+            words2num("one", "EN", "cardinal").unwrap(),
+            crate::w2n_lang_en::W2nValue::Int(1.into())
+        );
+    }
+
+    /// #197: no "first two characters" guess. Language names and unknown
+    /// three-letter codes are rejected, not read as a different language.
+    #[test]
+    fn resolve_lang_rejects_names_and_prefixes_issue_197() {
+        for code in [
+            "swedish", "estonian", "kazakh", "kannada", "slovak", "latvian", "enx", "english",
+            "e", "", "_en", "en__US",
+        ] {
+            assert!(
+                matches!(resolve_lang(code), Err(W2nError::NotImplemented(_))),
+                "{code} must be rejected, got {:?}",
+                resolve_lang(code)
+            );
+        }
+        // Real ISO 639-2 codes still resolve, terminological and bibliographic.
+        for (code, key) in [("eng", "en"), ("fra", "fr"), ("fre", "fr"), ("deu", "de"),
+                            ("ger", "de"), ("swe", "sv"), ("est", "et"), ("ENG-US", "en")] {
+            assert_eq!(resolve_lang(code).unwrap(), key, "{code}");
+        }
+        // Every alias names a supported key and never shadows one.
+        for (alias, key) in ISO_639_2_ALIASES {
+            assert!(is_known_lang(key), "{alias} -> {key} is not a supported key");
+            assert!(!is_known_lang(alias), "{alias} is itself a key");
+        }
+    }
+
+    /// #201: an unknown `to` raises in sentence mode like in `words2num`.
+    #[test]
+    fn sentence_rejects_unknown_to_issue_201() {
+        for (text, lang, to) in [("twenty five", "en", "bogus"), ("vingt cinq", "fr", "cardnal")] {
+            assert!(
+                matches!(
+                    words2num_sentence(text, lang, to, false),
+                    Err(W2nError::NotImplemented(ref m)) if m.contains("unsupported")
+                ),
+                "{to}"
+            );
+        }
+        for to in CONVERTER_TYPES {
+            assert!(words2num_sentence("twenty five", "en", to, false).is_ok(), "{to}");
+        }
     }
 
     #[test]
@@ -3555,7 +4621,7 @@ mod tests {
     fn auto_parse_currency_and_units() {
         let prefer = HashMap::new();
         let q = auto_parse("$12.50", "en", &prefer, None, None).unwrap();
-        assert_eq!(q.value, W2nValue::Float(12.5));
+        assert_eq!(q.value, W2nValue::Dec(BigDecimal::from_str("12.50").unwrap()));
         assert_eq!(q.unit.as_deref(), Some("USD"));
         assert_eq!(q.kind.as_deref(), Some("currency"));
 
@@ -3566,11 +4632,11 @@ mod tests {
         let q = auto_parse("$5bn", "en", &prefer, None, None).unwrap();
         assert_eq!(q.value, int(5_000_000_000));
 
-        // KeyError escapes for an invalid scale suffix.
-        assert_eq!(
+        // An unknown scale suffix is a Words2NumError, not a KeyError (#194).
+        assert!(matches!(
             auto_parse("$5kn", "en", &prefer, None, None),
-            Err(W2nError::Key("kn".to_string()))
-        );
+            Err(W2nError::Words2Num(_))
+        ));
     }
 
     #[test]
@@ -3682,5 +4748,401 @@ mod digits_tests {
         );
         assert_eq!(s("una llamada", "es", "cardinal", false).unwrap(), "una llamada");
         assert_eq!(s("ciento uno", "es", "cardinal", false).unwrap(), "101");
+    }
+
+}
+
+#[cfg(test)]
+mod ordinal_tests {
+    use super::{words2num, words2num_sentence};
+
+    fn ordnum(text: &str, lang: &str) -> Option<i64> {
+        match words2num(text, lang, "ordinal_num") {
+            Ok(crate::w2n_lang_en::W2nValue::Int(n)) => n.to_string().parse().ok(),
+            _ => None,
+        }
+    }
+
+    fn ord(text: &str, lang: &str) -> Option<i64> {
+        match words2num(text, lang, "ordinal") {
+            Ok(crate::w2n_lang_en::W2nValue::Int(n)) => n.to_string().parse().ok(),
+            _ => None,
+        }
+    }
+
+    /// Inflected ordinal forms (ordA) meet the gender forms (forms): a cardinal
+    /// run whose last word is also an ordinal form stays a cardinal, and a
+    /// number before a plural ordinal is a fraction kept in words.
+    #[test]
+    fn cardinal_runs_and_fractions_next_to_ordinal_forms() {
+        let s = |t: &str, l: &str| words2num_sentence(t, l, "cardinal", false).unwrap();
+        assert_eq!(s("tři sta korun", "cs"), "300 korun"); // "sta" is also "stá" (100th)
+        assert_eq!(s("dvě stě korun", "cs"), "200 korun");
+        assert_eq!(s("две стотни", "bg"), "две стотни"); // two hundredths
+        assert_eq!(s("две хиляди", "bg"), "2000");
+    }
+
+    #[test]
+    fn ordinal_table_has_no_minus_first_issue_62() {
+        assert_eq!(ord("üheksas", "et"), Some(9));
+        assert_eq!(ord("kesepuluh", "ms"), Some(10));
+    }
+
+    #[test]
+    fn ordinal_num_prefix_hyphen_is_not_a_sign_issue_63() {
+        assert_eq!(ordnum("ika-1", "fil"), Some(1));
+        assert_eq!(ordnum("ika-21", "tl"), Some(21));
+        assert_eq!(ordnum("we-100", "zu"), Some(100));
+        assert_eq!(ordnum("ka-21", "ban"), Some(21));
+        assert_eq!(ordnum("ke-21", "ms"), Some(21));
+        assert_eq!(ordnum("-5th", "en"), Some(-5));
+    }
+
+    #[test]
+    fn ordinal_num_reads_grouped_figures_issue_64() {
+        assert_eq!(ordnum("1,000th", "en"), Some(1000));
+        assert_eq!(ordnum("1.000.", "de"), Some(1000));
+        assert_eq!(ordnum("1 000e", "fr"), Some(1000));
+        assert_eq!(ordnum("1.000.000th", "en"), Some(1000000));
+        assert_eq!(ordnum("2.5th", "en"), None);
+        assert_eq!(ordnum("covid19", "en"), None);
+        assert_eq!(ordnum("we21", "xh"), Some(21)); // xh glues its marker
+        assert_eq!(ordnum("第21", "ja"), Some(21));
+        assert_eq!(ordnum("21.", "sr_Latn"), Some(21));
+    }
+
+    #[test]
+    fn ordinal_num_reads_latin_roman_numerals_issue_127() {
+        assert_eq!(ordnum("XXI", "la"), Some(21));
+        assert_eq!(ordnum("MMXXIV", "la"), Some(2024));
+        assert_eq!(ordnum("IIII", "la"), None);
+        assert_eq!(ordnum("XXI", "en"), None);
+    }
+
+    #[test]
+    fn ordinal_num_reads_the_word_forms_ar_bn_render_issue_246() {
+        assert_eq!(ordnum("الأول", "ar"), Some(1));
+        assert_eq!(ordnum("الأول والعشرون", "ar"), Some(21));
+        assert_eq!(ordnum("একুশতম", "bn"), Some(21));
+        assert_eq!(ordnum("প্রথম", "bn"), Some(1));
+        assert_eq!(ordnum("twenty-first", "en"), None); // en renders figures
+    }
+
+    #[test]
+    fn ordinals_above_the_table_issue_125() {
+        assert_eq!(ord("dix mille unième", "fr"), Some(10001));
+        assert_eq!(ord("douze mille trois cent quarante-cinquième", "fr"), Some(12345));
+        assert_eq!(ord("zwanzigtausendste", "de"), Some(20000));
+        assert_eq!(ord("millonésimo", "es"), Some(1000000));
+    }
+
+    #[test]
+    fn compound_ordinal_spoken_in_parts_issue_70() {
+        let s = |t: &str, l: &str| words2num_sentence(t, l, "cardinal", false).unwrap();
+        assert_eq!(s("vigésimo cuarto piso", "es"), "24º piso");
+        assert_eq!(s("el vigésimo segundo piso", "es"), "el 22º piso");
+        assert_eq!(s("kırk ikinci", "tr"), "42'nci");
+        assert_eq!(s("venti quattresimo", "it"), "24º");
+        assert_eq!(s("al douăzeci și unulea", "ro"), "al 21-lea");
+        assert_eq!(s("dwadzieścia pierwszy", "pl"), "dwadzieścia pierwszy");
+        assert_eq!(s("двадцать первый день", "ru"), "двадцать первый день");
+        // Not a compound where the language does not build one that way.
+        assert_eq!(s("les vingt premiers", "fr"), "les 20 premiers");
+        assert_eq!(s("los veinte primeros", "es"), "los 20 primeros");
+    }
+
+    #[test]
+    fn agreed_ordinal_keeps_its_ending_in_figures_issue_153() {
+        let s = |t: &str, l: &str| words2num_sentence(t, l, "cardinal", false).unwrap();
+        assert_eq!(s("पहली बार", "hi"), "१ली बार");
+        assert_eq!(s("पहला दिन", "hi"), "१ला दिन");
+        assert_eq!(s("પહેલી વાર", "gu"), "૧લી વાર");
+        assert_eq!(s("ikinciye geldi", "tr"), "2'nciye geldi");
+        assert_eq!(s("нэгдүгээр анги", "mn"), "1 дүгээр анги");
+        // Nothing is appended to figures that end in punctuation.
+        let one = num_bigint::BigInt::from(1);
+        assert_eq!(super::agree_figures("hu", &one, "elsőt", "1.".to_string()), "1.");
+    }
+}
+
+#[cfg(test)]
+mod digit_mode_tests {
+    use super::words2num_sentence as s;
+    use crate::w2n_lang_en::W2nValue;
+    use num_bigint::BigInt;
+
+    fn digits(text: &str, lang: &str) -> Option<BigInt> {
+        match super::words2num(text, lang, "digits") {
+            Ok(W2nValue::Int(n)) => Some(n),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn hyphenated_digit_words() {
+        // #50: Wolof 6-9 are one hyphenated word each.
+        assert_eq!(digits("ñaar juróom-ñaar juróom", "wo"), Some(BigInt::from(275)));
+        assert_eq!(digits("juróom-ñeent juróom-ñett", "wo"), Some(BigInt::from(98)));
+        assert_eq!(digits("one-two-three", "en"), Some(BigInt::from(123)));
+    }
+
+    #[test]
+    fn multi_token_digit_words() {
+        // #106: lus/miz zero is "a awmlo".
+        assert_eq!(digits("a awmlo", "lus"), Some(BigInt::from(0)));
+        assert_eq!(digits("pakhat a awmlo a awmlo", "miz"), Some(BigInt::from(100)));
+    }
+
+    #[test]
+    fn double_triple_and_leading_zeros() {
+        // #190: "double"/"triple" in to="digits"; #195: the int drops leading
+        // zeros, the sentence keeps them.
+        assert_eq!(digits("double zero seven", "en"), Some(BigInt::from(7)));
+        assert_eq!(digits("triple five o one", "en"), Some(BigInt::from(55501)));
+        assert_eq!(digits("double", "en"), None);
+        assert_eq!(s("call double zero seven", "en", "digits", false).unwrap(), "call 007");
+        assert_eq!(s("zero zero seven", "en", "digits", false).unwrap(), "007");
+        assert_eq!(s("zéro six un deux", "fr", "digits", false).unwrap(), "0612");
+    }
+
+    #[test]
+    fn long_runs_do_not_overflow() {
+        // #215: a run longer than i64 is still read.
+        let nines = vec!["neuf"; 25].join(" ");
+        assert_eq!(digits(&nines, "fr"), Some("9".repeat(25).parse().unwrap()));
+    }
+
+    #[test]
+    fn regional_english_sentences() {
+        // #193
+        assert_eq!(s("born in nineteen ninety nine", "en_IN", "cardinal", false).unwrap(), "born in 1999");
+        assert_eq!(s("a hundred dollars", "en_IN", "cardinal", false).unwrap(), "100 dollars");
+        assert_eq!(s("two point five million", "en_NG", "cardinal", false).unwrap(), "2.5 million");
+        assert_eq!(s("point five", "en_IN", "cardinal", false).unwrap(), "0.5");
+        assert_eq!(s("double zero seven", "en_NP", "cardinal", false).unwrap(), "007");
+        assert_eq!(s("one lakh people", "en_IN", "cardinal", false).unwrap(), "100000 people");
+    }
+
+    #[test]
+    fn stacked_and_juxtaposed_in_sentences() {
+        // #57, #58
+        assert_eq!(s("a thousand million people", "en", "cardinal", false).unwrap(), "1000000000 people");
+        assert_ne!(s("rooms one hundred one hundred and two", "en", "cardinal", false).unwrap(), "rooms 10102");
+    }
+}
+
+/// The October 2026 audit fixes to `auto_parse` / `auto_parse_sentence`.
+#[cfg(test)]
+mod auto_parse_audit_tests {
+    use super::*;
+
+    fn q(text: &str, lang: &str) -> Result<Quantity, W2nError> {
+        auto_parse(text, lang, &HashMap::new(), None, None)
+    }
+    fn sent(text: &str) -> String {
+        auto_parse_sentence(text, "en", &HashMap::new(), None, None, false).unwrap()
+    }
+    fn dec(s: &str) -> W2nValue {
+        W2nValue::Dec(BigDecimal::from_str(s).unwrap())
+    }
+    fn int(n: i64) -> W2nValue {
+        W2nValue::Int(BigInt::from(n))
+    }
+
+    /// #71: digit decimals are exact and scale suffixes shift the point.
+    #[test]
+    fn digit_decimals_are_exact() {
+        assert_eq!(q("$4.1bn", "en").unwrap().value, int(4_100_000_000));
+        assert_eq!(q("$1.005k", "en").unwrap().value, int(1005));
+        assert_eq!(q("$1.2345k", "en").unwrap().value, dec("1234.5"));
+        assert_eq!(sent("cost $4.1bn total"), "cost 4100000000 USD total");
+        assert_eq!(sent("$12345678901234567.89"), "12345678901234567.89 USD");
+        assert_eq!(sent("Pay $12.50 now"), "Pay 12.5 USD now");
+    }
+
+    /// #194: "n" spellings of the large scales, and no KeyError.
+    #[test]
+    fn scale_suffix_spellings() {
+        assert_eq!(q("$5Mn", "en").unwrap().value, int(5_000_000));
+        assert_eq!(q("$5TN", "en").unwrap().value, int(5_000_000_000_000));
+        assert_eq!(q("$5BN", "en").unwrap().value, int(5_000_000_000));
+        assert!(matches!(q("$5kn", "en"), Err(W2nError::Words2Num(_))));
+        assert_eq!(sent("it cost $5kn today"), "it cost $5kn today");
+    }
+
+    /// #53: a dot decimal survives a comma-decimal locale.
+    #[test]
+    fn dot_decimal_in_comma_locale() {
+        assert_eq!(q("3.14 m", "fr").unwrap().value, dec("3.14"));
+        assert_eq!(q("2.5%", "fr").unwrap().value, dec("2.5"));
+    }
+
+    /// #54: a hyphenated locale uses its own separators.
+    #[test]
+    fn hyphenated_locale() {
+        let v = q("1.234,56 \u{20ac}", "pt-BR").unwrap();
+        assert_eq!(v.value, dec("1234.56"));
+        assert_eq!(v.unit.as_deref(), Some("EUR"));
+    }
+
+    /// #188: identical separator overrides raise, even in sentence mode.
+    #[test]
+    fn identical_separators_raise() {
+        let p = HashMap::new();
+        assert!(matches!(
+            auto_parse("$1,5", "en", &p, Some(","), Some(",")),
+            Err(W2nError::Words2Num(_))
+        ));
+        assert!(matches!(
+            auto_parse_sentence("pay $1,5 now", "en", &p, Some(","), Some(","), false),
+            Err(W2nError::Words2Num(_))
+        ));
+    }
+
+    /// #204: an unsupported language raises NotImplementedError up front.
+    #[test]
+    fn unknown_lang_raises() {
+        let p = HashMap::new();
+        assert!(matches!(q("$5", "xx"), Err(W2nError::NotImplemented(_))));
+        assert!(matches!(q("forty", "xx"), Err(W2nError::NotImplemented(_))));
+        assert!(matches!(
+            auto_parse_sentence("forty two kg", "xx", &p, None, None, false),
+            Err(W2nError::NotImplemented(_))
+        ));
+    }
+
+    /// #203: `prefer` swaps the whole unit, and only for a real reading.
+    #[test]
+    fn prefer_swaps_the_unit() {
+        let mut p = HashMap::new();
+        p.insert("m".to_string(), "minute".to_string());
+        let v = auto_parse("5m", "en", &p, None, None).unwrap();
+        assert_eq!(v.unit.as_deref(), Some("min"));
+        assert_eq!(v.unit_long.as_deref(), Some("minute"));
+        assert_eq!(v.kind.as_deref(), Some("time"));
+        assert_eq!(
+            auto_parse_sentence("ran 5m", "en", &p, None, None, false).unwrap(),
+            "ran 5 min"
+        );
+        p.insert("m".to_string(), "mile".to_string());
+        assert_eq!(auto_parse("5m", "en", &p, None, None).unwrap().unit.as_deref(), Some("mi"));
+        // Not a reading of "m": ignored, the metre stands.
+        for target in ["kg", "bogus"] {
+            p.insert("m".to_string(), target.to_string());
+            let v = auto_parse("5m", "en", &p, None, None).unwrap();
+            assert_eq!(v.unit.as_deref(), Some("m"));
+            assert_eq!(v.unit_long.as_deref(), Some("meter"));
+            assert_eq!(v.kind.as_deref(), Some("length"));
+        }
+    }
+}
+
+/// Sentence walker fixes from the October 2026 audit, one test per issue.
+#[cfg(test)]
+mod audit_tests {
+    use super::words2num_sentence as s;
+
+    fn c(text: &str, lang: &str) -> String {
+        s(text, lang, "cardinal", false).unwrap()
+    }
+
+    #[test]
+    fn issue_51_two_digit_words_are_a_range() {
+        assert_eq!(c("two three minutes", "en"), "2 3 minutes");
+        assert_eq!(c("deux trois minutes", "fr"), "2 3 minutes");
+        assert_eq!(c("zero six", "en"), "06");
+        assert_eq!(c("four five six", "en"), "456");
+    }
+
+    #[test]
+    fn issue_68_digit_tokens_never_join_a_run() {
+        assert_eq!(c("nineteen 90", "en"), "19 90");
+        assert_eq!(c("born twenty 1990", "en"), "born 20 1990");
+        assert_eq!(c("cinq 5", "fr"), "5 5");
+    }
+
+    #[test]
+    fn issue_79_oh_alone_is_a_word() {
+        assert_eq!(c("oh no", "en"), "oh no");
+        assert_eq!(c("I said oh", "en"), "I said oh");
+        assert_eq!(c("room oh seven", "en"), "room 07");
+    }
+
+    /// 2000 number tokens that never merge: each start used to re-parse a run
+    /// growing to the end of the text, O(n^3).
+    #[test]
+    fn issue_186_long_runs_are_linear() {
+        for (lang, word) in [("de", "zweitausend"), ("it", "duemila"), ("es", "mil"), ("en", "nineteen ninety")] {
+            let text = vec![word; 2000].join(" ");
+            let start = std::time::Instant::now();
+            let out = c(&text, lang);
+            assert!(!out.is_empty());
+            assert!(
+                start.elapsed().as_secs_f64() < 20.0,
+                "{lang}: 2000 tokens took {:?}",
+                start.elapsed()
+            );
+        }
+    }
+
+    #[test]
+    fn issue_74_77_78_179_180_aliases() {
+        assert_eq!(c("Около трёх тысяч человек.", "ru"), "Около 3000 человек.");
+        assert_eq!(c("około trzech tysięcy osób", "pl"), "około 3000 osób");
+        assert_eq!(c("دفعت ثلاثة وعشرين يورو", "ar"), "دفعت 23 يورو");
+        assert_eq!(c("ba mươi tư", "vi"), "34");
+        assert_eq!(c("hai nghìn không trăm hai mươi", "vi"), "2020");
+        assert_eq!(c("δεκαοχτώ", "el"), "18");
+        assert_eq!(c("tres kroner", "da"), "60 kroner");
+        assert_eq!(c("pětadvacet korun", "cs"), "25 korun");
+        assert_eq!(c("șaișpe", "ro"), "16");
+        // The cardinal API reads them too; the renderer's own spelling wins.
+        assert!(matches!(super::words2num("трёх", "ru", "cardinal"), Ok(crate::w2n_lang_en::W2nValue::Int(v)) if v == 3.into()));
+    }
+
+    #[test]
+    fn issue_75_tr_spaced_hundreds() {
+        assert_eq!(c("üç yüz bin beş yüz", "tr"), "300500");
+        assert_eq!(c("Ev üç yüz bin lira.", "tr"), "Ev 300000 lira.");
+    }
+
+    #[test]
+    fn issue_73_76_184_affixes() {
+        assert_eq!(c("on ikide", "tr"), "12'de");
+        assert_eq!(c("yüzde elli", "tr"), "yüzde 50");
+        assert_eq!(c("Háromkor találkozunk.", "hu"), "3-kor találkozunk.");
+        assert_eq!(c("Tulen viidellä bussilla.", "fi"), "Tulen 5:llä bussilla.");
+        assert_eq!(c("נולד באלף תשע מאות תשעים ותשע", "he"), "נולד ב-1999");
+        assert_eq!(c("البيت بثلاثمائة ألف دولار", "ar"), "البيت ب300000 دولار");
+        assert_eq!(c("le train d'onze heures", "fr"), "le train d'11 heures");
+        assert_eq!(c("l'un d'entre eux", "fr"), "l'un d'entre eux");
+    }
+
+    #[test]
+    fn issue_177_unspaced_scripts() {
+        assert_eq!(c("我买了三个苹果。", "zh"), "我买了3个苹果。");
+        assert_eq!(c("家は三百万円です。", "ja"), "家は3000000円です。");
+        assert_eq!(c("ฉันจ่ายยี่สิบสามบาท", "th"), "ฉันจ่าย23บาท");
+        assert_eq!(c("我们一起去", "zh"), "我们一起去");
+        assert_eq!(c("สามารถ", "th"), "สามารถ");
+    }
+
+    #[test]
+    fn issue_178_ko_native_numerals() {
+        assert_eq!(c("사과 세 개를 샀어요.", "ko"), "사과 3 개를 샀어요.");
+        assert_eq!(c("그녀는 서른다섯 살이에요.", "ko"), "그녀는 35 살이에요.");
+        assert_eq!(c("하나 둘 셋", "ko"), "1 2 3");
+        assert_eq!(c("네, 알겠습니다", "ko"), "네, 알겠습니다");
+        assert_eq!(c("집은 삼만원이에요", "ko"), "집은 30000원이에요");
+    }
+
+    #[test]
+    fn issue_202_no_exponent_in_text() {
+        assert_eq!(c("zero point zero zero zero zero zero zero one", "en"), "0.0000001");
+        let prefer = std::collections::HashMap::new();
+        assert_eq!(
+            super::auto_parse_sentence("0.0000001 kg", "en", &prefer, None, None, false).unwrap(),
+            "0.0000001 kg"
+        );
     }
 }

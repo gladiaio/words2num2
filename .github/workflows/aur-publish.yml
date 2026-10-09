@@ -35,22 +35,28 @@ jobs:
       - name: Wait for PyPI sdist to be live
         run: |
           VER="${{ steps.ver.outputs.version }}"
-          for i in $(seq 1 60); do
+          # auto-release dispatches this alongside release.yml, which needs
+          # the wheel builds and tests to finish first: wait up to an hour,
+          # and fail (rather than hash an error page) if it never appears.
+          for i in $(seq 1 360); do
             CODE=$(curl -sL -o /dev/null -w "%{http_code}" \
               "https://files.pythonhosted.org/packages/source/w/words2num2/words2num2-${VER}.tar.gz")
             if [ "$CODE" = "200" ]; then
               echo "PyPI sdist for $VER is live."
-              break
+              exit 0
             fi
-            echo "Waiting for PyPI sdist... ($i/60) (got $CODE)"
+            echo "Waiting for PyPI sdist... ($i/360) (got $CODE)"
             sleep 10
           done
+          echo "::error::PyPI sdist for $VER never appeared"
+          exit 1
 
       - name: Compute sha256 of PyPI sdist
         id: sha
         run: |
+          set -euo pipefail
           VER="${{ steps.ver.outputs.version }}"
-          SHA=$(curl -sL "https://files.pythonhosted.org/packages/source/w/words2num2/words2num2-${VER}.tar.gz" | sha256sum | awk '{print $1}')
+          SHA=$(curl -sfL "https://files.pythonhosted.org/packages/source/w/words2num2/words2num2-${VER}.tar.gz" | sha256sum | awk '{print $1}')
           echo "sha=$SHA" >> $GITHUB_OUTPUT
           echo "sha256: $SHA"
 

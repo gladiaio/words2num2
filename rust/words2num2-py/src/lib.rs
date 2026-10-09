@@ -205,13 +205,24 @@ fn parse_number_string(
     }
 }
 
+/// `TypeError: <func>() got an unexpected keyword argument 'precision'` for the
+/// first key of a non-empty `kwargs`, the message Python itself gives (#199).
+fn reject_kwargs(func: &str, kwargs: Option<&Bound<'_, PyDict>>) -> PyResult<()> {
+    if let Some((key, _)) = kwargs.and_then(|d| d.iter().next()) {
+        return Err(PyTypeError::new_err(format!(
+            "{func}() got an unexpected keyword argument {}",
+            key.repr()?
+        )));
+    }
+    Ok(())
+}
+
 /// `_rust.words2num(text, lang, to, kwargs)` — the public single-token entry.
 ///
 /// Mirrors `words2num2.words2num(text, lang, to, **kwargs)`: the core owns the
 /// whole dispatch (`_resolve_lang`, the en-vs-reverse-table choice, the `to`
-/// mode selection). Python forwarded `**kwargs` straight to `to_<to>(text)`,
-/// which accepts none, so any keyword argument is a `TypeError` — reproduced
-/// here rather than passed down.
+/// mode selection). No conversion takes extra keyword arguments, so any key in
+/// `kwargs` is a `TypeError` naming it, as Python's own would.
 #[pyfunction]
 #[pyo3(signature = (text, lang="en", to="cardinal", kwargs=None))]
 fn words2num(
@@ -221,12 +232,10 @@ fn words2num(
     to: &str,
     kwargs: Option<Bound<'_, PyDict>>,
 ) -> PyResult<Py<PyAny>> {
-    if kwargs.as_ref().is_some_and(|d| !d.is_empty()) {
-        return Err(PyTypeError::new_err(
-            "words2num() got an unexpected keyword argument",
-        ));
-    }
-    match words2num2_core::words2num(text, lang, to) {
+    reject_kwargs("words2num", kwargs.as_ref())?;
+    let (text, lang, to) = (text.to_owned(), lang.to_owned(), to.to_owned());
+    // Pure Rust from here: other Python threads run meanwhile (#186).
+    match py.detach(move || words2num2_core::words2num(&text, &lang, &to)) {
         Ok(v) => en_value_to_py(py, v),
         Err(e) => Err(w2n_error_to_pyerr(py, e)),
     }
@@ -243,10 +252,12 @@ fn words2num_sentence(
     kwargs: Option<Bound<'_, PyDict>>,
     currency: bool,
 ) -> PyResult<String> {
-    // Python passed `kwargs or None`, so a present dict is always non-empty;
-    // the guard keeps parity if an empty dict is ever passed directly.
-    let has_kwargs = kwargs.as_ref().is_some_and(|d| !d.is_empty());
-    w2n_sentence::words2num_sentence_opts(sentence, lang, to, has_kwargs, currency)
+    // A stray keyword used to make every conversion fail silently, handing the
+    // sentence back unchanged (#201); it is a TypeError like in `words2num`.
+    reject_kwargs("words2num_sentence", kwargs.as_ref())?;
+    let (sentence, lang, to) = (sentence.to_owned(), lang.to_owned(), to.to_owned());
+    // A long transcript takes a while: release the GIL for the walk (#186).
+    py.detach(move || w2n_sentence::words2num_sentence_opts(&sentence, &lang, &to, false, currency))
         .map_err(|e| w2n_error_to_pyerr(py, e))
 }
 
@@ -270,7 +281,12 @@ fn auto_parse(
     decimal_sep: Option<&str>,
 ) -> PyResult<Py<PyAny>> {
     let prefer = prefer.unwrap_or_default();
-    match w2n_sentence::auto_parse(text, lang, &prefer, thousands_sep, decimal_sep) {
+    let (text, lang) = (text.to_owned(), lang.to_owned());
+    let (ts, ds) = (thousands_sep.map(str::to_owned), decimal_sep.map(str::to_owned));
+    let parsed = py.detach(move || {
+        w2n_sentence::auto_parse(&text, &lang, &prefer, ts.as_deref(), ds.as_deref())
+    });
+    match parsed {
         Ok(q) => quantity_to_py(py, q),
         Err(e) => Err(w2n_error_to_pyerr(py, e)),
     }
@@ -290,8 +306,12 @@ fn auto_parse_sentence(
     expand: bool,
 ) -> PyResult<String> {
     let prefer = prefer.unwrap_or_default();
-    w2n_sentence::auto_parse_sentence(text, lang, &prefer, thousands_sep, decimal_sep, expand)
-        .map_err(|e| w2n_error_to_pyerr(py, e))
+    let (text, lang) = (text.to_owned(), lang.to_owned());
+    let (ts, ds) = (thousands_sep.map(str::to_owned), decimal_sep.map(str::to_owned));
+    py.detach(move || {
+        w2n_sentence::auto_parse_sentence(&text, &lang, &prefer, ts.as_deref(), ds.as_deref(), expand)
+    })
+    .map_err(|e| w2n_error_to_pyerr(py, e))
 }
 
 #[pymodule]
@@ -309,5 +329,7 @@ fn _rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(pluralize, m)?)?;
     m.add_function(wrap_pyfunction!(auto_parse, m)?)?;
     m.add_function(wrap_pyfunction!(auto_parse_sentence, m)?)?;
+    // The accepted `to=` modes, from the one list the core checks against.
+    m.add("CONVERTER_TYPES", w2n_sentence::CONVERTER_TYPES.to_vec())?;
     Ok(())
 }

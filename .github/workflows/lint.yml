@@ -6,6 +6,8 @@ on:
   pull_request:
     branches: [ master, main ]
 
+# Every step gates: the style CONTRIBUTING.md describes is the style CI
+# enforces. Run `make format` then `make lint` locally before pushing.
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -24,24 +26,21 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install flake8 isort black mypy
+        # Pinned (same as the Makefile's LINTERS) so a new black/isort
+        # release cannot turn the workflow red on unchanged code.
+        pip install black==26.10.0 isort==9.0.2 flake8==7.4.1 mypy==2.4.0
 
     - name: Check code formatting with Black
-      run: |
-        black --check --diff words2num2 tests
-      continue-on-error: true
-
-    - name: Lint with flake8
-      run: |
-        flake8 words2num2 tests --count --select=E9,F63,F7,F82 --show-source --statistics
-        flake8 words2num2 tests --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+      run: black --check --diff words2num2 tests
 
     - name: Check import sorting with isort
-      run: |
-        isort --check-only --diff words2num2 tests
-      continue-on-error: true
+      run: isort --check-only --diff words2num2 tests
+
+    - name: Lint with flake8
+      # Settings (max-line-length, ignores) come from .flake8.
+      run: flake8 words2num2 tests --count --show-source --statistics
 
     - name: Type checking with mypy
-      run: |
-        mypy words2num2 --ignore-missing-imports
-      continue-on-error: true
+      # words2num2/_rust.pyi types the compiled extension, so mypy does not
+      # need it built.
+      run: mypy words2num2

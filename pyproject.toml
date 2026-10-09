@@ -6,7 +6,7 @@ build-backend = "maturin"
 name = "words2num2"
 # Static base version. The release CI overrides it from the pushed git tag
 # (see .github/workflows/release.yml); bump here for local source builds.
-version = "0.3.4"
+version = "0.3.5"
 license = "LGPL-2.1-only"
 license-files = ["COPYING"]
 description = "Rust-powered inverse of num2words2: parse spoken-form numbers back to numeric values across 100+ languages, optimized for ASR/LLM/speech."
@@ -63,6 +63,12 @@ python-source = "."
 module-name = "words2num2._rust"
 features = ["pyo3/extension-module"]
 strip = true
+# Ship the test suite (and the doctested API reference) in the sdist so a
+# from-source build can verify itself: the AUR PKGBUILD's check() runs it.
+include = [
+    { path = "tests/**/*.py", format = "sdist" },
+    { path = "REFERENCE.md", format = "sdist" },
+]
 
 [tool.pytest.ini_options]
 markers = [

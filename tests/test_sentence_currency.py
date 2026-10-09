@@ -18,8 +18,14 @@ def fold(text, lang):
 @pytest.mark.parametrize(
     "text,expected",
     [
-        ("one thousand three hundred fifty five dollars and twenty eight cents", "$1,355.28"),
-        ("your balance is one hundred and fifty four dollars and ninety two cents.", "your balance is $154.92."),
+        (
+            "one thousand three hundred fifty five dollars and twenty eight cents",
+            "$1,355.28",
+        ),
+        (
+            "your balance is one hundred and fifty four dollars and ninety two cents.",
+            "your balance is $154.92.",
+        ),
         ("twelve dollars", "$12"),
         ("one dollar", "$1"),
         ("five dollars, please", "$5, please"),
@@ -55,7 +61,10 @@ def test_en(text, expected):
         ("mille deux cents euros cinquante", "1 200,50 €"),
         ("trois mille quatre cent cinquante euros", "3 450 €"),
         ("cent mille euros", "100 000 €"),
-        ("un solde de quarante-trois euros et vingt-deux centimes.", "un solde de 43,22 €."),
+        (
+            "un solde de quarante-trois euros et vingt-deux centimes.",
+            "un solde de 43,22 €.",
+        ),
         ("deux euros cinquante", "2,50 €"),
         ("deux virgule cinq euros", "2,50 €"),
         ("vingt centimes", "0,20 €"),
@@ -152,7 +161,11 @@ def test_it_centesimi_is_the_cent_after_a_number_even_without_the_fold():
     [
         # A transcript's punctuation puts a comma where the speaker paused: the
         # subunit that follows (connector + number + subunit word) is the same amount.
-        ("fr", "le solde est de zéro dollar, et cinquante-cinq centimes.", "le solde est de 0,55 $."),
+        (
+            "fr",
+            "le solde est de zéro dollar, et cinquante-cinq centimes.",
+            "le solde est de 0,55 $.",
+        ),
         ("fr", "deux euros, et cinquante centimes", "2,50 €"),
         ("en", "zero dollars, and fifty five cents", "$0.55"),
         ("es", "dos dólares, con cincuenta centavos", "$2.50"),
@@ -167,4 +180,48 @@ def test_it_centesimi_is_the_cent_after_a_number_even_without_the_fold():
     ],
 )
 def test_comma_before_the_subunit(lang, text, expected):
+    assert fold(text, lang) == expected
+
+
+@pytest.mark.parametrize(
+    "lang,text,expected",
+    [
+        # A bare subunit of 100 or more carries into the unit (#45).
+        ("en", "one hundred fifty cents", "$1.50"),
+        ("fr", "cent cinquante centimes", "1,50 €"),
+        ("en", "twelve dollars and 100 cents", "$12 and 100 cents"),
+        # A longer spoken fraction is never truncated (#46).
+        ("en", "three point five yen", "3.5 yen"),
+        ("en", "twelve point three four five euros", "12.345 euros"),
+        # num2words' English "<unit>, <n> <subunit>" (#47).
+        ("en", "twelve euros, thirty-four cents", "€12.34"),
+        ("en", "I paid twenty dollars, fifty cents", "I paid $20.50"),
+        # No currency nobody said (#48).
+        ("en", "five apples and fifty cents", "5 apples and 50 cents"),
+        ("pt", "duas libras e cinquenta pence", "2,50 £"),
+        # fr "cents" is the US cent after "<unit> et <n>" (#49).
+        ("fr", "douze dollars et trente-quatre cents", "12,34 $"),
+        ("fr", "deux euros et cinq cents", "2,05 €"),
+        ("fr", "mille euros et deux cents personnes", "1 000 € et 200 personnes"),
+        # "pounds of" is a weight (#81).
+        ("en", "twenty pounds of flour", "20 pounds of flour"),
+        # The article-number before any known currency (#103).
+        ("en", "one yen", "¥1"),
+        ("fr", "un rouble", "1 ₽"),
+        ("pt", "um iene", "1 ¥"),
+        # Names num2words writes (#104).
+        ("en", "twelve rupees, thirty-four paise", "₹12.34"),
+        ("es", "doce rublos con treinta y cuatro kopeykas", "12,34 ₽"),
+        ("de", "zwölf Yuan und vierunddreißig Fen", "12,34 CN¥"),
+        ("es", "dos francos", "CHF 2"),
+        # Connector + bare subunit ending the amount (#181).
+        ("en", "two dollars and fifty", "$2.50"),
+        ("es", "cinco euros con cincuenta", "5,50 €"),
+        ("en", "two dollars and fifty people", "$2 and 50 people"),
+        # Suffix symbols are spaced in English (#182).
+        ("en", "twenty krone", "20 kr"),
+        ("en", "two zlotys", "2 zł"),
+    ],
+)
+def test_audit_fold(lang, text, expected):
     assert fold(text, lang) == expected

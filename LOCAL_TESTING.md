@@ -5,7 +5,10 @@ suite locally before pushing changes.
 
 ## Prerequisites
 
-- Python 3.8 or newer (3.11 recommended; CI matrix is 3.8–3.13).
+- Python 3.10 or newer (`requires-python = ">=3.10"`; CI covers CPython
+  3.10–3.15 and PyPy 3.11).
+- A stable Rust toolchain (`rustup`): the package is a Rust extension built
+  with maturin, so every install from a checkout compiles it.
 - `pip` with virtualenv support.
 
 ## Setup
@@ -17,15 +20,22 @@ cd words2num2
 python3 -m venv .venv
 source .venv/bin/activate
 
-# Editable install pulls num2words2 (runtime dep) and dev tooling.
+# Builds the Rust core in place (maturin) and installs the dev tooling.
 make install-dev
 ```
 
-`make install-dev` runs:
+`make install-dev` runs `pip install -e .` (which compiles the core; re-run
+it after any change under `rust/`) and installs pytest, the linters and
+`num2words2`. The package itself has **no runtime dependencies**;
+`num2words2` is only needed by `tests/test_multilang.py`, which renders
+numbers with the published package and parses them back (it is skipped
+without it).
+
+The Rust core has its own tests, including the round-trip ratchet over
+every language:
 
 ```bash
-pip install -e .
-pip install pytest pytest-cov flake8 black isort build twine
+cd rust && cargo test --release -p words2num2-core -- --include-ignored
 ```
 
 ## Running tests
@@ -68,23 +78,23 @@ local result before tagging a release.
 | File | What it covers |
 |---|---|
 | `tests/test_lang_EN.py` | Hand-written English grammar parser. |
-| `tests/test_dispatch.py` | Locale resolution, alias handling, `CONVERTER_CLASSES`. |
-| `tests/test_multilang.py` | Roundtrip: `words2num(num2words(n, lang)) == n` across fr/es/de/it/pt/nl/ru/pl. Skipped automatically if `num2words2` is not installed. |
+| `tests/test_dispatch.py` | Locale resolution and aliases. |
+| `tests/test_api_contract.py` | Language codes, `to=` modes, keyword arguments, the CLI. |
+| `tests/test_multilang.py` | Round trip `words2num(num2words(n, lang)) == n` for every language. Skipped if `num2words2` is not installed. |
 | `tests/test_auto_parse.py` | `auto_parse`, `auto_parse_sentence`, `parse_number_string`, currencies, units, separators, pluralization. |
-
-Total: **135 tests**.
+| `tests/test_sentence_*.py` | Sentence mode on real-world text and the currency fold. |
+| `tests/test_reference_doctest.py` | Every `>>>` example in `REFERENCE.md`. |
+| `rust/words2num2-core/tests/roundtrip.rs` | Rust round-trip ratchet (render, parse back) across all languages. |
 
 ## Linting and formatting
 
 ```bash
-make lint                  # flake8 (style + safety)
+make lint                  # black --check, isort --check-only, flake8, mypy
 make format                # apply black + isort
 ```
 
-Pre-commit hooks aren't enforced, but the CI `Lint` workflow runs
-`black --check`, `flake8`, `isort --check-only`, and `mypy
---ignore-missing-imports`. Run `make format` before committing to
-avoid noise.
+`make lint` runs exactly what the CI `Lint` workflow runs, and every one of
+those checks fails the workflow. Run `make format` before committing.
 
 ## Building the package
 
@@ -92,16 +102,16 @@ avoid noise.
 make build
 ```
 
-Produces:
+Produces an sdist and a wheel for the current platform, e.g.:
 
 ```
 dist/words2num2-X.Y.Z.tar.gz
-dist/words2num2-X.Y.Z-py3-none-any.whl
+dist/words2num2-X.Y.Z-cp38-abi3-macosx_11_0_arm64.whl
 ```
 
-`twine check dist/*` runs as part of the build. The CI `Build and
-Release` workflow does the same in a clean Ubuntu runner before the
-PyPI upload.
+The wheel is a CPython `abi3` wheel (one per platform for every CPython
+3.10+). The `Release` workflow builds the same per platform and tests each
+one before publishing.
 
 ## Smoke-testing a built wheel
 
@@ -128,43 +138,36 @@ print(auto_parse('\$12,345.00'))
 
 ## Cutting a release
 
-1. Update `CHANGELOG.md` — move the unreleased entries under a new
-   version header.
-2. Run the full test suite locally: `make test`.
-3. Run the smoke test on a built wheel (above).
-4. Tag and push:
-
-   ```bash
-   git tag vX.Y.Z
-   git push origin vX.Y.Z
-   ```
-
-   The `Build and Release` workflow takes over: build → test → GitHub
-   Release → PyPI publish via Trusted Publishing. End-to-end takes
-   about 90 seconds.
-
-If Trusted Publishing fails (rare — usually a misconfigured
-environment), the `Publish to PyPI (manual)` workflow is a fallback
-that uses the `PYPI_API_TOKEN` repo secret.
+See "Release process" in [CONTRIBUTING.md](CONTRIBUTING.md). In short: bump
+the version in both `pyproject.toml` and `words2num2/_version.py` and merge
+to `main`; `auto-release.yml` tags it and dispatches `release.yml` (version
+check → build → test every native wheel and the sdist → PyPI + GitHub
+Release), `crates.yml` and `aur-publish.yml`. Before bumping, run
+`make test`, `make lint` and the smoke test above.
 
 ## Troubleshooting
 
-**`ModuleNotFoundError: No module named 'num2words2'` from the generic backend.**
-Install it: `pip install num2words2`. The English path doesn't depend
-on it, but every other locale does.
+**`ImportError: cannot import name '_rust'`.**
+The compiled core has not been built in this checkout: run `pip install -e .`
+(needs a Rust toolchain).
+
+**`tests/test_multilang.py` is skipped.**
+Install `num2words2` (`pip install num2words2`). Only that test file uses
+it; the package does not.
 
 **`Words2NumError: cannot parse '...' as a number`.**
-The token isn't in the per-language vocabulary. For non-English locales
-the generic backend covers `-1..10000` only — pass an in-range value
-or contribute a hand-written parser (see [CONTRIBUTING.md](CONTRIBUTING.md)).
+The token isn't in the language's vocabulary as the core reads it. See
+[CONTRIBUTING.md](CONTRIBUTING.md) for where per-language parsing lives.
 
 **Smoke test prints the wrong version.**
 You're running from inside the repo root. `cd /tmp` (or anywhere
 outside the repo) before `python -c` — Python's auto-`sys.path[0]`
 shadows the installed package with the source tree.
 
-**Auto-publish workflow on tag push didn't upload to PyPI.**
-Check that:
+**A release did not reach PyPI.**
+Re-run `Auto release` (Actions → Auto release → Run workflow): it
+re-dispatches the release for any version that is tagged but not on PyPI.
+If it keeps failing, check that:
 - The PyPI Trusted Publisher has been configured at
   https://pypi.org/manage/project/words2num2/settings/publishing/ with
   workflow `release.yml` and environment `pypi`.
