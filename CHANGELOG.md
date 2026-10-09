@@ -12,6 +12,10 @@ num2words2-core in every mode, parsed it back, and filed each distinct defect. T
 or partly fixed, and stay open. On a 1.4M-value cardinal sweep, failures drop from 422774 to 20716
 with no value that parsed before parsing differently now.
 
+### Added
+
+- French, German and Spanish sentence mode write clock times in figures: fr "à neuf heures quinze" → "à 9h15", "et quart" / "et demie" / "moins le quart" → "9h15" / "9h30" / "8h45"; de "um neun Uhr fünfzehn" → "um 9:15 Uhr", "um halb zehn" → "um 9:30"; es "a las nueve y cuarto" → "a las 9:15". An hour alone is a time only after a time cue ("à neuf heures" → "à 9h"); a duration stays ("trois heures de route" → "3 heures de route").
+
 ### Changed (behaviour callers will notice)
 
 - Documented that `words2num(..., to="digits")` returns an `int`, so leading zeros are dropped ("zero zero seven" → 7; use `words2num_sentence` to keep "007"), and that digit runs of any length are read (#195, #215).

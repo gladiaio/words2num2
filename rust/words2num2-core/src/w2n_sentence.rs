@@ -2988,6 +2988,15 @@ pub fn words2num_sentence_opts(
     // unsupported `lang` or `to` would otherwise come back as the input text.
     resolve_lang(lang)?;
     check_converter_type(to)?;
+    // fr / de / es clock times, read on the words before the walk ("à neuf
+    // heures quinze" -> "à 9h15"); the walk leaves the figures alone.
+    let timed;
+    let sentence = if matches!(to, "cardinal" | "year") && !has_kwargs {
+        timed = crate::w2n_time::fold_times(sentence, lang);
+        timed.as_str()
+    } else {
+        sentence
+    };
     if currency {
         let resolved = resolve_lang(lang)?;
         // Walked piece by piece: fr "trente-quatre cents" after "dollars et"
