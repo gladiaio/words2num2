@@ -53,8 +53,54 @@ fn native_pointwords(base: &str) -> &'static [&'static str] {
         "nn" | "fo" | "lb" => &["komma"],
         "oc" => &["virgula"],
         "mt" => &["punt"],
+        // ar: the renderer writes "،" (#371), which normalizing drops.
+        "ar" => &["فاصلة"],
         _ => &[],
     }
+}
+
+/// The separator mark ar num2words writes between the integer and the
+/// hundredths, as a word of its own: "ثلاثة ، أربع عشرة" is 3.14, "، خمسون"
+/// 0.50 (#371). Normalizing deletes it, so it is looked for in the text as
+/// written.
+fn hundredths_mark(lang: &str) -> Option<&'static str> {
+    let base = lang.split(&['_', '-'][..]).next().unwrap_or(lang);
+    (base == "ar").then_some("\u{060C}")
+}
+
+/// The hundredths as the renderer writes them after the mark, normalized ->
+/// value: ar writes them feminine ("أربع عشرة" 14, "خمس" 5), which the
+/// cardinal table (masculine) does not hold. Taken from the 0.01..0.99
+/// renderings.
+fn hundredths(lang: &str) -> &'static HashMap<String, u32> {
+    static CACHE: OnceLock<RwLock<HashMap<String, &'static HashMap<String, u32>>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(Default::default);
+    if let Some(t) = cache.read().ok().and_then(|m| m.get(lang).copied()) {
+        return t;
+    }
+    let mut table = HashMap::new();
+    if let (Some(r), Some(mark)) = (num2words2_core::get_lang_by_key(lang), hundredths_mark(lang)) {
+        for n in 1..100u32 {
+            let value = BigDecimal::from_str(&format!("0.{:02}", n)).expect("literal");
+            let fv = FloatValue::Decimal { value, precision: 2 };
+            let Ok(text) = r.to_cardinal_float(&fv, None) else { continue };
+            if let Some(words) = text.trim().strip_prefix(mark) {
+                table.entry(crate::normalize(words)).or_insert(n);
+            }
+        }
+    }
+    let built: &'static HashMap<String, u32> = Box::leak(Box::new(table));
+    if let Ok(mut m) = cache.write() {
+        m.entry(lang.to_string()).or_insert(built);
+    }
+    built
+}
+
+/// Whether `text` holds the language's written decimal mark as a word of its
+/// own, which a cardinal read would silently drop ("مائة ، خمسون" is 100.50,
+/// not 150).
+pub fn has_written_mark(lang: &str, text: &str) -> bool {
+    hundredths_mark(lang).is_some_and(|m| text.split_whitespace().any(|t| t == m))
 }
 
 /// The derived forms of renderer key `lang`, built once and cached.
@@ -218,6 +264,20 @@ pub fn read(
     cardinal: &dyn Fn(&str) -> Option<BigInt>,
 ) -> Option<(String, char, String)> {
     let f = forms(lang);
+    // 0. ar "<int> ، <hundredths>": the fraction is a count of hundredths.
+    if let Some(mark) = hundredths_mark(lang) {
+        let words: Vec<&str> = text.split_whitespace().collect();
+        if let Some(pos) = words.iter().position(|t| *t == mark) {
+            let int = if pos == 0 { BigInt::from(0) } else { cardinal(&words[..pos].join(" "))? };
+            let rest = words[pos + 1..].join(" ");
+            let n = hundredths(lang)
+                .get(&crate::normalize(&rest))
+                .map(|&n| BigInt::from(n))
+                .or_else(|| cardinal(&rest))
+                .filter(|n| *n >= BigInt::from(0) && *n < BigInt::from(100))?;
+            return Some((int.to_string(), default_sep, format!("{:0>2}", n)));
+        }
+    }
     // Each written word normalized on its own: a hyphenated compound stays
     // one fraction digit (wo "juróom-ñeent" is 9, not 5 and 4).
     let units: Vec<String> = text
@@ -384,5 +444,19 @@ mod tests {
         assert_eq!(sent("tres coma un catro", "gl"), "3,14");
         assert_eq!(sent("три запирка еден четири", "mk"), "3.14");
         assert_eq!(sent("tre komma ein fire", "nn"), "3,14");
+    }
+
+    /// #371: ar "،" (the renderer's separator, hundredths) and "فاصلة".
+    #[test]
+    fn arabic_decimals() {
+        assert_eq!(card("ثلاثة ، أربع عشرة", "ar"), "3.14");
+        assert_eq!(card("ثلاثة ، خمس", "ar"), "3.05");
+        assert_eq!(card("مائة ، خمسون", "ar"), "100.50");
+        assert_eq!(card("، خمسون", "ar"), "0.50");
+        assert_eq!(card("مليون ، خمس وسبعون", "ar"), "1000000.75");
+        assert_eq!(card("ثلاثة فاصلة أربعة عشر", "ar"), "3.14");
+        assert_eq!(card("ثلاثة فاصلة واحد أربعة", "ar"), "3.14");
+        // A mark with no hundredths after it is no number.
+        assert!(crate::words2num("مائة ، خمسمائة", "ar", "cardinal").is_err());
     }
 }
