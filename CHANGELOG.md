@@ -27,7 +27,8 @@ with no value that parsed before parsing differently now.
 
 ### Fixed
 
-- `words2num_sentence(..., to="year")`: a century and a decade word read as one decade, "the nineteen nineties" → "the 1990s" (was "the 19 nineties"); a pair with a single-digit first half is no year in running text, "at nine fifteen" → "at 9 15" (was "at 915"). The single-token `words2num("nine eleven", to="year")` is still 911 (#111).
+- English sentence mode (`cardinal` and `year`) writes a clock time: an hour (one..twelve) then its minutes ("fifteen", "forty five", "oh five") after "at", "around", "by", "until", "from"... or before am/pm: "call me at nine fifteen" → "call me at 9:15", "nine thirty am" → "9:30 am". Without a cue it stays two numbers ("five twenty" → "5 20").
+- `words2num_sentence(..., to="year")`: a century and a decade word read as one decade, "the nineteen nineties" → "the 1990s" (was "the 19 nineties"); a pair with a single-digit first half is no year in running text (was "at 915"). The single-token `words2num("nine eleven", to="year")` is still 911 (#111).
 - Cardinals up to 10^18 parse: trillion, long-scale billion/billiard, the Indian kharab/padma/shankh, ja/zh 兆 and 京, ko 조 and 경 ("eine Billion", "dos billones", "one kharab", "一兆"). A power whose multipliers the renderer drops (ro "bilion" for 1, 2 and 5·10^12) is no longer learned, so it raises instead of reading a wrong value (#84, #220).
 - Stacked scale words multiply instead of adding: bn "দশ কোটি কোটি" = 10^15, ba "бер миллиард миллиард" = 10^18, eu "mila mila milioi" = 10^12, th "หนึ่งล้านสองแสนล้าน" = 1.2·10^12; the remainder after a scale word must stay below it. A stacked reading is accepted only where num2words2 spells that very number so, and languages that never stack (fr "deux mille deux mille") decline (#40, #217).
 - Scale composition never wraps around i64: an overflowing input raises instead of returning a negative or wrapped number (#72).
