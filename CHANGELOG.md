@@ -12,6 +12,10 @@ num2words2-core in every mode, parsed it back, and filed each distinct defect. T
 or partly fixed, and stay open. On a 1.4M-value cardinal sweep, failures drop from 422774 to 20716
 with no value that parsed before parsing differently now.
 
+### Added
+
+- `words2num_sentence(..., date=True)`: a day + month (+ year) is written the way the language writes a date: "on march twelfth twenty twenty six" → "on March 12, 2026", `en_GB` → "12 March 2026", de "am zwölften märz" → "am 12. März", es "el primero de mayo" → "el 1 de mayo" (en, fr, de, es, pt, it, nl). Off by default.
+
 ### Changed (behaviour callers will notice)
 
 - Documented that `words2num(..., to="digits")` returns an `int`, so leading zeros are dropped ("zero zero seven" → 7; use `words2num_sentence` to keep "007"), and that digit runs of any length are read (#195, #215).

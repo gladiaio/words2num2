@@ -95,7 +95,7 @@ def words2num(text, lang="en", to="cardinal"):
     return _RUST.words2num(text, lang, to, None)
 
 
-def words2num_sentence(sentence, lang="en", to="cardinal", currency=False):
+def words2num_sentence(sentence, lang="en", to="cardinal", currency=False, date=False):
     """Convert every word-number in ``sentence`` to numeric form.
 
     Walks the sentence, matching the longest run of number tokens at each
@@ -108,10 +108,16 @@ def words2num_sentence(sentence, lang="en", to="cardinal", currency=False):
     dollars et vingt centimes"`` -> ``"43,20 $"``, de ``"zwanzig euro fünfzig"``
     -> ``"20,50 €"``. Off by default: the output is unchanged.
 
+    With ``date=True`` a day + month (+ year) is written the way the language
+    writes a date: ``"march twelfth twenty twenty six"`` -> ``"March 12,
+    2026"``, ``lang="en_GB"`` -> ``"12 March 2026"``, de ``"am zwölften märz"``
+    -> ``"am 12. März"``, es ``"el primero de mayo"`` -> ``"el 1 de mayo"``
+    (en, fr, de, es, pt, it, nl). Off by default.
+
     ``lang`` and ``to`` are validated before the walk and raise
     ``NotImplementedError`` like :func:`words2num`.
     """
-    return _RUST.words2num_sentence(sentence, lang, to, None, currency)
+    return _RUST.words2num_sentence(sentence, lang, to, None, currency, date)
 
 
 # Aliases (parity with num2words2)
