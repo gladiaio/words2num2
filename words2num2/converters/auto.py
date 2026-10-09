@@ -9,6 +9,7 @@ in the Rust core (``w2n_sentence.rs``). This module keeps only the public
 ``rust/words2num2-py/src/lib.rs``, ``quantity_to_py``), so it stays the single
 source of truth for the result shape — and the thin :func:`pluralize` binder.
 """
+
 from __future__ import unicode_literals
 
 from dataclasses import dataclass

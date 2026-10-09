@@ -4,11 +4,13 @@
 These tests require ``num2words2`` to be installed.
 """
 
+from decimal import Decimal
+
 import pytest
 
-num2words2 = pytest.importorskip("num2words2")
-
 from words2num2 import words2num, words2num_sentence
+
+num2words2 = pytest.importorskip("num2words2")
 
 
 @pytest.mark.parametrize(
@@ -66,9 +68,9 @@ from words2num2 import supported_langs  # noqa: E402
 # core disagree on the script, the language cannot round-trip — see #14.
 # This list may shrink; it must never grow.
 _NATIVE_SCRIPT = {
-    "ti": (0x1200, 0x137F),   # Ge'ez
-    "ky": (0x0400, 0x04FF),   # Cyrillic
-    "or": (0x0B00, 0x0B7F),   # Odia
+    "ti": (0x1200, 0x137F),  # Ge'ez
+    "ky": (0x0400, 0x04FF),  # Cyrillic
+    "or": (0x0B00, 0x0B7F),  # Odia
     "ckb": (0x0600, 0x06FF),  # Arabic
     "kok": (0x0900, 0x097F),  # Devanagari
 }
@@ -100,15 +102,17 @@ def _roundtrip_param(lang):
             marks=pytest.mark.xfail(
                 strict=True,
                 reason="gladiaio/words2num2#14 — the installed num2words2 "
-                       "and the embedded num2words2-core render this "
-                       "language in different scripts",
+                "and the embedded num2words2-core render this "
+                "language in different scripts",
             ),
         )
     return lang
 
 
 @pytest.mark.slow
-@pytest.mark.parametrize("lang", [_roundtrip_param(code) for code in sorted(supported_langs())])
+@pytest.mark.parametrize(
+    "lang", [_roundtrip_param(code) for code in sorted(supported_langs())]
+)
 def test_roundtrip_every_language(lang):
     """num2words2 -> words2num2 is the identity for every advertised language.
 
@@ -125,14 +129,14 @@ def test_roundtrip_every_language(lang):
     [
         # Each of these used to be swallowed by the two-character prefix
         # fallback and answered by an unrelated language.
-        "ban",   # was -> ba  (Bashkir)
-        "ceb",   # was -> ce  (Chechen)
-        "cnh",   # was -> cn  (Chinese)
-        "fil",   # was -> fi  (Finnish)
-        _roundtrip_param("kok"),   # was -> ko  (Korean)
-        "miz",   # was -> mi  (Maori)
-        "pap",   # was -> pa  (Punjabi)
-        "pli",   # was -> pl  (Polish)
+        "ban",  # was -> ba  (Bashkir)
+        "ceb",  # was -> ce  (Chechen)
+        "cnh",  # was -> cn  (Chinese)
+        "fil",  # was -> fi  (Finnish)
+        _roundtrip_param("kok"),  # was -> ko  (Korean)
+        "miz",  # was -> mi  (Maori)
+        "pap",  # was -> pa  (Punjabi)
+        "pli",  # was -> pl  (Polish)
         # Script variants that were collapsed onto their base language.
         "sr_Latn",
         "uz_Cyrl",
@@ -181,3 +185,62 @@ def test_es_bare_ciento_is_one_hundred():
 )
 def test_es_apocope_inside_a_number(text, expected):
     assert words2num_sentence(text, lang="es") == expected
+
+
+@pytest.mark.parametrize(
+    "text,lang,expected",
+    [
+        # Numbers in figures follow the language's separators (#60).
+        ("1.234", "de", 1234),
+        ("1.234", "es", 1234),
+        ("2,5", "de", Decimal("2.5")),
+        ("1 234,5", "fr", Decimal("1234.5")),
+        ("3.14", "fr", Decimal("3.14")),
+    ],
+)
+def test_digit_literal_locale_separators(text, lang, expected):
+    got = words2num(text, lang=lang)
+    assert got == expected
+    assert type(got) is type(expected)
+
+
+@pytest.mark.parametrize(
+    "lang,text,expected",
+    [
+        # Leading zeros / a fraction of any size (#52).
+        ("fr", "trois virgule zéro vingt-cinq", "3,025"),
+        ("fr", "trois virgule cent vingt-cinq", "3,125"),
+        # The separator word derived from the renderer (#107).
+        ("sv", "tre komma ett fyra", "3,14"),
+        ("cs", "tři čárka jedna čtyři", "3,14"),
+        ("hi", "तीन दशमलव एक चार", "3.14"),
+        ("ko", "삼 점 일 사", "3.14"),
+        ("en_IN", "three point one four", "3.14"),
+        # Whole-word + denominator (#108).
+        ("ru", "три целых четырнадцать сотых", "3,14"),
+        ("hu", "három egész tizennégy század", "3,14"),
+        ("fa", "سه و چهارده صدم", "3.14"),
+        # Native spelling where the renderer writes "point" (#267).
+        ("gl", "tres coma un catro", "3,14"),
+    ],
+)
+def test_spoken_decimals_in_sentences(lang, text, expected):
+    assert words2num_sentence(text, lang=lang) == expected
+
+
+@pytest.mark.parametrize(
+    "lang,text,expected",
+    [
+        # words2num reads a decimal in every language (#191).
+        ("fr", "trois virgule un quatre", Decimal("3.14")),
+        ("es", "tres punto uno cuatro", Decimal("3.14")),
+        ("de", "drei Komma eins vier", Decimal("3.14")),
+        ("ru", "три целых пять сотых", Decimal("3.05")),
+        ("ja", "三点一四", Decimal("3.14")),
+        ("tr", "üçvirgülondört", Decimal("3.14")),
+    ],
+)
+def test_words2num_spoken_decimals(lang, text, expected):
+    got = words2num(text, lang=lang)
+    assert got == expected
+    assert isinstance(got, Decimal)

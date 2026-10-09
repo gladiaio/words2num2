@@ -78,7 +78,13 @@ def test_year():
 def test_digits_passthrough():
     assert words2num("42") == 42
     assert words2num("-17") == -17
-    assert words2num("3.14") == 3.14
+    # A decimal in figures is an exact Decimal, like a spoken one (#71).
+    assert words2num("3.14") == Decimal("3.14")
+    # Thousands separators group, they do not split the number (#59).
+    assert words2num("1,234") == 1234
+    assert words2num("12,345", to="ordinal") == 12345
+    assert words2num("1 000") == 1000
+    assert words2num("2,000", to="year") == 2000
 
 
 def test_unknown_token_raises():
@@ -203,15 +209,17 @@ def test_sentence_reads_spoken_years(sentence, expected):
         ("zero six one two", "0612"),
         ("one two three", "123"),
         ("one oh one", "101"),
-        ("seven eight", "78"),
+        # Two digit words without a leading zero are a range ("two three
+        # minutes" = 2 or 3 minutes), never one number (#51).
+        ("seven eight", "7 8"),
         # A lone digit word, and tens + unit, stay cardinals.
         ("press one", "press 1"),
         ("twenty five", "25"),
         ("one hundred twenty three", "123"),
         # unit + tens is two numbers, not 25 and not 520.
         ("five twenty", "5 20"),
-        # "oh" does not open a digit run.
-        ("oh seven", "0 7"),
+        # "oh" is 0 next to another digit word, a leading zero kept (#79).
+        ("oh seven", "07"),
     ],
 )
 def test_sentence_digit_runs_concatenate(sentence, expected):
@@ -264,6 +272,7 @@ def test_explicit_year_mode_unchanged(text, expected):
 # "one point" returned Decimal('1'), "two thousand point" returned
 # Decimal('2000'), and a bare "point" returned Decimal('0').
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.parametrize(
     "text",

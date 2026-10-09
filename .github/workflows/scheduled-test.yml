@@ -24,10 +24,16 @@ jobs:
         python-version: ${{ matrix.python-version }}
         allow-prereleases: true
 
+    # `pip install -e .` compiles the Rust core with maturin.
+    - uses: dtolnay/rust-toolchain@stable
+
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
         pip install pytest pytest-cov
+        # tests/test_multilang.py round-trips the published renderer through
+        # this parser; without it the whole file is skipped.
+        pip install num2words2
         pip install -e .
 
     - name: Run tests

@@ -63,6 +63,12 @@ python-source = "."
 module-name = "words2num2._rust"
 features = ["pyo3/extension-module"]
 strip = true
+# Ship the test suite (and the doctested API reference) in the sdist so a
+# from-source build can verify itself: the AUR PKGBUILD's check() runs it.
+include = [
+    { path = "tests/**/*.py", format = "sdist" },
+    { path = "REFERENCE.md", format = "sdist" },
+]
 
 [tool.pytest.ini_options]
 markers = [

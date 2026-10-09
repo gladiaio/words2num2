@@ -6,6 +6,143 @@ follows [Semantic Versioning](https://semver.org/) and uses
 
 ## [Unreleased]
 
+The October 2026 audit (gladiaio/words2num2#40–#268) rendered every advertised language with
+num2words2-core in every mode, parsed it back, and filed each distinct defect. This release fixes
+169 of them; the rest are num2words2 renderer defects (fixed upstream, mitigated here where possible)
+or partly fixed, and stay open. On a 1.4M-value cardinal sweep, failures drop from 422774 to 20716
+with no value that parsed before parsing differently now.
+
+### Changed (behaviour callers will notice)
+
+- Documented that `words2num(..., to="digits")` returns an `int`, so leading zeros are dropped ("zero zero seven" → 7; use `words2num_sentence` to keep "007"), and that digit runs of any length are read (#195, #215).
+
+- `parse_number_string`, `auto_parse` and `auto_parse_sentence` return an exact `Decimal` for a number with a decimal part, never a binary `float`; scale suffixes shift the decimal point, so `"$4.1bn"` is `4100000000` and `"$12345678901234567.89"` keeps every digit (#71).
+- `words2num("3.14")` returns `Decimal("3.14")`, the same type as `words2num("three point one four")` (#71).
+
+- Language codes are case-insensitive (`"EN"`, `"pt_br"`, `"EN-US"`), unknown trailing subtags fall back one at a time (`"sr-Latn-RS"` -> `sr_Latn`), and ISO 639-2 codes are accepted (`"eng"`, `"fra"`, `"ger"`) (#192).
+- **Breaking:** the "first two characters" language fallback is gone. Language names and unknown codes such as `"swedish"`, `"estonian"`, `"kazakh"` or `"enx"` now raise `NotImplementedError`; before, they resolved to an unrelated language (Swahili, Spanish, Georgian, English) (#197).
+- `words2num` and `words2num_sentence` no longer advertise `**kwargs`: an unknown keyword is a `TypeError` that names it (#199, #201).
+- The CLI uses argparse: `--lang fr` works as well as `--lang=fr`, and an unparseable input or unsupported `--lang`/`--to` prints `words2num2: error: ...` on stderr and exits 1 instead of printing a traceback (#200).
+- PyPy (3.11+) is supported from source only (releases ship CPython abi3 wheels, which PyPy cannot load); the PyPy CI job now gates (#212).
+
+### Fixed
+
+- Cardinals up to 10^18 parse: trillion, long-scale billion/billiard, the Indian kharab/padma/shankh, ja/zh 兆 and 京, ko 조 and 경 ("eine Billion", "dos billones", "one kharab", "一兆"). A power whose multipliers the renderer drops (ro "bilion" for 1, 2 and 5·10^12) is no longer learned, so it raises instead of reading a wrong value (#84, #220).
+- Stacked scale words multiply instead of adding: bn "দশ কোটি কোটি" = 10^15, ba "бер миллиард миллиард" = 10^18, eu "mila mila milioi" = 10^12, th "หนึ่งล้านสองแสนล้าน" = 1.2·10^12; the remainder after a scale word must stay below it. A stacked reading is accepted only where num2words2 spells that very number so, and languages that never stack (fr "deux mille deux mille") decline (#40, #217).
+- Scale composition never wraps around i64: an overflowing input raises instead of returning a negative or wrapped number (#72).
+- Very long inputs (tens of thousands of number groups) are refused up front instead of recursing once per group and overflowing the stack (#187).
+- Digit-by-digit numbers (en_AERO) of 19 digits parse; longer runs raise instead of overflowing (#94).
+- dv scale words are read from their glued renderings with the special multiplier forms (ދެ = 2, އެއް = 1): "ތިރީސްއެއްހާސް" = 31000 instead of a raise or 30000, "ދެމިލިޔަން" = 2000000 (#41).
+- vi "tỷ" (10^9) is a scale word: "một tỷ" = 1000000000. bm "ba" stays out, since every "ba X ni Y" spelling is also another number (#42).
+- kok / or / pli: लाख / ଲକ୍ଷ / lakkha is a lakh (10^5), and the renderer's "ten lakh" unit reads 10^6 ("धा लाख", "एक धा लाख", "eka dasa-lakkha"); "एक शंभर धा लाख", which reads 10^8 to the renderer and 110 lakh to a reader, raises. sn "bhiriyoni mbiri" = 2·10^9 (#43, #221).
+- A table number glued to a scale is split when more follows: hu "tízezer-száz", fi "kymmenentuhatta sata", sv "tiotusen etthundra", nl "tienduizend honderd" = 10100 (#90, #256).
+- ja / zh / ko / bo / th myriad numbers with a multiplier up to 9999 and a multi-scale tail parse: "千二百三十四万五千六百七十八" = 12345678, "일억 이천삼백사십오만 육천칠백팔십구" = 123456789 (#91).
+- zh 零 between scale groups: "一万零一" = 10001, "一亿零一万" = 100010000, "一万零一十" = 10010. A lone digit after a scale without 零 ("一万五", spoken for 15000) now raises instead of reading 10005 (#92).
+- sv "tjugoettusen" (ett + tusen sharing a t) = 21000, and the renderer's "en miljonett" / "två miljonerett" = 1000001 / 2000001 (#99, #239).
+- th final "เอ็ด" after a higher place: "หนึ่งหมื่นเอ็ด" = 10001 (#100).
+- sl / lt scale plurals heard only after 3, 4 or 10+: "tri milijarde", "dešimt milijardų" (#102).
+- The standard spellings da "en million" and sl "pet milijonov" / "pet milijard" parse beside the forms num2words2 writes (#240, #259).
+- Numbers above 10000 with a connector after the scale word now parse in fa, ckb, ku, ki, is, da, nb/no, bm, ha, lg, lij, om, rm, rw, sq, tet, ti, vi, xh, zu, bg and cy ("ده هزار و یک" = 10001, "ein milljón og einn" = 1000001, "miliyan da ɗaya" = 1000001). In sentences, a number run no longer ends on the connector, so "tre og fire" stays "3 og 4". bm writes 10001 and 11000 the same way ("ba tan ni kelen"), so that text is not read as either number (#85).
+- "And" written as a prefix of the next word now parses after a scale word: ar "مليون وواحد", he "מיליון ואחת", sn "miriyoni neimwe" (#86, #101).
+- A multiplier in a gender, construct or attributive form now parses: ru/be/uk/bg/hr/sr "двадцать одна тысяча", cs "dvě miliardy", el "είκοσι μία χιλιάδες", cy "tair ar hugain mil", is "eitt þúsund", he "שני מיליון" / "אחד עשר אלף", hu "kétmillió", et "sada tuhat", ce, la, mn, rm, lij. These forms are taken from num2words2's own longer renderings (#87).
+- ar dual and accusative scale nouns now parse: "مليونان", "ملياران", "ألفاً", "مئتا ألف", and the genitive "ألفين" (#88).
+- da "tusinde", and a thousand glued to the words around it, now parse: "tolvtusinde og trehundrede og femogfyrre" = 12345, "ethundrede og ettusindsyvhundrede og fireogtyve" = 101724 (#89).
+- The form a scale word takes before a remainder now parses: kn "ಹತ್ತು ಸಾವಿರದ ಒಂದು", te "పది వేయిల ఒకటి", tg "даҳ ҳазору як" (#93, #96, #97).
+- rm numbers with the connector glued after the thousand now parse ("dieschmilliedin" = 10001) (#95).
+- A bare hundred inside a larger number now parses: nb "hundre tusen", tg "даҳ ҳазор яксад" (#98).
+- Feminine numerals now parse on their own: pt "duas", "duzentas", es "doscientas", ru "две", uk "дві", cs "dvě", ca "dues", el "τρεις", is "tvö". "duas libras" becomes "2 £" when currency=True (#105).
+- In sentence mode, gendered and combining number words no longer split a number into two: "две тысячи двадцать четыре" gives 2024 instead of "две 1024", and kn/mn 12345 is read as one number. A form that only works inside a longer number stays a word when it stands alone (he "יום שני", "Monday") (#66).
+- el "εκατόν" before a remainder now parses: "εκατόν δώδεκα" = 112. num2words2 writes "εκατό δώδεκα", which still parses too (#237).
+- Negative numbers parse in every language: the minus word is read off the renderer (fr "moins sept", es "menos cuarenta y dos", zh "负七", xh "ngaphantsi kwe sixhenxe") instead of an English-only list (#123).
+- The sign applies to the whole number: "moins un million mille" is -1001000 (was -999000), am "ሰልቢ አንድ ሺህ …" is -1234 (was -766), and negatives above 10000 ("minus zwölftausend…") no longer raise (#61).
+- A minus glued to the number parses: th "ติดลบเจ็ด", tr "eksiyedi" (#124).
+- Kannada and Telugu accept the spoken minus words ಋಣ / ಮೈನಸ್ and మైనస్ as well as the renderer's "(-)" (#243).
+- Typographic dashes and the minus sign (en dash, non-breaking hyphen, U+2212) work like "-": "twenty–one", "−five" (#114).
+- Curly and modifier-letter apostrophes match the ASCII one: uk "п’ять", uz "toʻrt", haw "ʻekahi" (#115).
+- Turkish/Azerbaijani upper case with dotless ı parses: "KIRK", "ALTI" (#116).
+- German "ss" matches "ß": Swiss "dreissig", "ZWEIUNDDREISSIG" (#117).
+- Invisible characters (BOM, zero-width space/joiners, soft hyphen, word joiner) no longer break a number word (#118).
+- Malayalam legacy chillus (consonant + virama + ZWJ) match the atomic chillu: "ഒന്‍പത്" (#119).
+- Tibetan numbers parse without the final tsheg: "གཅིག" (#120).
+- Script-native punctuation and brackets are ignored around a number: "पाँच।", "خمسة،", "五。", "«cinq»", "(five)"; in sentence mode a trailing mark stays after the figure (#121).
+- Hindi/Nepali anusvara spellings match the chandrabindu ones ("पांच" = 5), and the Bengali chandrabindu is optional (#122).
+- Norwegian ordinal "attende" is 18th again, no longer 8th ("åttende"); "atte" without the ring still reads 8 (#44).
+- Ordinals now parse in every gender, case and number, not only the masculine form num2words2 renders: ru "первая", "третьего", "двадцать первая" (#137), uk "перша" (#138), be "першая", "трэцяя" (#139), pl "dwudziesta pierwsza" (#140), cs "druhého" (#141), sk "prvá" (#142), sl "tretja" (#143), hr/sr/bs "prva", "трећег" (#144), bg "първа", "първата", "третия" (#145), lt "pirmoji" (#146), lv "otrā" (#147), ro "a doua", "a douăzeci și una", "întâiul" (#148), ca "primera", "cinquena", "primers" (#149), el "πρώτη", "εικοστή πρώτη" (#150), he "ראשונה", "שלישית", "הראשון" (#151), is "fyrsta", "önnur" (#159), da "andet" (#160), nb "annen"/"annet" (#161), sv "förste"/"andre" (#162), cy "trydedd", "gyntaf" (#163), la "prima", "primum" (#164), eo "unuan", "unuaj" (#165), et "esimese", "kolmanda" (#166), fi "toisen", "kolmannen" (#167), hu "elsőt", "másodikán" (#168), sq "e dyta", "i parë" (#169), mt "ewwel" without the article (#170), sw "ya kwanza", "cha pili" (#171), fr plural "premières", "deuxièmes" (#172).
+- es ordinals 11th-29th spoken spaced ("vigésimo primero", "décimo primero", "vigésima primera") parse like the glued form (#126).
+- Compound ordinals parse in their grammatical form where num2words2 renders the cardinal + a suffix: cs "dvacátý první", sk "dvadsiaty prvý", hr/sr/bs "dvadeset prvi", lt "dvidešimt pirmas", lv "divdesmit pirmais", el "δέκατος όγδοος", la "vicesimus primus", gl "primeiro", "vixésimo primeiro" (#244); el "εκατοστός εικοστός πρώτος" is 121 (#230).
+- be "васьмідзясяты" (80th) and every x80th parse (the renderer writes them as the 70th) (#231); "дзевяцісоты" (900th) with a Cyrillic і parses (#241).
+- cy "unfed ar hugain", "ugeinfed", "deugeinfed" (#251) and the round hundreds / 1000th "dau ganfed", "tri chanfed", "milfed" (#252) parse.
+- ro "al o sutălea", "al o sută unulea", "al o mielea" parse (#253).
+- Sentence mode writes the figure in the spoken gender and number: bg "1-ва глава", ca "la 5a planta", el "η 1η μέρα", fr "les 2es places" (#145, #149, #150, #172), it "le 1ª volte" (#185). An inflected ordinal after a number stays a fraction ("trois cinquièmes", "tres quarts"), and homographs stay words when alone (el "Τρίτη" Tuesday, da "andet" other, fr "secondes", sw "kwanza").
+- Ordinals agreed with their noun or carrying a case suffix now parse: ar feminine / indefinite (الأولى, الثالثة, ثالث, أول), hi पहली / पहले / पाँचवीं / पाँचवें, mr पहिली / पहिले / पाचवी, ne पहिली / दोस्री, gu પહેલી / પહેલું / પાંચમી, pa ਪਹਿਲੀ / ਪਹਿਲੇ / ਪੰਜਵੀਂ, ur پہلی / پہلے / پانچویں, tr ikinciye / birinciyi / birincisi / üçüncüsü (#152, #153, #154, #155, #156, #157, #158, #173).
+- The other standard ordinal forms parse too: fa دومین / بیست و یکمین and اول / نخست / نخستین, ja 第一 / 第二十一, ko 첫째 / 둘째 / 셋째 and 두번째 (#174, #175, #176).
+- Standard spellings the renderer does not produce are accepted: ar الحادي والعشرون / الحادي بعد المائة (#249), mn glued нэгдүгээр / хорин нэгдүгээр (#248), hy glued քսանմեկերորդ (#250), ms kesebelas / kedua puluh satu (#254), vi thứ mười một / thứ nhất / thứ tư, bn প্রথম / একুশতম and ar الألف in ordinal mode (#245).
+- In sentence mode a Hindi / Gujarati / Turkish ordinal keeps its agreement in figures: "पहली बार" is "१ली बार", "ikinciye" is "2'nciye" (#153).
+- `to="ordinal"` no longer maps et "üheksas" (9th) and ms "kesepuluh" (10th) to -1: the ordinal table is no longer built from the renderer's garbage ordinal of -1 (#62).
+- `to="ordinal_num"`: a prefix hyphen is not a minus sign ("ke-21", "ika-21", "we-100" are 21 / 21 / 100) (#63); thousands-grouped figures are read whole ("1,000th", "1.000.", "1 000e" are 1000) while a decimal ("2.5th") or figures glued to a word ("covid19") raise (#64); la Roman numerals (XXI, MMXXIV) and the word forms ar / bn render (الأول, একুশতম) parse (#127, #246).
+- Ordinals above 10000 parse: "dix mille unième" (10001), "douze mille trois cent quarante-cinquième" (12345), "zwanzigtausendste" (20000), "millonésimo" (1000000) (#125).
+- Sentence mode reads a compound ordinal spoken in parts as one: es "vigésimo cuarto piso" is "24º piso", tr "kırk ikinci" is "42'nci", it "venti quattresimo" is "24º", ro "al douăzeci și unulea" is "al 21-lea"; pl "dwadzieścia pierwszy" stays in words instead of becoming "20 pierwszy" (#70).
+- English `to="year"`: a tens word plus unit is the year itself ("twenty-two" → 22, not 2002) (#56); "oh"/"o" years read ("nineteen oh-five" → 1905, "ten oh six" → 1006) (#110); 3-digit years as num2words2 renders them read ("nine eleven" → 911, "one twenty-seven" → 127) (#111); the "BC"/"AD" era word is accepted ("forty-four BC" → -44) (#112).
+- English stacked scale words multiply: "a thousand million" → 1000000000, "one million million" → 10^12 (#57).
+- English no longer sums two numbers said side by side ("one hundred one hundred", "one thousand one million", "12 34" now raise) (#58).
+- English reads every scale word num2words2 renders up to centillion ("one unvigintillion" → 10^66) and every scale ordinal ("one vigintillionth", "one centillionth") (#113).
+- en_IN, en_NG, en_NE and en_NP fall back to the English grammar where their table has no reading: decimals, year pairs, "a hundred", "double zero seven", scales above the table; en_IN keeps lakh/crore (#193).
+- `to="year"` reads the year spelling of every table language's renderer: year words (bn সাল, ba йыл, vi năm, hy թվական, km ឆ្នាំ, zh/ja 年, ...) are stripped (#128), zh digit-by-digit years ("一九〇五年" → 1905) (#129), ja imperial eras ("明治三十八年" → 1905) (#130), ta "ஆயிரத்து" (#131), fi glued years (#132), af "negentien nege-en-negentig" (#133), nb/no "nitten hundre og fem" (#134), am "አሥራ ዘጠኝ መቶ አምስት" (#135), dv "ނަވާރަ ސަތޭކަ ފަހެއް" (#136), and lij years carrying the renderer's stray ". urtea" suffix (#247).
+- `to="digits"` reads Wolof hyphenated digits ("juróom-ñaar" is 7, not 5 2) (#50), the two-word lus/miz zero "a awmlo" (#106), and English "double"/"triple" (#190).
+- `words2num_sentence(..., to="digits")` writes a digit run as its digit string, keeping leading zeros and "double"/"triple" ("call double zero seven" → "call 007") (#190, #195).
+
+- Two digit words in a row are a range, not one number: "deux trois minutes" → "2 3 minutes", not "23". A dictated string still needs three digits or a leading zero ("zero six" → "06", "one two three" → "123") (#51).
+- A token already written in figures never joins a word run: "nineteen 90" → "19 90", "cinq 5" → "5 5" (#68).
+- English "oh" is the interjection on its own ("oh no", "I said oh" are left alone) and 0 only next to another digit word ("room oh seven" → "room 07") (#79).
+- Long texts made of number words are processed in linear time (2000 tokens in well under a second instead of minutes) (#186).
+- Rewritten text never uses exponent notation: "zero point zero zero zero zero zero zero one" → "0.0000001", and `auto_parse_sentence("0.0000001 kg")` keeps "0.0000001 kg" (#202).
+- Punctuation around a number is kept and no longer blocks it: "(forty two)" → "(42)", "\"forty\"" → "\"40\"", "forty…" → "40…", "«vingt-deux»" → "«22»", "¿veinte?" → "¿20?" (#69).
+- Cardinals joined by a connector convert whole in ~37 more languages, with the connectors taken from num2words2's own spelling (is "fjörutíu og tveir" → 42, no "fem hundre og femtifem" → 555, fa "چهل و دو", sq, bg, ha, lus, vi "lẻ" ...); ro "douăzeci de lei" keeps its "de" ("20 de lei"); "and" between two separate numbers stays a list ("fem og seks" → "5 og 6") (#65).
+- The comma num2words2 writes after a scale word stays inside the number: "twelve thousand, three hundred and forty-five" → "12345"; "in two thousand, five people came" still gives "2000, 5" (#67).
+- A lone homograph of a number word stays a word (it "tu sei bravo", fr "quoi de neuf", nl "acht geven", de "in Acht nehmen"); next to another number word it is the number ("sei e trenta" → "6 e 30") (#80).
+- el "τοις εκατό" and vi "phần trăm" (percent) keep their hundred word (#82).
+- The indefinite article that is the word for one stays a word in tr, hu, sv, da, no, el, fa, hi, bn, vi ("Bir gün bir adam geldi."), unless a unit follows ("bir lira" → "1 lira") (#83).
+- The article-one in front of a scale word opens the number: sv "en miljon kronor" → "1000000 kronor", no "ett tusen" → "1000", ro "o mie de lei" → "1000 de lei" (#183).
+- Case-declined cardinals are read: ru "около трёх тысяч" → "около 3000", "сто двадцати" → "120", uk "трьох тисяч", pl "trzech tysięcy", ar "ثلاثة وعشرين" → 23, "عشرين" → 20, fi "viidellä" → "5:llä" (#74).
+- tr spaced hundreds before a scale word: "üç yüz bin" → 300000, "üç yüz bin beş yüz" → 300500 (also in `words2num`) (#75).
+- vi "hai nghìn không trăm linh bốn" → 2004, "không trăm hai mươi" → 2020, "ba mươi tư" → 34 (#77).
+- Common spellings beside num2words2's: el "εννιά", "δεκαοχτώ", hi "छह", "पांच", da "tres" / "halvtres", bn "পঁয়ত্রিশ" (#78), cs inverted "pětadvacet" → 25 (#179), ro contracted teens "unșpe" ... "nouășpe" (#180). Also accepted by `words2num`.
+- A case ending, classifier or counter glued to a number is kept after the figures: tr "on ikide" → "12'de", "Saat üçte" → "Saat 3'te", hu "Háromkor" → "3-kor", bn "বারোটা" → "12টা", ko "삼만원이에요" → "30000원이에요"; words that only look suffixed stay ("yüzde elli" → "yüzde 50", "ona", "egykor") (#73).
+- A proclitic preposition glued to a number is kept before it: he "באלף תשע מאות תשעים ותשע" → "ב-1999", ar "بثلاثمائة ألف" → "ب300000" (#76); so is an elided clitic: fr "d'onze heures" → "d'11 heures", it "dell'otto" → "dell'8" (#184).
+- Numbers inside unspaced Chinese, Japanese and Thai text convert in place: "我买了三个苹果。" → "我买了3个苹果。", "家は三百万円です。" → "家は3000000円です。", "ฉันจ่ายยี่สิบสามบาท" → "ฉันจ่าย23บาท"; words that contain a numeral character stay (一起, 十分, 四川, สามารถ, เก้าอี้) (#177).
+- Native Korean numerals are read: "사과 세 개" → "사과 3 개", "서른다섯 살" → "35 살", "하나 둘 셋" → "1 2 3"; "네" (yes) and the age counter in "삼십오 세" are left alone (#178).
+
+- `parse_number_string(..., lang=...)` reads a dot followed by 1, 2 or 4+ digits as a decimal in every locale (`"3.14"` with `lang="fr"` is 3.14, `"1,5"` with `lang="en"` is 1.5); `"1.234"` stays a thousands group where the locale writes decimals with a comma (#53).
+- A hyphenated locale (`"pt-BR"`) uses its own separators, and a language without a separator table auto-detects instead of applying English rules (#54).
+- Auto-detection no longer reads `"1234.567"` as 1234567 or `"1.5.2026"` as 152026: a leading group of four or more digits is a decimal, and repeated separators must group thousands in threes (#55).
+- `words2num` reads numbers written in figures with the language's separators: en `"1,234"` is 1234 (not 235), de `"1.234"` is 1234 and de `"2,5"` is 2.5 (#59, #60).
+- The Swiss typographic apostrophe (`1’234.5`) is accepted as a thousands separator (#109).
+- `thousands_sep` equal to `decimal_sep` (or a digit as a separator) raises `ValueError` instead of silently deleting the decimal point (#188).
+- `auto_parse` accepts `Mn`/`BN`/`TN`-style scale suffixes and raises `Words2NumError`, never `KeyError`, for an unknown one; `auto_parse_sentence` leaves such a span untouched instead of aborting (#194).
+- `auto_parse(..., prefer=...)` now swaps the whole unit (`unit`, `unit_long`, `kind`): `"5m"` with `{"m": "minute"}` is `5 min`, a time; a target that is not a reading of the token is ignored (#203).
+- `auto_parse` and `auto_parse_sentence` raise `NotImplementedError` for an unsupported language, like `words2num` (#204).
+- `words2num(text, to="currency")` parses a spoken amount and returns it as a `Decimal`, unit plus subunit: `"twelve euros, thirty-four cents"` is `Decimal("12.34")`, de `"zwei Euro"` is `Decimal("2")`; text without a currency word is read as a plain cardinal (#189).
+- Currency fold (`words2num_sentence(..., currency=True)`): a bare subunit of 100 or more carries into the unit (`"one hundred fifty cents"` -> `$1.50`) (#45); a spoken fraction longer than the currency's minor unit is left as said instead of truncated (#46); num2words' English `"twelve euros, thirty-four cents"` folds to `€12.34` (#47); a subunit after an amount that was not folded is no longer given a currency nobody named (#48); fr `"douze dollars et trente-quatre cents"` is `12,34 $`, not `12 $ et 3400` (#49).
+- Currency fold: `"twenty pounds of flour"` stays a weight (#81); `"one yen"`, `"un rouble"`, `"um iene"` fold like any other amount (#103); every unit and subunit name num2words writes is recognised (`paise`, `kopeykas`, `copechi`, `Fen`, `rappen`, es `francos`, ca `iens`/`rupies`) (#104); `"two dollars and fifty"` and `"cinco euros con cincuenta"` fold at the end of an amount (#181); English writes `20 kr` and `2 zł` with a space (#182).
+- Spoken decimals are read in every language the way num2words writes them, derived from its own output: separator words (sv `"komma"`, cs `"čárka"`, hi `"दशमलव"`, ko `"점"`, en_IN `"point"`), whole-word + denominator forms (ru `"три целых четырнадцать сотых"`, hu `"három egész tizennégy század"`, fa, sk, kz, mn), and separators glued into one word (ja `"三点一四"`, tr `"üçvirgülondört"`, `words2num` only) (#107, #108).
+- A decimal fraction may start with zeros or be a number up to 999: fr `"trois virgule zéro vingt-cinq"` is `3,025`, `"trois virgule cent vingt-cinq"` is `3,125` (#52).
+- `words2num(..., to="cardinal")` reads spoken decimals in every language, not only English: fr `"trois virgule un quatre"` is `Decimal("3.14")` (#191).
+- The standard decimal word is accepted where num2words writes English "point": gl `"coma"`, mk `"запирка"`, nn/fo/lb `"komma"`, oc `"virgula"`, mt `"punt"` (#267).
+- `to="currency"` reads pt feminine numerals before a feminine currency (`"duas libras"`) and Hebrew amounts with the conjunction glued to either the unit or the subunit, working around num2words renderings (#264, #266).
+- `words2num_sentence` raises `NotImplementedError` for an unknown `to` (e.g. `"cardnal"`) instead of returning the sentence unchanged (#201).
+- Rust API: `is_scale_word_of`, `scale_words` and `token_may_be_number` no longer cache an entry for every unsupported language string passed in (unbounded memory) (#216).
+- Releases: `release.yml` refuses a tag that disagrees with `pyproject.toml` or `_version.py`, and installs and tests every native wheel and the sdist before publishing (#205, #206).
+- `auto-release.yml` decides on PyPI, not the tag, so a release that failed after tagging is retried; it now also dispatches the AUR publish (#207, #208).
+- AUR package builds again: maturin + Rust make-dependencies, no stale `docopt`/`num2words2` dependencies, and a `check()` that runs the test suite (now shipped in the sdist) and can fail (#209).
+- E2E tests run on Rust-only changes, and E2E/Scheduled install `num2words2` so the multilingual round trip is no longer skipped (#210, #211).
+- The Lint workflow fails on black, isort, flake8 and mypy violations, and the code passes them; the package ships `py.typed` and `_rust.pyi` type stubs (#213).
+
+### Documentation
+
+- `to="digits"` is documented: digit-by-digit, returns an `int` (leading zeros dropped; sentence mode keeps them) (#196).
+- README and REFERENCE.md no longer document names that do not exist since the Rust port (`CONVERTER_CLASSES`, `UNITS`, `CURRENCIES`, `NUMBER_FORMAT_DEFAULTS`, `lang_XX.py`); every REFERENCE.md example is now run as a test (#198).
+- Setup docs updated for the Rust package: Python >= 3.10, Rust toolchain for source builds, no runtime dependencies, abi3 wheels, Intel macOS wheels, `normalize` docstring (#214).
+
 ## [0.3.5] — 2026-10-08
 
 ### Fixed

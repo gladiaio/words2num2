@@ -27,12 +27,14 @@ Decimal('3.14')
 >>> words2num("trente-deux", lang="fr")
 32
 """
+
 from __future__ import unicode_literals
 
 # The compiled core is mandatory: this package is a binder over it. A source
 # checkout must build the extension (maturin develop) — an ImportError here is
 # the honest signal that it has not been built.
 from . import _rust as _RUST  # noqa: E402
+from ._version import __version__, __version_tuple__  # noqa: E402,F401
 
 # Exception + result types the core references by name (see
 # rust/words2num2-py/src/lib.rs: `words2num_error` imports
@@ -42,12 +44,9 @@ from . import _rust as _RUST  # noqa: E402
 from .base import Words2NumError  # noqa: E402
 from .converters.auto import Quantity  # noqa: E402
 
-try:
-    from ._version import __version__, __version_tuple__
-except ImportError:
-    # Package is not installed, provide defaults
-    __version__ = "unknown"
-    __version_tuple__ = (0, 0, 0, "unknown", 0)
+#: The ``to=`` conversion types :func:`words2num` and
+#: :func:`words2num_sentence` accept.
+CONVERTER_TYPES = tuple(_RUST.CONVERTER_TYPES)
 
 
 __all__ = [
@@ -60,31 +59,43 @@ __all__ = [
     "parse_number_string",
     "normalize",
     "supported_langs",
+    "CONVERTER_TYPES",
     "Quantity",
     "Words2NumError",
 ]
 
 
-def words2num(text, lang="en", to="cardinal", **kwargs):
+def words2num(text, lang="en", to="cardinal"):
     """Parse ``text`` (a number written in words) into a numeric value.
 
     Args:
         text: The words to parse, e.g. ``"forty-two"``.
-        lang: Language code (default ``"en"``).
+        lang: Language code (default ``"en"``), case-insensitive. ``-`` and
+            ``_`` are interchangeable, unknown region subtags fall back to the
+            base language (``"en-US"`` -> ``en``) and ISO 639-2 codes are
+            accepted (``"eng"``, ``"fra"``). Language names are not.
         to: Conversion type — ``cardinal``, ``ordinal``, ``ordinal_num``,
-            ``year``, or ``currency``.
+            ``year``, ``currency``, or ``digits`` (digit-by-digit:
+            ``"two seven five"`` -> ``275``; the result is an ``int``, so
+            leading zeros are dropped — use :func:`words2num_sentence` to keep
+            ``"zero seven"`` as ``07``).
 
     Returns:
-        ``int``, ``float``, or ``Decimal`` depending on the input.
+        ``int``, ``float`` or ``Decimal`` depending on the input. ``to="currency"``
+        returns the amount as a ``Decimal``, unit plus subunit
+        (``"twelve euros, thirty-four cents"`` -> ``Decimal("12.34")``); text
+        that names no currency is read as a plain cardinal. A number written
+        in figures is read with the language's separators (``"1,234"`` ->
+        1234 in en, ``"2,5"`` -> ``Decimal("2.5")`` in de).
 
     Raises:
         NotImplementedError: if ``lang`` or ``to`` is not supported.
         Words2NumError: if ``text`` cannot be parsed.
     """
-    return _RUST.words2num(text, lang, to, kwargs or None)
+    return _RUST.words2num(text, lang, to, None)
 
 
-def words2num_sentence(sentence, lang="en", to="cardinal", currency=False, **kwargs):
+def words2num_sentence(sentence, lang="en", to="cardinal", currency=False):
     """Convert every word-number in ``sentence`` to numeric form.
 
     Walks the sentence, matching the longest run of number tokens at each
@@ -96,8 +107,11 @@ def words2num_sentence(sentence, lang="en", to="cardinal", currency=False, **kwa
     ``"twelve dollars and fifty cents"`` -> ``"$12.50"``, fr ``"quarante-trois
     dollars et vingt centimes"`` -> ``"43,20 $"``, de ``"zwanzig euro fünfzig"``
     -> ``"20,50 €"``. Off by default: the output is unchanged.
+
+    ``lang`` and ``to`` are validated before the walk and raise
+    ``NotImplementedError`` like :func:`words2num`.
     """
-    return _RUST.words2num_sentence(sentence, lang, to, kwargs or None, currency)
+    return _RUST.words2num_sentence(sentence, lang, to, None, currency)
 
 
 # Aliases (parity with num2words2)
@@ -105,39 +119,53 @@ convert_sentence = words2num_sentence
 sentence_to_words = words2num_sentence
 
 
-def auto_parse(text, lang="en", prefer=None, thousands_sep=None,
-               decimal_sep=None):
+def auto_parse(text, lang="en", prefer=None, thousands_sep=None, decimal_sep=None):
     """Parse a single quantity expression, e.g. ``"$12,345.00"`` or ``"5cm"``.
 
-    Returns a :class:`Quantity`; raises ``Words2NumError`` if unparseable.
-    ``prefer`` disambiguates ambiguous unit tokens (``{"m": "mile"}``).
+    Returns a :class:`Quantity`; raises ``Words2NumError`` if unparseable or
+    if ``thousands_sep == decimal_sep``, and ``NotImplementedError`` for an
+    unsupported ``lang``. A digit-form decimal is an exact ``Decimal`` and a
+    scale suffix shifts its point (``"$4.1bn"`` -> ``4100000000``).
+
+    ``prefer`` disambiguates ambiguous unit tokens (``{"m": "mile"}``,
+    ``{"m": "minute"}``): the preferred unit replaces the whole reading
+    (``unit``, ``unit_long``, ``kind``). A target that is not a reading of the
+    token (``{"m": "kg"}``) is ignored.
     """
     return _RUST.auto_parse(text, lang, prefer, thousands_sep, decimal_sep)
 
 
-def auto_parse_sentence(text, lang="en", prefer=None, thousands_sep=None,
-                        decimal_sep=None, expand=False):
+def auto_parse_sentence(
+    text, lang="en", prefer=None, thousands_sep=None, decimal_sep=None, expand=False
+):
     """Walk free text and rewrite every quantity expression in place.
 
     Each match becomes ``"<value> <unit>"``; with ``expand=True`` units use
     their long form. Returns the rewritten string.
     """
     return _RUST.auto_parse_sentence(
-        text, lang, prefer, thousands_sep, decimal_sep, expand)
+        text, lang, prefer, thousands_sep, decimal_sep, expand
+    )
 
 
 def parse_number_string(s, thousands_sep=None, decimal_sep=None, lang=None):
     """Parse a numeric string with configurable / per-locale separators.
 
-    Resolution order (all in the core): explicit separators, then the ``lang``
-    locale's defaults, then auto-detection from the string itself.
+    Resolution order (all in the core): explicit separators (which must
+    differ), then the ``lang`` locale's defaults, then auto-detection from the
+    string itself. A dot or comma followed by 1, 2 or 4+ digits is a decimal in
+    any locale (``"3.14"`` with ``lang="fr"`` is 3.14); ``"1.234"`` stays a
+    thousands group where the locale writes decimals with a comma.
+
+    Returns an ``int``, or an exact ``Decimal`` for a decimal.
     """
     return _RUST.parse_number_string(s, thousands_sep, decimal_sep, lang)
 
 
 def normalize(text):
     """Normalize ``text`` the way the core does before a reverse lookup
-    (NFKD, lowercase, strip diacritics, collapse whitespace, drop hyphens)."""
+    (NFKD, lowercase, strip diacritics, hyphens between words become spaces,
+    collapse whitespace): ``normalize("Forty-Two")`` -> ``"forty two"``."""
     return _RUST.normalize(text)
 
 
