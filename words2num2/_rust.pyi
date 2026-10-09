@@ -37,6 +37,8 @@ def words2num_sentence(
     kwargs: Optional[Dict[str, object]] = None,
     currency: bool = False,
     date: bool = False,
+    region: Optional[str] = None,
+    date_format: str = "written",
 ) -> str: ...
 def pluralize(long_form: Optional[str], value: Number) -> Optional[str]: ...
 def auto_parse(

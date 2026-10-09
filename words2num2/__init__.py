@@ -95,7 +95,15 @@ def words2num(text, lang="en", to="cardinal"):
     return _RUST.words2num(text, lang, to, None)
 
 
-def words2num_sentence(sentence, lang="en", to="cardinal", currency=False, date=False):
+def words2num_sentence(
+    sentence,
+    lang="en",
+    to="cardinal",
+    currency=False,
+    date=False,
+    region=None,
+    date_format="written",
+):
     """Convert every word-number in ``sentence`` to numeric form.
 
     Walks the sentence, matching the longest run of number tokens at each
@@ -112,12 +120,19 @@ def words2num_sentence(sentence, lang="en", to="cardinal", currency=False, date=
     writes a date: ``"march twelfth twenty twenty six"`` -> ``"March 12,
     2026"``, ``lang="en_GB"`` -> ``"12 March 2026"``, de ``"am zwölften märz"``
     -> ``"am 12. März"``, es ``"el primero de mayo"`` -> ``"el 1 de mayo"``
-    (en, fr, de, es, pt, it, nl). Off by default.
+    (en, fr, de, es, pt, it, nl). Off by default. A date spoken all in
+    numbers is written in figures in the region's order: ``"three twelve
+    twenty twenty six"`` -> ``"3/12/2026"`` (en), ``"03/12/2026"`` (en_GB),
+    ``"12.03.2026"`` (de). ``region`` (``"US"``, ``"GB"``...) overrides the
+    region of ``lang``; ``date_format="iso"`` writes every date with a year
+    as ``"2026-03-12"``.
 
     ``lang`` and ``to`` are validated before the walk and raise
     ``NotImplementedError`` like :func:`words2num`.
     """
-    return _RUST.words2num_sentence(sentence, lang, to, None, currency, date)
+    return _RUST.words2num_sentence(
+        sentence, lang, to, None, currency, date, region, date_format
+    )
 
 
 # Aliases (parity with num2words2)

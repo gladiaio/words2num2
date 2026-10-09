@@ -80,7 +80,7 @@ Decimal('3.14')
 
 ### `words2num_sentence`
 
-`words2num_sentence(sentence, lang="en", to="cardinal", currency=False, date=False)`
+`words2num_sentence(sentence, lang="en", to="cardinal", currency=False, date=False, region=None, date_format="written")`
 
 Walk a sentence and replace every word-number with its numeric form.
 Non-number tokens pass through unchanged. Punctuation is preserved.
@@ -99,7 +99,12 @@ mayo de 2026"`, pt `"1º de maio de 2026"`, it `"il 1º maggio"`, nl `"12
 maart 2026"`. Other languages pass through. In English, "may", "march" and
 the abbreviations count as a month only with an ordinal day ("march
 twelfth"), "the" ("may the fourth") or a year; "they march twelve miles"
-stays as it is.
+stays as it is. A date spoken all in numbers (day, month,
+four-digit year, a real calendar date) is written in figures in the region's
+order: en `"3/12/2026"`, en_GB / fr / es / it / pt `"12/03/2026"`, de
+`"12.03.2026"`, nl `"12-03-2026"`. `region` (`"US"`, `"GB"`...) overrides
+the region of `lang`; `date_format="iso"` writes every date that has a year
+as `"2026-03-12"` (`"written"`, the default, otherwise).
 
 **Returns** — `str`.
 
