@@ -2937,6 +2937,19 @@ fn en_decade(word: Option<&str>) -> bool {
     })
 }
 
+/// en "nineties" -> 9: the decade a decade word names, for `to="year"`.
+fn en_decade_value(word: &str) -> Option<i64> {
+    "twenties thirties forties fifties sixties seventies eighties nineties"
+        .split_whitespace()
+        .position(|d| d == word)
+        .map(|p| p as i64 + 2)
+}
+
+/// The index of the next part that is not blank.
+fn next_word_index(parts: &[String], i: usize) -> Option<usize> {
+    (i + 1..parts.len()).find(|&k| !py_str_isspace(&parts[k]))
+}
+
 /// The `to=` modes [`words2num`] and [`words2num_sentence`] accept.
 pub const CONVERTER_TYPES: [&str; 6] =
     ["cardinal", "ordinal", "ordinal_num", "year", "currency", "digits"];
@@ -3038,6 +3051,9 @@ fn words2num_sentence_walk(
     // to the cardinal walk: `to="year"` keeps its own pair reading, and any
     // extra keyword argument fails every conversion (see `has_kwargs`).
     let en_cardinal = en_grammar && to == "cardinal" && !has_kwargs;
+    // `to="year"` on a sentence: decades ("the nineteen nineties" -> "the
+    // 1990s") and no year out of a time ("at nine fifteen" stays "at 9 15").
+    let en_year = en_grammar && to == "year" && !has_kwargs;
     // `to="digits"` writes a digit run as its digit string too, leading zeros
     // and "double"/"triple" included ("call double zero seven" -> "call
     // 007"), where the single-token `to_digits` can only return an int (#190, #195).
@@ -3321,6 +3337,36 @@ fn words2num_sentence_walk(
                 if best_value.is_none() || end > best_end {
                     best_value = Some(W2nValue::Int(BigInt::from(year)));
                     best_end = end;
+                }
+            }
+        }
+
+        if en_year {
+            // "the nineteen nineties", "the twenty twenties": the decade of that
+            // century, one token ("1990s"); the cardinal walk keeps it in words.
+            let century = match &best_value {
+                Some(W2nValue::Int(c)) => i64::try_from(c).ok().filter(|c| (10..=99).contains(c)),
+                _ => None,
+            };
+            let decade = next_word_index(&parts, best_end)
+                .and_then(|k| en_decade_value(&rstrip_punct(&parts[k]).to_lowercase()).map(|d| (k, d)));
+            if let (Some(c), Some((k, d))) = (century, decade) {
+                out.push_str(sep_before(i));
+                out.push_str(&format!("{c}{d}0s"));
+                out.push_str(trailing_punct(&parts[k]));
+                out.push_str(sep_after(k));
+                i = k + 1;
+                continue;
+            }
+            // "at nine fifteen" is a time: a year read in running text needs a
+            // two-digit first half ("nineteen oh five", "twenty twenty six").
+            // The single-token `words2num(..., to="year")` still reads "nine
+            // eleven" as 911, the way num2words2 spells 100..999 (#111).
+            let three_digit = matches!(&best_value, Some(W2nValue::Int(v)) if (BigInt::from(100)..BigInt::from(1000)).contains(v));
+            if three_digit && best_end > i && crate::w2n_lang_en::unit_value(&head).is_some_and(|u| (1..=9).contains(&u)) {
+                if let Ok(v) = converter.to_cardinal(&head) {
+                    best_value = Some(v);
+                    best_end = i;
                 }
             }
         }
@@ -4690,6 +4736,31 @@ mod digits_tests {
         // The old cardinal behaviour that motivated this was "two seven five"
         // -> 14; the cardinal walk now reads the digit string itself.
         assert_eq!(s("Two seven five", "en", "cardinal", false).unwrap(), "275");
+    }
+
+    #[test]
+    fn year_mode_reads_decades_and_leaves_times() {
+        let y = |t: &str| s(t, "en", "year", false).unwrap();
+        // A century and a decade word: one decade token.
+        assert_eq!(y("the nineteen nineties"), "the 1990s");
+        assert_eq!(y("back in the nineteen eighties, we"), "back in the 1980s, we");
+        assert_eq!(y("the twenty twenties."), "the 2020s.");
+        assert_eq!(y("nineteen sixties music"), "1960s music");
+        // The cardinal walk still keeps it in words.
+        assert_eq!(s("the nineteen nineties", "en", "cardinal", false).unwrap(), "the nineteen nineties");
+        // A bare decade word is no number.
+        assert_eq!(y("in the eighties"), "in the eighties");
+        // A time is two numbers, not a three-digit year.
+        assert_eq!(y("call me at nine fifteen"), "call me at 9 15");
+        assert_eq!(y("open five thirty to six"), "open 5 30 to 6");
+        // Years with a two-digit first half are untouched.
+        assert_eq!(y("born in nineteen eighty four"), "born in 1984");
+        assert_eq!(y("in nineteen oh five"), "in 1905");
+        assert_eq!(y("twenty twenty six"), "2026");
+        assert_eq!(y("in two thousand and five"), "in 2005");
+        assert_eq!(y("open twenty four seven"), "open 24 7");
+        // The single-token reading keeps num2words2's 100..999 spelling (#111).
+        assert!(matches!(crate::en_to_year("nine eleven"), Ok(crate::w2n_lang_en::W2nValue::Int(v)) if v == num_bigint::BigInt::from(911)));
     }
 
     #[test]
