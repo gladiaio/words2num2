@@ -1536,22 +1536,25 @@ pub fn words2num(
             let table = match to {
                 // A decimal spoken in words, read as the sentence walker
                 // reads it: fr "trois virgule un quatre" -> 3.14 (#191).
-                "cardinal" => {
-                    let decimal = || {
-                        table_decimal(&converter, &resolved, text)
-                            .and_then(|(int, _, frac)| BigDecimal::from_str(&format!("{}.{}", int, frac)).ok())
-                            .map(W2nValue::Dec)
-                    };
-                    // ar "مائة ، خمسون": the mark normalizing drops makes it a
-                    // decimal, never the cardinal 150 (#371).
-                    if crate::w2n_decimal::has_written_mark(converter.n2w_key(), text) {
-                        decimal().ok_or_else(|| {
-                            W2nError::Words2Num(format!("cannot parse {} as a number", py_repr_str(text)))
-                        })
-                    } else {
-                        base_convert(lang, text, false).or_else(|e| decimal().ok_or(e))
-                    }
+                // ar "مائة ، خمسون": the mark normalizing drops makes it a
+                // decimal, never the cardinal 150 — in every mode (#371, #620).
+                "cardinal" | "currency" if crate::w2n_decimal::has_written_mark(converter.n2w_key(), text) => {
+                    table_decimal(&converter, &resolved, text)
+                        .and_then(|(int, _, frac)| BigDecimal::from_str(&format!("{}.{}", int, frac)).ok())
+                        .map(W2nValue::Dec)
+                        .ok_or_else(|| W2nError::Words2Num(unparseable_msg(text)))
                 }
+                // A dictated "خمسة ، ستة ، سبعة" (to="digits") keeps its commas
+                // as separators; only the number modes refuse the mark.
+                "year" | "ordinal" if crate::w2n_decimal::has_written_mark(converter.n2w_key(), text) => {
+                    Err(W2nError::Words2Num(unparseable_msg(text)))
+                }
+                "cardinal" => base_convert(lang, text, false).or_else(|e| {
+                    table_decimal(&converter, &resolved, text)
+                        .and_then(|(int, _, frac)| BigDecimal::from_str(&format!("{}.{}", int, frac)).ok())
+                        .map(W2nValue::Dec)
+                        .ok_or(e)
+                }),
                 // A currency amount was read above; what is left is the cardinal.
                 "currency" => base_convert(lang, text, false),
                 "year" => table_year(lang, text),
@@ -3289,7 +3292,13 @@ fn words2num_sentence_walk(
                 }
                 Err(_) if plain && !en_cardinal => {
                     // "trois virgule cinq": a decimal spoken in a table language.
-                    let dec = table_decimal(&converter, &resolved, &stripped).and_then(
+                    // In running text a comma glued to a word, or any ASCII
+                    // comma, separates a list: only the renderer's own spaced
+                    // "،" makes a decimal here (#668).
+                    let list_comma = converter.n2w_key().starts_with("ar")
+                        && (stripped.contains(',')
+                            || stripped.split_whitespace().any(|w| w != "\u{060C}" && w.contains('\u{060C}')));
+                    let dec = (!list_comma).then(|| table_decimal(&converter, &resolved, &stripped)).flatten().and_then(
                         |(int, sep, frac)| {
                             BigDecimal::from_str(&format!("{}.{}", int, frac))
                                 .ok()
@@ -5210,6 +5219,16 @@ mod audit_tests {
 #[cfg(test)]
 mod ambiguous_span_tests {
     use super::words2num_sentence;
+
+    /// #668: a glued or ASCII comma in running text is no decimal mark.
+    #[test]
+    fn arabic_list_commas_stay_lists() {
+        let s = |t: &str| words2num_sentence(t, "ar", "cardinal", false).unwrap();
+        assert!(!s("عندي ثلاثة وعشرون,أربعون شخصا").contains("23.40"));
+        assert!(!s("عندي مائة وخمسون,عشرون كتابا").contains("150.20"));
+        assert!(!s("عندي واحد وعشرون ,خمسون").contains("21.50"));
+        assert!(!s("عندي واحد وعشرون،عشرون").contains("21.20"));
+    }
 
     /// #348: a span the renderer writes for two values stays words, with the
     /// rest of the same number, and its ordinal is declined too.
