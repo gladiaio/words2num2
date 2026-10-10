@@ -134,7 +134,13 @@ fn mark_forms(lang: &str) -> &'static MarkForms {
 /// not 150).
 pub fn has_written_mark(lang: &str, text: &str) -> bool {
     let Some(m) = hundredths_mark(lang) else { return false };
-    mark_words(text, m).iter().any(|w| w == m)
+    let words = mark_words(text, m);
+    // A comma before "و" ("ألف، وخمسمائة") is punctuation inside the number:
+    // no hundredths form opens with the conjunction (#807).
+    words
+        .iter()
+        .enumerate()
+        .any(|(k, w)| w == m && !words.get(k + 1).is_some_and(|n| n.starts_with('\u{0648}')))
 }
 
 /// The words of `text` with the mark as a word of its own however it is
@@ -335,7 +341,7 @@ pub fn read(
         let t = text.trim();
         let (sign, body) = match t.strip_prefix(['-', '\u{2212}']) {
             Some(b) => ("-", b),
-            None => ("", t),
+            None => ("", t.strip_prefix('+').unwrap_or(t)), // #805
         };
         if let Some((a, b)) = body.split_once(mark) {
             let digits = |s: &str| -> Option<String> {
@@ -344,6 +350,11 @@ pub fn read(
                     .flatten()
             };
             if let (Some(a), Some(b)) = (digits(a), digits(b)) {
+                // Three digits after it group thousands, as "12,500" does:
+                // no decimal ("12،500" is no 12.5; #804).
+                if b.len() == 3 || body.matches(mark).count() > 1 {
+                    return None;
+                }
                 let int = a.trim_start_matches('0');
                 let int = if int.is_empty() { "0" } else { int };
                 return Some((format!("{sign}{int}"), default_sep, b));
@@ -388,11 +399,12 @@ pub fn read(
         // Only the hundredths the renderer writes after the mark: "ثلاثة ،
         // أربعة" is a list, not 3.04 (#617).
         let rest = words[pos + 1..].join(" ");
-        // A figure is no masculine word: "ثلاثة ، 50" is 3.50.
+        // A two-digit figure is hundredths: "ثلاثة ، 50" is 3.50. One digit is
+        // a list item ("ثلاثة ، 5"), never 0.05 (#806).
         let figure = || {
             let digits: Option<String> =
                 rest.chars().map(|c| crate::w2n_sentence::digit_value(c).map(|d| char::from(b'0' + d as u8))).collect();
-            digits.filter(|d| (1..=2).contains(&d.len())).and_then(|d| d.parse::<u32>().ok())
+            digits.filter(|d| d.len() == 2).and_then(|d| d.parse::<u32>().ok())
         };
         let n = forms.hundredths.get(&crate::normalize(&rest)).copied().or_else(figure)?;
         let sign = if negative { "-" } else { "" };
@@ -619,6 +631,20 @@ mod tests {
         assert_eq!(card("12،5", "ar"), "12.5");
         assert_eq!(card("٣،٥٠", "ar"), "3.50");
         assert_eq!(card("3،05", "ar"), "3.05");
+        // #804: three digits after the mark group, they are no decimal.
+        for t in ["12،500", "١٢،٥٠٠", "1،000", "1،000،000"] {
+            assert!(crate::words2num(t, "ar", "cardinal").is_err(), "{t}");
+        }
+        // #805: a plus sign.
+        assert_eq!(card("+3،5", "ar"), "3.5");
+        // #806: one digit after a spaced or one-sided mark is a list item.
+        for t in ["ثلاثة،5", "ثلاثة ،5", "٣ ،٥", "٣، ٥", "،5", "ثلاثة ، 5", "3 ، 5"] {
+            assert!(crate::words2num(t, "ar", "cardinal").is_err(), "{t}");
+        }
+        // #807: a comma before the conjunction is inside the number.
+        for t in ["ألف، وخمسمائة", "ألف, وخمسمائة"] {
+            assert_eq!(crate::words2num(t, "ar", "cardinal").unwrap(), W2nValue::Int(1500.into()), "{t}");
+        }
         assert!(crate::words2num("مائة ، , خمسون", "ar", "cardinal").is_err());
         assert!(crate::words2num("مائة , ، خمسون", "ar", "cardinal").is_err());
         assert!(crate::words2num("ثلاثة , أربعة", "ar", "cardinal").is_err());
