@@ -177,6 +177,8 @@ fn conjunction_comma(lang: &str, text: &str, at: usize) -> bool {
     let Ok(crate::w2n_lang_en::W2nValue::Int(p)) = crate::words2num(&head, lang, "cardinal") else {
         return false;
     };
+    // The size of the number: "سالب ألف، وخمسمائة" is -1500 (#975).
+    let p = if p < num_bigint::BigInt::from(0) { -p } else { p };
     let Ok(p) = i64::try_from(p) else { return true }; // past i64: a scale, no list
     let mut place = 1i64;
     while p % (place * 10) == 0 && place < i64::MAX / 10 {
@@ -731,7 +733,7 @@ mod tests {
         for t in ["ثلاثة، وخمسون", "خمسة، وعشرون", "خمسة, وعشرون", "عشرون، وخمسة"] {
             assert!(crate::words2num(t, "ar", "cardinal").is_err(), "{t}");
         }
-        for (t, v) in [("ألف، وخمسمائة", 1500), ("ثلاثة آلاف، وخمسمائة", 3500), ("مائة، وخمسون", 150), ("ألف، وخمسمائة، وخمسون", 1550)] {
+        for (t, v) in [("ألف، وخمسمائة", 1500), ("ثلاثة آلاف، وخمسمائة", 3500), ("مائة، وخمسون", 150), ("ألف، وخمسمائة، وخمسون", 1550), ("سالب ألف، وخمسمائة", -1500), ("-ألف، وخمسمائة", -1500), ("سالب مليونان، وثمانية عشر", -2000018)] {
             assert_eq!(crate::words2num(t, "ar", "cardinal").unwrap(), W2nValue::Int(v.into()), "{t}");
         }
         // #959: a dash before an ASCII comma leaves it the mark, as a sign word does.
