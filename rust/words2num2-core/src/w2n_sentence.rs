@@ -1071,6 +1071,14 @@ fn canonical_apocopes_norm(lang: &str, norm: &str) -> Option<String> {
 }
 
 fn base_convert(lang: &str, text: &str, ordinal: bool) -> Result<W2nValue, W2nError> {
+    // pt "vinte é cinco" is two numbers: "é" (is) is no connector "e" (#411).
+    let conns = crate::w2n_forms::connectors(lang);
+    if text.split_whitespace().any(|w| {
+        let n = crate::normalize(w);
+        conns.contains(&n.as_str()) && folded_letter(w, &n)
+    }) {
+        return Err(W2nError::Words2Num(unparseable_msg(text)));
+    }
     // Normalized once here; every reading below works on `norm`.
     let norm = crate::normalize(text);
     let supported = crate::is_supported_lang(lang);
@@ -1124,6 +1132,20 @@ fn base_convert_unsigned(lang: &str, norm: &str, ordinal: bool) -> Result<W2nVal
 }
 
 /// [`base_convert_unsigned`] on the text exactly as written, no aliases.
+/// May the spaced words of `norm` be read glued? Only when every one is
+/// itself a number word or part: fr "d eux" is no "deux", vi "ba y" no "bảy",
+/// nl "twee de" no "tweede" (#285).
+fn despace_ok(lang: &str, norm: &str) -> bool {
+    let conns = crate::w2n_forms::connectors(lang);
+    norm.split_whitespace().all(|p| {
+        conns.contains(&p)
+            || crate::token_may_be_number(lang, p)
+            || crate::w2n_forms::is_number_part(lang, p)
+            || crate::w2n_forms::is_bound_form(lang, p)
+            || apocope_word(lang, p).is_some()
+    })
+}
+
 fn base_convert_as_written(lang: &str, norm: &str, ordinal: bool) -> Result<W2nValue, W2nError> {
     let norm = norm.to_string();
     let supported = crate::is_supported_lang(lang);
@@ -1154,7 +1176,7 @@ fn base_convert_as_written(lang: &str, norm: &str, ordinal: bool) -> Result<W2nV
             // A compound ordinal spoken in parts where num2words glues it:
             // es "vigésimo cuarto" is "vigesimocuarto", tr "kırk ikinci" is
             // "kırkikinci" (#70). Only a genuine table hit counts.
-            if norm.contains(' ') {
+            if norm.contains(' ') && despace_ok(lang, &norm) {
                 let despaced: String = norm.split_whitespace().collect();
                 if let Ok(Some(v)) = crate::lookup_norm(lang, &despaced, true, &[]) {
                     return Ok(W2nValue::Int(BigInt::from(v)));
@@ -1178,7 +1200,7 @@ fn base_convert_as_written(lang: &str, norm: &str, ordinal: bool) -> Result<W2nV
             // "millenovecentottantotto". Only when de-spacing actually changes
             // the string (multi-token input), and only if that glued form is a
             // genuine table hit — so it never invents a value.
-            if norm.contains(' ') {
+            if norm.contains(' ') && despace_ok(lang, &norm) {
                 let despaced: String = norm.split_whitespace().collect();
                 if let Ok(Some(v)) =
                     crate::lookup_norm(lang, &despaced, false, &[])
@@ -1594,7 +1616,8 @@ fn sentence_to_en_value(v: W2nValue) -> crate::w2n_lang_en::W2nValue {
 /// is a literal: it never starts or extends a run. Without this, adjacent
 /// numerals were summed ("calling from 850 820 9095" came out as "10765").
 fn holds_digit(token: &str) -> bool {
-    token.chars().any(|c| c.is_ascii_digit())
+    // Any script's digits: "twenty ２" is no 22, "one hundred ٥" no 105 (#288).
+    token.chars().any(is_unicode_digit)
 }
 
 /// `SentenceConverter._starts_run` — a run must open with a real number word
@@ -1617,7 +1640,7 @@ fn holds_digit(token: &str) -> bool {
 /// run-internal: a run still may not open with `"and"`, `"minus"`,
 /// `"negative"`, `"a"` or `"an"`.
 fn starts_run(converter: &Converter, token: &str, decimal_heads: &[&str]) -> bool {
-    if token.is_empty() || holds_digit(token) {
+    if token.is_empty() || holds_digit(token) || tokens::has_interior_punct(token) {
         return false;
     }
     if decimal_heads.contains(&token) {
@@ -1643,7 +1666,7 @@ fn decimal_heads_for(resolved: &str) -> &'static [&'static str] {
 
 /// `SentenceConverter._is_candidate` — cheap pre-filter for run growth.
 fn is_candidate(converter: &Converter, token: &str, includable: &[&str]) -> bool {
-    if token.is_empty() || holds_digit(token) {
+    if token.is_empty() || holds_digit(token) || tokens::has_interior_punct(token) {
         return false;
     }
     if is_includable(token, includable) || converter.apocope(token).is_some() {
@@ -1682,8 +1705,14 @@ fn candidate_is_number(converter: &Converter, token: &str, includable: &[&str]) 
 fn is_includable(token: &str, includable: &[&str]) -> bool {
     includable.contains(&token) || {
         let norm = crate::normalize(token);
-        includable.contains(&norm.as_str())
+        includable.contains(&norm.as_str()) && !folded_letter(token, &norm)
     }
+}
+
+/// pt "é", it "è" (is) fold to the connector "e" (and) but are another word
+/// (#411). Other accented connectors are the language's own (ku "û").
+fn folded_letter(token: &str, norm: &str) -> bool {
+    norm == "e" && matches!(token.to_lowercase().as_str(), "é" | "è" | "e\u{301}" | "e\u{300}")
 }
 
 /// A run that crosses a connector only the renderer lists ([`lexicon::
@@ -2708,6 +2737,9 @@ fn homograph_words(resolved: &str) -> &'static str {
         "ca" => "nou",
         "ro" => "noua",
         "tr" => "yedi yuz",
+        // семью: 7 and "family", сорока: 40 and "magpie" (#433).
+        "ru" => "семью сорока",
+        "uk" => "сорока",
         _ => "",
     }
 }
@@ -2732,6 +2764,14 @@ fn is_homograph(resolved: &str, parts: &[String], i: usize, piece: &str) -> bool
         return word == "Acht" && !sentence_start;
     }
     let norm = crate::normalize(word);
+    // ru "с семью друзьями": after "с"/"со" семью is the instrumental of 7;
+    // "family" there is "семьёй".
+    if base == "ru" && norm == crate::normalize("семью") {
+        let prev = prev_word(parts, i).map(|p| p.to_lowercase());
+        if prev.is_some_and(|p| p == "с" || p == "со") {
+            return false;
+        }
+    }
     homograph_words(resolved).split_whitespace().any(|w| w == norm)
 }
 
@@ -3287,6 +3327,17 @@ fn words2num_sentence_walk(
             let hit = hit.filter(|_| !two_digit_words(&converter, &parts[i..=j]));
             let hit = hit.filter(|(v, _)| connector_join_ok(&converter, &stripped, v, hand_includable));
             let hit = hit.filter(|_| comma_groups_ok(&converter, &parts, j, &commas));
+            // A word that is no number nor number part completes a run only as
+            // an ordinal ("vigésimo cuarto", it "venti quattresimo" glued) or a
+            // decimal's denominator ("три целых четырнадцать сотых"). A short
+            // fragment never glues onto a number: nl "twee de" is no "tweede",
+            // de "zwei te" no "zweite", vi "ba y" no "bảy" (#285).
+            let hit = hit.filter(|(v, ordinal)| {
+                candidate
+                    || matches!(v, W2nValue::Dec(_))
+                    || converter.is_ordinal_word(&clean)
+                    || (*ordinal && rstrip_punct(&clean).chars().count() >= 4)
+            });
             match hit {
                 // A run never ends on a connector: "one and a half" is "1 and
                 // a half", not "1 half"; "five point" keeps its "point".
@@ -5144,5 +5195,66 @@ mod audit_tests {
             super::auto_parse_sentence("0.0000001 kg", "en", &prefer, None, None, false).unwrap(),
             "0.0000001 kg"
         );
+    }
+}
+
+#[cfg(test)]
+mod false_number_tests {
+    use super::words2num_sentence;
+
+    fn s(t: &str, l: &str) -> String {
+        words2num_sentence(t, l, "cardinal", false).unwrap()
+    }
+
+    /// #283: clause punctuation inside a token joins no two words.
+    #[test]
+    fn interior_punctuation_issue_283() {
+        assert_eq!(s("twenty,two", "en"), "twenty,two");
+        assert_eq!(s("He was twenty;two came", "en"), "He was twenty;two came");
+        assert_eq!(s("_twenty_", "en"), "_twenty_");
+        assert_eq!(s("zwanzig!drei", "de"), "zwanzig!drei");
+        assert_eq!(s("twenty-two, three", "en"), "22, 3");
+    }
+
+    /// #285: a word glued onto a number reads no other number.
+    #[test]
+    fn no_glue_onto_the_next_word_issue_285() {
+        assert_eq!(s("Chacun d'eux est venu.", "fr"), "Chacun d'eux est venu.");
+        assert_eq!(s("Tôi có ba y tá", "vi"), "Tôi có 3 y tá");
+        assert_eq!(s("Ik zag er twee de straat oversteken.", "nl"), "Ik zag er 2 de straat oversteken.");
+        assert_eq!(s("Es waren zwei te Leute", "de"), "Es waren 2 te Leute");
+        assert_eq!(s("Tri je ura.", "sl"), "3 je ura.");
+        assert_eq!(s("eight y", "en_IN"), "8 y");
+        assert_eq!(s("X šest Y.", "cs"), "X 6 Y.");
+        assert_eq!(s("X jedenásť Y.", "sk"), "X 11 Y.");
+        assert_eq!(s("X pięćdziesiąt Y.", "pl"), "X 50 Y.");
+        // Still read: a compound ordinal glued by the renderer.
+        assert_eq!(s("venti quattresimo", "it"), "24º");
+    }
+
+    /// #288: digits of any script are literals, never part of a word run.
+    #[test]
+    fn unicode_digits_are_literals_issue_288() {
+        assert_eq!(s("twenty ２", "en"), "20 ２");
+        assert_eq!(s("one hundred ٥", "en"), "100 ٥");
+        assert_eq!(s("room ５０１", "en"), "room ５０１");
+    }
+
+    /// #411: pt "é", it "è" (is) are no connector "e" (and).
+    #[test]
+    fn copula_is_no_connector_issue_411() {
+        assert_eq!(s("metade de cem é cinquenta", "pt"), "metade de 100 é 50");
+        assert_eq!(s("la metà di cento è cinquanta", "it"), "la metà di 100 è 50");
+        assert_eq!(s("cento e cinquanta", "it"), "150");
+        assert!(crate::words2num("vinte é cinco", "pt", "cardinal").is_err());
+    }
+
+    /// #433: ru/uk homographs of 7 and 40.
+    #[test]
+    fn russian_homographs_issue_433() {
+        assert_eq!(s("я люблю свою семью", "ru"), "я люблю свою семью");
+        assert_eq!(s("Сорока украла кольцо", "ru"), "Сорока украла кольцо");
+        assert_eq!(s("Сорока украла кольцо", "uk"), "Сорока украла кольцо");
+        assert_eq!(s("с семью друзьями", "ru"), "с 7 друзьями");
     }
 }
