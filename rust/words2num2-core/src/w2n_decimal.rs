@@ -330,7 +330,30 @@ pub fn read(
     let f = forms(lang);
     // 0. ar "<int> ، <hundredths>": the fraction is a count of hundredths.
     if let Some(mark) = hundredths_mark(lang).filter(|_| has_written_mark(lang, text)) {
+        // Figures with the mark as their decimal point: "٣،٥" is 3.5, as
+        // "3,5" is, never 3.05 (the renderer writes no figures).
+        let t = text.trim();
+        let (sign, body) = match t.strip_prefix(['-', '\u{2212}']) {
+            Some(b) => ("-", b),
+            None => ("", t),
+        };
+        if let Some((a, b)) = body.split_once(mark) {
+            let digits = |s: &str| -> Option<String> {
+                (!s.is_empty())
+                    .then(|| s.chars().map(|c| crate::w2n_sentence::digit_value(c).map(|d| char::from(b'0' + d as u8))).collect())
+                    .flatten()
+            };
+            if let (Some(a), Some(b)) = (digits(a), digits(b)) {
+                let int = a.trim_start_matches('0');
+                let int = if int.is_empty() { "0" } else { int };
+                return Some((format!("{sign}{int}"), default_sep, b));
+            }
+        }
         let mut words = mark_words(text, mark);
+        // Two marks are no decimal, whichever comma each is: "مائة ، , خمسون".
+        if words.iter().any(|w| w == ",") {
+            return None;
+        }
         // Two marks are no decimal: "مائة ، ، خمسون" (#616).
         if words.iter().filter(|w| *w == mark).count() > 1 {
             return None;
@@ -590,6 +613,14 @@ mod tests {
         assert_eq!(card("مائة ,خمسون", "ar"), "100.50");
         assert_eq!(card("ثلاثة ، 50", "ar"), "3.50");
         assert_eq!(card("3 ، 50", "ar"), "3.50");
+        // Figures glued to the mark: its decimal point, as "3,5" is.
+        assert_eq!(card("٣،٥", "ar"), "3.5");
+        assert_eq!(card("3،5", "ar"), "3.5");
+        assert_eq!(card("12،5", "ar"), "12.5");
+        assert_eq!(card("٣،٥٠", "ar"), "3.50");
+        assert_eq!(card("3،05", "ar"), "3.05");
+        assert!(crate::words2num("مائة ، , خمسون", "ar", "cardinal").is_err());
+        assert!(crate::words2num("مائة , ، خمسون", "ar", "cardinal").is_err());
         assert!(crate::words2num("ثلاثة , أربعة", "ar", "cardinal").is_err());
         // to="digits" keeps the commas of a dictated string.
         for (t, v) in [("خمسة ، ستة ، سبعة", 567), ("خمسة، ستة، سبعة", 567), ("خمسة , ستة", 56)] {

@@ -3292,7 +3292,13 @@ fn words2num_sentence_walk(
                 }
                 Err(_) if plain && !en_cardinal => {
                     // "trois virgule cinq": a decimal spoken in a table language.
-                    let dec = table_decimal(&converter, &resolved, &stripped).and_then(
+                    // In running text a comma glued to a word, or any ASCII
+                    // comma, separates a list: only the renderer's own spaced
+                    // "،" makes a decimal here (#668).
+                    let list_comma = converter.n2w_key().starts_with("ar")
+                        && (stripped.contains(',')
+                            || stripped.split_whitespace().any(|w| w != "\u{060C}" && w.contains('\u{060C}')));
+                    let dec = (!list_comma).then(|| table_decimal(&converter, &resolved, &stripped)).flatten().and_then(
                         |(int, sep, frac)| {
                             BigDecimal::from_str(&format!("{}.{}", int, frac))
                                 .ok()
@@ -5213,6 +5219,16 @@ mod audit_tests {
 #[cfg(test)]
 mod ambiguous_span_tests {
     use super::words2num_sentence;
+
+    /// #668: a glued or ASCII comma in running text is no decimal mark.
+    #[test]
+    fn arabic_list_commas_stay_lists() {
+        let s = |t: &str| words2num_sentence(t, "ar", "cardinal", false).unwrap();
+        assert!(!s("عندي ثلاثة وعشرون,أربعون شخصا").contains("23.40"));
+        assert!(!s("عندي مائة وخمسون,عشرون كتابا").contains("150.20"));
+        assert!(!s("عندي واحد وعشرون ,خمسون").contains("21.50"));
+        assert!(!s("عندي واحد وعشرون،عشرون").contains("21.20"));
+    }
 
     /// #348: a span the renderer writes for two values stays words, with the
     /// rest of the same number, and its ordinal is declined too.
