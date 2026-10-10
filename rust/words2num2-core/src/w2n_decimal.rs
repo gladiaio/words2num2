@@ -132,6 +132,11 @@ fn mark_forms(lang: &str) -> &'static MarkForms {
 /// Whether `text` holds the language's written decimal mark as a word of its
 /// own, which a cardinal read would silently drop ("مائة ، خمسون" is 100.50,
 /// not 150).
+/// Does the language write "،" as its decimal mark (ar)?
+pub fn has_hundredths_mark(lang: &str) -> bool {
+    hundredths_mark(lang).is_some()
+}
+
 pub fn has_written_mark(lang: &str, text: &str) -> bool {
     let Some(m) = hundredths_mark(lang) else { return false };
     // Every comma must be the conjunction kind for the text to be no decimal:

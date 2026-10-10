@@ -55,12 +55,13 @@ pub fn words2num(
         // A comma or mark glued to the sign ("-، 50") is no bare sign word,
         // but a comma after a sign word is punctuation: fr "moins, 1.234"
         // reads as "moins 1.234" (#896).
+        let mark_is_decimal = w2n_decimal::has_hundredths_mark(lang);
         let split = text.trim().split_once(char::is_whitespace).and_then(|(h, f)| {
-            let word = h.strip_suffix(',').filter(|w| !w.is_empty() && w.chars().all(char::is_alphabetic));
-            match word {
-                Some(w) => Some((w, f)),
-                None => (!h.contains([',', '\u{060C}'])).then_some((h, f)),
-            }
+            // One trailing comma after the sign (word or dash) is punctuation;
+            // a "،" is not where it is the decimal mark (ar "-، 50" is -0.50).
+            let stripped = h.strip_suffix(',').or_else(|| h.strip_suffix('\u{060C}').filter(|_| !mark_is_decimal));
+            let head = stripped.unwrap_or(h);
+            (!head.is_empty() && !head.contains([',', '\u{060C}'])).then_some((head, f))
         });
         if let Some((head, figure)) = split {
             let resolved = w2n_sentence::resolve_lang(lang)?;
