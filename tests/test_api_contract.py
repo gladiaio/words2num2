@@ -166,3 +166,14 @@ def test_convert_numerical_symbols_opt_in():
     # The flag does not leak into the next call.
     with pytest.raises(Words2NumError):
         words2num2.words2num("①")
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["x ① y", "x ⑩ y", "x ⒈ y", "note ³ here", "x ₃ y", "x ⑴ y", "x Ⅻ y", "x ⅓ y"],
+)
+def test_numerical_symbols_stay_as_written_in_sentences(text):
+    # #958: no fold, no strip, in either sentence walker.
+    assert words2num2.words2num_sentence(text) == text
+    assert words2num2.auto_parse_sentence(text) == text
+    assert words2num2.auto_parse_sentence(text, expand=True) == text
