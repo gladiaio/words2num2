@@ -1245,7 +1245,7 @@ pub fn parse_scaled_norm(lang: &str, norm: &str) -> Option<i64> {
             (None, None) => return None,
         },
     };
-    if w2n_forms::has_rival_reading(lang, v, norm) {
+    if w2n_forms::has_rival_reading(lang, v, norm) || postfix_rival(lang, v, norm, &sc) {
         return None; // bm "ba tan ni kelen": 10001 and 11000 render alike
     }
     // Where the multiplier may follow the scale word (ha, ff, sw, sn, bm, tet,
@@ -1256,6 +1256,31 @@ pub fn parse_scaled_norm(lang: &str, norm: &str) -> Option<i64> {
         return None;
     }
     Some(v)
+}
+
+/// ha "miliyan dubu ɗari" is 1 001 100 and 1 100 000 alike: a postfix scale
+/// word followed by a multiplier below 1000 ("dubu ɗari" = 1000 × 100) is a
+/// rival reading of a number read additively. True when such a rival differs
+/// from `v` and the renderer writes it as `norm` too (#348).
+fn postfix_rival(lang: &str, v: i64, norm: &str, sc: &Scales) -> bool {
+    if sc.postfix.is_empty() {
+        return false;
+    }
+    let toks: Vec<&str> = norm.split_whitespace().collect();
+    (0..toks.len().saturating_sub(1)).any(|i| {
+        if !sc.postfix.iter().any(|w| w == toks[i]) {
+            return false;
+        }
+        let Some(unit) = sc.words.iter().find(|(w, _)| w == toks[i]).map(|(_, m)| *m) else {
+            return false;
+        };
+        let Some(m) = lookup_plain(lang, &toks[i + 1..].join(" ")).filter(|m| (2..1000).contains(m)) else {
+            return false;
+        };
+        let head = if i == 0 { Some(0) } else { parse_scaled_norm_unchecked(lang, &toks[..i].join(" ")) };
+        head.and_then(|h| h.checked_add(unit.checked_mul(m)?))
+            .is_some_and(|rival| rival != v && renders_as(lang, rival, norm))
+    })
 }
 
 /// [`parse_scaled_norm`] without its ambiguity checks, for a fragment.
@@ -1395,7 +1420,10 @@ fn split_glued_scale(lang: &str, tok: &str, sc: &Scales) -> Option<i64> {
 
 /// `tok` read as head × `mag` + tail around the morpheme at `pos..pos + len`.
 fn glued_at(lang: &str, tok: &str, pos: usize, len: usize, mag: i64, sc: &Scales) -> Option<i64> {
-    let (pre, suf) = (&tok[..pos], &tok[pos + len..]);
+    // bo: the tsheg ending the syllable before the morpheme, or opening the
+    // tail, belongs to neither part ("དགུ་ཁྲི་" + "དུང་ཕྱུར").
+    let tsheg = ['\u{0F0B}', '\u{0F0C}'];
+    let (pre, suf) = (tok[..pos].trim_matches(tsheg), tok[pos + len..].trim_matches(tsheg));
     if pre.is_empty() && suf.is_empty() {
         return None; // the bare morpheme: the table's business
     }
@@ -1446,8 +1474,17 @@ fn glued_at(lang: &str, tok: &str, pos: usize, len: usize, mag: i64, sc: &Scales
         return None;
     }
     let v = high.checked_mul(mag)?.checked_add(low)?;
+    // bo "ཁྲི་དུང་ཕྱུར" (10^4 · 10^8) is one scale word, but in "གཅིག་འབུམ་
+    // གཅིག་ཁྲི་དུང་ཕྱུར" its ཁྲི belongs to the multiplier of དུང་ཕྱུར: 11·10^12,
+    // not 100001·10^12 (#349). A compound scale after a multiplier that holds
+    // a scale of its own only where the renderer spells this very number so.
+    let morpheme = &tok[pos..pos + len];
+    let compound = || {
+        let inner = |g: &str| sc.glue.iter().any(|(w, m)| *m >= 1000 && *m < mag && g.contains(w.as_str()));
+        inner(morpheme) && inner(pre)
+    };
     // A stacked reading only where the renderer spells this very number so.
-    (!stacked || renders_as(lang, v, tok)).then_some(v)
+    (!(stacked || compound()) || renders_as(lang, v, tok)).then_some(v)
 }
 
 /// en_AERO "wun zero zero zero zero zero" = 100000: every token one digit. An i64
@@ -1635,7 +1672,11 @@ fn parse_scaled_inner(lang: &str, text: &str, sc: &Scales, conns: &[&str]) -> Op
                     else {
                         continue;
                     };
-                    if let Some(v) = rest(&after[j..], mag).and_then(|r| compose(m, r)) {
+                    // A multiplier of 1000 or more only where the renderer spells
+                    // the product so: ha "miliyan dubu" is 10^6 + 1000 (read
+                    // below), not 1000 × 10^6, which is "biliyan" (#348).
+                    let v = rest(&after[j..], mag).and_then(|r| compose(m, r));
+                    if let Some(v) = v.filter(|&v| m < 1000 || renders_as(lang, v, text)) {
                         return Some(v);
                     }
                 }
@@ -2379,6 +2420,12 @@ mod tests {
         // ha / ff put every multiplier after the scale word.
         assert_eq!(parse_scaled("ha", "dubu biyu"), Some(2_000));
         assert_eq!(parse_scaled("ha", "miliyan biyu"), Some(2_000_000));
+        // #348: the additive reading when 1000 × 10^6 is not how the renderer
+        // writes the product.
+        assert_eq!(parse_scaled("ha", "miliyan dubu"), Some(1_001_000));
+        assert_eq!(parse_scaled("ha", "miliyan dubu biyu"), Some(1_002_000));
+        assert_eq!(parse_scaled("ha", "miliyan dubu uku ɗari huɗu hamsin da shida"), Some(1_003_456));
+        assert_eq!(parse_scaled("ha", "biliyan dubu"), Some(1_000_001_000));
         assert_eq!(parse_scaled("ff", "ujunere teemerre"), Some(100_000));
         // km myriad and hundred-thousand glued to their multiplier.
         assert_eq!(parse_scaled("km", "មួយម៉ឺន ពីរពាន់ បីរយ សែសិបប្រាំ"), Some(12_345));
@@ -2524,6 +2571,12 @@ mod tests {
         assert_eq!(parse_scaled("ko", "일억 이천삼백사십오만 육천칠백팔십구"), Some(123_456_789));
         assert_eq!(parse_scaled("zh", "九千九百九十九万"), Some(99_990_000));
         assert_eq!(parse_scaled("bo", "གཅིག་འབུམ་གཅིག་ཁྲི་དྲུག་བརྒྱ་དགུ་བཅུ་བདུན་"), Some(110_697));
+        // #349: a compound scale (ཁྲི་དུང་ཕྱུར) does not swallow the ཁྲི of the
+        // multiplier before དུང་ཕྱུར.
+        assert_eq!(parse_scaled("bo", "གཅིག་འབུམ་གཅིག་ཁྲི་དུང་ཕྱུར་"), Some(11_000_000_000_000));
+        assert_eq!(parse_scaled("bo", "དགུ་འབུམ་དགུ་ཁྲི་དུང་ཕྱུར་"), Some(99_000_000_000_000));
+        assert_eq!(parse_scaled("bo", "གཅིག་ས་ཡ་གཅིག་ཁྲི་དུང་ཕྱུར་"), Some(101_000_000_000_000));
+        assert_eq!(parse_scaled("bo", "གཅིག་ཁྲི་དུང་ཕྱུར་"), Some(1_000_000_000_000));
         assert_eq!(parse_scaled("th", "หนึ่งแสนสองหมื่นสามพันสี่ร้อยห้าสิบหก"), Some(123_456));
         // zh 零 fills a skipped place.
         assert_eq!(parse_scaled("zh", "一万零一"), Some(10_001));
