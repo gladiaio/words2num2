@@ -1350,6 +1350,39 @@ pub fn is_ambiguous_number(lang: &str, norm: &str) -> bool {
     matches!(scaled_reading(lang, norm), Scaled::Ambiguous)
 }
 
+/// th / lo / km: a number ending in a scale word from a thousand up and then
+/// one bare digit, as spoken prices and salaries elide the place of that
+/// digit: "หมื่นห้า" is 15 000, "ล้านสอง" 1 200 000 (#875). Returns whether
+/// words lead the scale word, and the value with the digit one place down.
+/// With a multiplier the renderer writes the same words for the digit as
+/// units ("สองพันห้า": 2005, spoken 2500), so that reading is the caller's
+/// to weigh; a bare scale word it never writes, which leaves one reading.
+pub fn elided_place(lang: &str, norm: &str) -> Option<(bool, i64)> {
+    let (scales, digits): (&[(&str, i64)], &[&str]) = match lang.split(&['_', '-'][..]).next()? {
+        "th" => (
+            &[("พัน", 1_000), ("หมื่น", 10_000), ("แสน", 100_000), ("ล้าน", 1_000_000)],
+            &["หนึ่ง", "สอง", "สาม", "สี่", "ห้า", "หก", "เจ็ด", "แปด", "เก้า"],
+        ),
+        "lo" => (
+            &[("ພັນ", 1_000), ("ໝື່ນ", 10_000), ("ແສນ", 100_000), ("ລ້ານ", 1_000_000)],
+            &["ໜຶ່ງ", "ສອງ", "ສາມ", "ສີ່", "ຫ້າ", "ຫົກ", "ເຈັດ", "ແປດ", "ເກົ້າ"],
+        ),
+        "km" => (
+            &[("ពាន់", 1_000), ("ម៉ឺន", 10_000), ("សែន", 100_000), ("លាន", 1_000_000)],
+            &["មួយ", "ពីរ", "បី", "បួន", "ប្រាំ", "ប្រាំមួយ", "ប្រាំពីរ", "ប្រាំបី", "ប្រាំបួន"],
+        ),
+        _ => return None,
+    };
+    let glued: String = norm.chars().filter(|c| !c.is_whitespace()).collect();
+    digits.iter().enumerate().find_map(|(d, w)| {
+        let rest = glued.strip_suffix(normalize(w).as_str())?;
+        scales.iter().find_map(|(s, mag)| {
+            let head = rest.strip_suffix(normalize(s).as_str())?;
+            Some((!head.is_empty(), mag + (d as i64 + 1) * mag / 10))
+        })
+    })
+}
+
 /// es "1º", pt "1ª", "1.º", "1.000º": the figure before an ordinal indicator,
 /// in any language and mode, as de "1." is its figure. `None` for anything
 /// else; the degree sign "°" is no indicator.
