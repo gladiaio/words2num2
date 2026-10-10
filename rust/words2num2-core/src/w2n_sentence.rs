@@ -1531,13 +1531,17 @@ pub fn words2num(
                 // reads it: fr "trois virgule un quatre" -> 3.14 (#191).
                 // ar "مائة ، خمسون": the mark normalizing drops makes it a
                 // decimal, never the cardinal 150 — in every mode (#371, #620).
-                _ if crate::w2n_decimal::has_written_mark(converter.n2w_key(), text) => match to {
-                    "cardinal" | "currency" => table_decimal(&converter, &resolved, text)
+                "cardinal" | "currency" if crate::w2n_decimal::has_written_mark(converter.n2w_key(), text) => {
+                    table_decimal(&converter, &resolved, text)
                         .and_then(|(int, _, frac)| BigDecimal::from_str(&format!("{}.{}", int, frac)).ok())
                         .map(W2nValue::Dec)
-                        .ok_or_else(|| W2nError::Words2Num(unparseable_msg(text))),
-                    _ => Err(W2nError::Words2Num(unparseable_msg(text))),
-                },
+                        .ok_or_else(|| W2nError::Words2Num(unparseable_msg(text)))
+                }
+                // A dictated "خمسة ، ستة ، سبعة" (to="digits") keeps its commas
+                // as separators; only the number modes refuse the mark.
+                "year" | "ordinal" if crate::w2n_decimal::has_written_mark(converter.n2w_key(), text) => {
+                    Err(W2nError::Words2Num(unparseable_msg(text)))
+                }
                 "cardinal" => base_convert(lang, text, false).or_else(|e| {
                     table_decimal(&converter, &resolved, text)
                         .and_then(|(int, _, frac)| BigDecimal::from_str(&format!("{}.{}", int, frac)).ok())

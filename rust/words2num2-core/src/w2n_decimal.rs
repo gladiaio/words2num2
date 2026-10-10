@@ -142,11 +142,25 @@ pub fn has_written_mark(lang: &str, text: &str) -> bool {
 /// it, an ASCII comma standing alone ("مائة , خمسون"; #616, #658) — and
 /// trailing marks dropped, as punctuation ("ثلاثة ،" is 3).
 fn mark_words(text: &str, mark: &str) -> Vec<String> {
-    let spaced = text.replace(mark, &format!(" {mark} "));
-    let mut words: Vec<String> = spaced
-        .split_whitespace()
-        .map(|w| if w == "," { mark.to_string() } else { w.to_string() })
+    // An ASCII comma between two letters is the mark too ("مائة,خمسون");
+    // between digits it groups ("1,000"), and stays.
+    let chars: Vec<char> = text.chars().collect();
+    let ascii: String = chars
+        .iter()
+        .enumerate()
+        .map(|(k, &c)| {
+            let letter = |d: Option<&char>| d.is_some_and(|c| c.is_alphabetic());
+            let before = chars[..k].iter().rev().find(|c| !c.is_whitespace());
+            let after = chars[k + 1..].iter().find(|c| !c.is_whitespace());
+            if c == ',' && (letter(before) || before.is_none()) && letter(after) {
+                mark.to_string()
+            } else {
+                c.to_string()
+            }
+        })
         .collect();
+    let spaced = ascii.replace(mark, &format!(" {mark} "));
+    let mut words: Vec<String> = spaced.split_whitespace().map(str::to_string).collect();
     while words.last().is_some_and(|w| w == mark) {
         words.pop();
     }
@@ -351,7 +365,13 @@ pub fn read(
         // Only the hundredths the renderer writes after the mark: "ثلاثة ،
         // أربعة" is a list, not 3.04 (#617).
         let rest = words[pos + 1..].join(" ");
-        let n = *forms.hundredths.get(&crate::normalize(&rest))?;
+        // A figure is no masculine word: "ثلاثة ، 50" is 3.50.
+        let figure = || {
+            let digits: Option<String> =
+                rest.chars().map(|c| crate::w2n_sentence::digit_value(c).map(|d| char::from(b'0' + d as u8))).collect();
+            digits.filter(|d| (1..=2).contains(&d.len())).and_then(|d| d.parse::<u32>().ok())
+        };
+        let n = forms.hundredths.get(&crate::normalize(&rest)).copied().or_else(figure)?;
         let sign = if negative { "-" } else { "" };
         return Some((format!("{sign}{int}"), default_sep, format!("{:0>2}", n)));
     }
@@ -564,6 +584,17 @@ mod tests {
         assert_eq!(card("مائة , خمسون", "ar"), "100.50");
         assert_eq!(card(", خمسون", "ar"), "0.50");
         assert_eq!(card("سالب , خمسون", "ar"), "-0.50");
+        // A glued ASCII comma between words; a figure after the mark.
+        assert_eq!(card("مائة, خمسون", "ar"), "100.50");
+        assert_eq!(card("مائة,خمسون", "ar"), "100.50");
+        assert_eq!(card("مائة ,خمسون", "ar"), "100.50");
+        assert_eq!(card("ثلاثة ، 50", "ar"), "3.50");
+        assert_eq!(card("3 ، 50", "ar"), "3.50");
+        assert!(crate::words2num("ثلاثة , أربعة", "ar", "cardinal").is_err());
+        // to="digits" keeps the commas of a dictated string.
+        for (t, v) in [("خمسة ، ستة ، سبعة", 567), ("خمسة، ستة، سبعة", 567), ("خمسة , ستة", 56)] {
+            assert_eq!(crate::words2num(t, "ar", "digits").unwrap(), W2nValue::Int(v.into()), "{t}");
+        }
         // #619: a glued minus.
         assert_eq!(card("-ثلاثة ، خمسون", "ar"), "-3.50");
         // #620: other modes never drop the mark.
