@@ -730,7 +730,8 @@ mod tests {
         assert_eq!(crate::words2num("مائة ،", "ar", "cardinal").unwrap(), W2nValue::Int(100.into()));
         assert_eq!(crate::words2num("ثلاثة ، ،", "ar", "cardinal").unwrap(), W2nValue::Int(3.into()));
         // #954: the conjunction comma only after a hundred or a scale.
-        for t in ["ثلاثة، وخمسون", "خمسة، وعشرون", "خمسة, وعشرون", "عشرون، وخمسة"] {
+        // "مائة وثلاثة، وعشرون" too: 20 is no smaller than the units place of 103.
+        for t in ["ثلاثة، وخمسون", "خمسة، وعشرون", "خمسة, وعشرون", "عشرون، وخمسة", "مائة وثلاثة، وعشرون"] {
             assert!(crate::words2num(t, "ar", "cardinal").is_err(), "{t}");
         }
         for (t, v) in [("ألف، وخمسمائة", 1500), ("ثلاثة آلاف، وخمسمائة", 3500), ("مائة، وخمسون", 150), ("ألف، وخمسمائة، وخمسون", 1550), ("سالب ألف، وخمسمائة", -1500), ("-ألف، وخمسمائة", -1500), ("سالب مليونان، وثمانية عشر", -2000018)] {
