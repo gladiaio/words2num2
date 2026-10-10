@@ -134,13 +134,33 @@ fn mark_forms(lang: &str) -> &'static MarkForms {
 /// not 150).
 pub fn has_written_mark(lang: &str, text: &str) -> bool {
     let Some(m) = hundredths_mark(lang) else { return false };
-    let words = mark_words(text, m);
-    // A comma before "و" ("ألف، وخمسمائة") is punctuation inside the number:
-    // no hundredths form opens with the conjunction (#807).
-    words
-        .iter()
-        .enumerate()
-        .any(|(k, w)| w == m && !words.get(k + 1).is_some_and(|n| n.starts_with('\u{0648}')))
+    if conjunction_comma(lang, text, m) {
+        return false;
+    }
+    mark_words(text, m).iter().any(|w| w == m)
+}
+
+/// "ألف، وخمسمائة" (1500): a comma typed glued to a number word, or an ASCII
+/// one, before the conjunction "و" and a number word is punctuation inside
+/// the number (#807). Not the renderer's spaced " ، ", nor "واحد" ("one",
+/// whose و is a root letter): "مائة ، واحد" stays a decimal.
+fn conjunction_comma(lang: &str, text: &str, mark: &str) -> bool {
+    let waw = '\u{0648}';
+    let wahid = crate::normalize("\u{0648}\u{0627}\u{062D}\u{062F}"); // واحد
+    let t = text.trim();
+    let Some(at) = t.find([',', mark.chars().next().unwrap_or(',')]) else { return false };
+    let (before, after) = (&t[..at], &t[at..]);
+    let comma = after.chars().next().unwrap_or(',');
+    let after = after[comma.len_utf8()..].trim_start();
+    let glued = before.chars().last().is_some_and(|c| c.is_alphabetic());
+    let spaced_mark = comma != ',' && !glued;
+    if before.trim().is_empty() || spaced_mark {
+        return false;
+    }
+    let next = after.split_whitespace().next().unwrap_or("");
+    let Some(rest) = next.strip_prefix(waw) else { return false };
+    let norm = crate::normalize(next);
+    !norm.starts_with(wahid.as_str()) && crate::lookup_plain(lang, &crate::normalize(rest)).is_some()
 }
 
 /// The words of `text` with the mark as a word of its own however it is
@@ -339,8 +359,12 @@ pub fn read(
         // Figures with the mark as their decimal point: "٣،٥" is 3.5, as
         // "3,5" is, never 3.05 (the renderer writes no figures).
         let t = text.trim();
+        let first = t.split_whitespace().next().unwrap_or("");
+        let spoken = crate::strip_sign(lang, &format!("{} x", crate::normalize(first))) == Some(("x", false));
         let (sign, body) = match t.strip_prefix(['-', '\u{2212}']) {
             Some(b) => ("-", b),
+            // "سالب ٣،٥": a spoken sign before the figures.
+            None if spoken => ("-", t[first.len()..].trim_start()),
             None => ("", t.strip_prefix('+').unwrap_or(t)), // #805
         };
         if let Some((a, b)) = body.split_once(mark) {
@@ -641,6 +665,13 @@ mod tests {
         for t in ["ثلاثة،5", "ثلاثة ،5", "٣ ،٥", "٣، ٥", "،5", "ثلاثة ، 5", "3 ، 5"] {
             assert!(crate::words2num(t, "ar", "cardinal").is_err(), "{t}");
         }
+        // #807, not for "واحد" (one) nor the renderer's spaced mark.
+        for t in ["مائة ، واحد وعشرون", "مائة ، واحد", "ألف ، واحد", "، واحد", "سالب ، واحد", "، وخمسون", "ثلاثة ، وخمسون", "مائة ، وثلاثة", "ألف ، وخمسمائة"] {
+            let r = crate::words2num(t, "ar", "cardinal");
+            assert!(!matches!(r, Ok(W2nValue::Int(_))), "{t}: {r:?}");
+        }
+        assert_eq!(card("سالب ٣،٥", "ar"), "-3.5");
+        assert_eq!(card("سالب 3،5", "ar"), "-3.5");
         // #807: a comma before the conjunction is inside the number.
         for t in ["ألف، وخمسمائة", "ألف, وخمسمائة"] {
             assert_eq!(crate::words2num(t, "ar", "cardinal").unwrap(), W2nValue::Int(1500.into()), "{t}");
