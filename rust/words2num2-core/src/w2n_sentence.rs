@@ -4001,10 +4001,16 @@ fn resolve_unit(unit_str: &str, prefer: &HashMap<String, String>) -> Option<(&'s
             let lower = unit_str.to_lowercase();
             let c: Vec<char> = unit_str.chars().collect();
             let si_prefixed = c.len() == 2 && "MGTPEZY".contains(c[0]) && "gmslt".contains(c[1]);
-            if si_prefixed || lower == "nm" {
+            let info = units_get(&lower)?;
+            // The caller may still pick the folded reading: OCR or caps-locked
+            // input loses case (prefer={"Mg": "milligram"}).
+            let chosen = prefer
+                .get(unit_str)
+                .is_some_and(|t| *t == info.long || *t == info.short || t.to_lowercase() == lower);
+            if (si_prefixed || lower == "nm") && !chosen {
                 return None;
             }
-            (units_get(&lower)?, true)
+            (info, true)
         }
     };
     let cap = |c: f64| if folded { c.min(0.8) } else { c };
@@ -4018,7 +4024,7 @@ fn resolve_unit(unit_str: &str, prefer: &HashMap<String, String>) -> Option<(&'s
             let reading = u.short == info.short || alternative_readings(unit_str).contains(key);
             if reading {
                 // Confidence reflects the caller stepping in.
-                return Some((u, cap(info.confidence.max(0.9))));
+                return Some((u, info.confidence.max(0.9)));
             }
         }
     }
@@ -4507,6 +4513,44 @@ fn format_quantity(q: &Quantity, expand: bool) -> String {
 /// language and the separator overrides are checked once, up front, so an
 /// unsupported `lang` or `thousands_sep == decimal_sep` raises instead of
 /// leaving every span untouched (#188, #204).
+/// Is the digit at `i` glued to a Latin word ("MP3", "B12", "COVID19")? An
+/// "x" between digits is a multiplier ("2x500 g").
+fn glued_to_word(chars: &[char], i: usize) -> bool {
+    if i == 0 || !chars[i].is_ascii_digit() || !chars[i - 1].is_ascii_alphanumeric() {
+        return false;
+    }
+    let x_mult = matches!(chars[i - 1], 'x' | 'X') && (i < 2 || !chars[i - 2].is_ascii_alphabetic());
+    !x_mult
+}
+
+/// The unit letters at the end of a quantity match ("5 kg" -> "kg").
+fn unit_token(raw: &str) -> &str {
+    let start = raw
+        .char_indices()
+        .rfind(|(_, c)| !c.is_ascii_alphabetic())
+        .map_or(0, |(k, c)| k + c.len_utf8());
+    &raw[start..]
+}
+
+/// A unit token whose shape says it is something else in running text: a
+/// single capital letter other than L or a degree scale ("5G", "4K", "3D",
+/// "Room 5 C"), "in" ("1 in 3"), an
+/// "s" glued to a decade ("1990s"), or the verb "won" before a number
+/// ("Score 2 won 3"; "5000 won." stays the currency) (#392).
+fn not_a_unit(chars: &[char], raw: &str, end: usize) -> bool {
+    let unit = unit_token(raw);
+    let glued = !raw.contains(char::is_whitespace);
+    let number_follows = || {
+        chars[end..].iter().skip_while(|c| c.is_whitespace()).next().is_some_and(|c| c.is_ascii_digit())
+    };
+    let degree = raw[..raw.len() - unit.len()].ends_with('\u{b0}');
+    // "L" is the litre's own symbol.
+    (unit.len() == 1 && unit.chars().all(|c| c.is_ascii_uppercase()) && unit != "L" && !degree)
+        || unit.eq_ignore_ascii_case("in")
+        || (unit == "s" && glued && raw.trim_end_matches('s').ends_with('0'))
+        || (unit.eq_ignore_ascii_case("won") && number_follows())
+}
+
 pub fn auto_parse_sentence(
     text: &str,
     lang: &str,
@@ -4525,13 +4569,16 @@ pub fn auto_parse_sentence(
         match match_quantity_at(&chars, i) {
             // The pattern can never match empty (both alternatives need at
             // least one character), so no zero-width-match handling is needed.
-            // A number starts on a word boundary: "MP3s" holds none (#392).
-            Some(end) if end > i && !(i > 0 && chars[i - 1].is_alphanumeric() && chars[i].is_ascii_digit()) => {
+            // A number starts on a word boundary: "MP3s", "B12" hold none
+            // (#392). Only Latin letters count: zh "约5kg", ar "و5%" glue a
+            // number to a word, and "2x500 g" is a multiplier.
+            Some(end) if end > i && !glued_to_word(&chars, i) => {
                 let raw: String = chars[i..end].iter().collect();
                 match auto_parse(&raw, lang, prefer, thousands_sep, decimal_sep) {
-                    // In running text an uncertain unit is left as written:
-                    // "the 1990s", "a 5G network", "1 in 3", "Room 5 C" (#392).
-                    Ok(q) if q.unit.is_some() && (q.confidence < 0.7 || raw.ends_with(" won")) => {
+                    // In running text a unit shaped like something else is left
+                    // as written: "the 1990s", "a 5G network", "1 in 3", "Room
+                    // 5 C", "Score 2 won 3" (#392).
+                    Ok(q) if q.unit.is_some() && !prefer.contains_key(unit_token(&raw)) && not_a_unit(&chars, &raw, end) => {
                         out.push_str(&raw)
                     }
                     Ok(q) => out.push_str(&format_quantity(&q, expand)),
@@ -5281,9 +5328,25 @@ mod unit_misread_tests {
         for t in ["in the 1990s", "a 5G network", "1 in 3 adults", "Born in 1990 in Paris", "a 4K TV", "a 3D movie", "Room 5 C is free", "Score 2 won 3", "my MP3s"] {
             assert_eq!(sent(t, true), t, "{t}");
         }
-        // Certain units still convert.
+        for t in ["Score 2 Won 3", "Score 2 WON 3"] {
+            assert_eq!(sent(t, false), t, "{t}");
+        }
+        // Certain units still convert, the common one-letter ones too.
         assert_eq!(sent("it weighs 5 kg", false), "it weighs 5 kg");
         assert_eq!(sent("it weighs 5kg", true), "it weighs 5 kilograms");
+        assert_eq!(sent("sprint 100 m", true), "sprint 100 meters");
+        assert_eq!(sent("200 g flour", true), "200 grams flour");
+        assert_eq!(sent("wait 30 s", true), "wait 30 seconds");
+        assert_eq!(sent("I paid 5000 won.", false), "I paid 5000 KRW.");
+        assert_eq!(sent("2x500 g", true), "2x500 grams");
+        // Glued to a word of another script.
+        assert_eq!(sent("约5kg", false), "约5 kg");
+        assert_eq!(sent("و5%", true), "و5 percent");
+        // Still no number inside a Latin word.
+        assert_eq!(sent("vitamin B12 5 mg", true), "vitamin B12 5 milligrams");
+        assert_eq!(sent("it is 20°C", false), "it is 20 °C");
+        assert_eq!(sent("a 2L bottle", true), "a 2 liters bottle");
+        assert_eq!(sent("it is 20 °F", true), "it is 20 degrees fahrenheit");
     }
 
     /// #393: SI prefixes are case-sensitive.
@@ -5297,5 +5360,10 @@ mod unit_misread_tests {
         assert_eq!(q.unit.as_deref(), Some("kg"));
         assert!(q.confidence < 1.0);
         assert_eq!(sent("Take 5 Mg daily", false), "Take 5 Mg daily");
+        // The caller can still choose the folded reading.
+        let mg: HashMap<String, String> = [("Mg".to_string(), "milligram".to_string())].into();
+        assert_eq!(auto_parse("5 Mg", "en", &mg, None, None).unwrap().unit.as_deref(), Some("mg"));
+        let kg: HashMap<String, String> = [("KG".to_string(), "kilogram".to_string())].into();
+        assert!(auto_parse("5 KG", "en", &kg, None, None).unwrap().confidence >= 0.9);
     }
 }
