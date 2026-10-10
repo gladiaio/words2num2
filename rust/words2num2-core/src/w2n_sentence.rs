@@ -1932,12 +1932,15 @@ fn en_number_words(parts: &[String], i: usize) -> Vec<EnWord> {
             continue;
         }
         // A dash at either end is a sign or punctuation, no hyphen between two
-        // words: "-four five six" is no 456, "three-" keeps its dash (#956).
-        let dashes: &[char] = &['-', '\u{2212}', '\u{2013}', '\u{2014}'];
-        if tok.starts_with(dashes) || tok.trim_end().ends_with(dashes) {
+        // words: "-four five six" is no 456. A trailing one ends the run and
+        // stays after the figure: "five five five- one" is "555- 1" (#956).
+        let core = rstrip_punct(tok);
+        if core.starts_with('-') {
             break;
         }
-        let clean = rstrip_punct(tok).to_lowercase().replace('-', " ");
+        let cut = core.trim_end_matches('-');
+        let ends_dash = cut.len() < core.len();
+        let clean = cut.to_lowercase().replace('-', " ");
         let subs = py_split_whitespace(&clean);
         if subs.is_empty()
             || !subs.iter().all(|w| {
@@ -1956,12 +1959,19 @@ fn en_number_words(parts: &[String], i: usize) -> Vec<EnWord> {
                 last: k + 1 == n,
             });
         }
-        if ends_with_terminal_punct(tok) {
+        if ends_with_terminal_punct(tok) || ends_dash {
             break;
         }
         j += 1;
     }
     words
+}
+
+/// What follows the words of a dictation run's last part: its dash, then its
+/// punctuation ("three-," gives "-,").
+fn run_tail(s: &str) -> &str {
+    let core = rstrip_punct(s).trim_end_matches('-');
+    &s[core.len()..]
 }
 
 /// A digit string read one digit at a time — an account number, ZIP code or
@@ -3434,7 +3444,7 @@ fn words2num_sentence_walk(
             let run = parts[i..=end].concat();
             out.push_str(sep_before(i));
             out.push_str(&digits);
-            out.push_str(trailing_punct(&run));
+            out.push_str(if en_digits { run_tail(&run) } else { trailing_punct(&run) });
             out.push_str(sep_after(end));
             i = end + 1;
             continue;
@@ -6020,7 +6030,11 @@ mod sign_and_script_tests {
         let s = |t: &str, to: &str| super::words2num_sentence(t, "en", to, false).unwrap();
         assert_eq!(s("it was -four five six degrees", "cardinal"), "it was -4 5 6 degrees");
         assert_eq!(s("call one two three -four", "cardinal"), "call 123 -4");
-        assert_eq!(s("call one two three-", "cardinal"), "call 1 2 three-");
+        assert_eq!(s("call one two three-", "cardinal"), "call 123-");
+        assert_eq!(s("my number is five five five- one two one two", "cardinal"), "my number is 555- 1212");
+        assert_eq!(s("zip nine four five oh four-", "digits"), "zip 94504-");
+        assert_eq!(s("call one two three-, four", "cardinal"), "call 123-, 4");
+        assert_eq!(s("call one two three-. Then", "cardinal"), "call 123-. Then");
         assert_eq!(s("code -one two three", "digits"), "code -one 2 3");
         assert_eq!(s("x -oh three y", "digits"), "x -oh 3 y");
         // An inner hyphen still joins: "one two-three four" is 1234.
