@@ -1193,7 +1193,13 @@ fn morpheme_glued(lang: &str, norm: &str) -> Option<String> {
             match out.last_mut() {
                 // A suffix morpheme (fi "kymmentä") joins the unit before it;
                 // a prefix one (es "veinti") the unit after it.
-                Some(prev) if !crate::w2n_forms::is_glued_morpheme(lang, prev) && k > 0 && suffix_like(lang, t) => prev.push_str(t),
+                Some(prev)
+                    if !crate::w2n_forms::is_glued_morpheme(lang, prev)
+                        && k > 0
+                        && crate::w2n_forms::morpheme_follows_unit(lang, t) == Some(true) =>
+                {
+                    prev.push_str(t)
+                }
                 _ if k + 1 < toks.len() => {
                     out.push(format!("{t}{}", toks[k + 1]));
                     k += 1;
@@ -1208,11 +1214,15 @@ fn morpheme_glued(lang: &str, norm: &str) -> Option<String> {
     any.then(|| out.join(" "))
 }
 
-/// Does the morpheme follow its unit in the renderer's words (fi "kolme
-/// kymmentä") rather than lead them (es "veinti tres")?
-fn suffix_like(lang: &str, morpheme: &str) -> bool {
-    crate::with_cardinal_table(lang, |tab| tab.keys().any(|k| !k.contains(' ') && k.len() > morpheme.len() && k.ends_with(morpheme)))
-        .unwrap_or(false)
+/// Is the token at `j` (cleaned `clean`) a word the next token, a morpheme
+/// that follows its unit (fi "kymmentä"), glues onto?
+fn unit_of_next_morpheme(key: &str, parts: &[String], j: usize, clean: &str) -> bool {
+    let norm = crate::normalize(clean);
+    if norm.contains(' ') || crate::w2n_forms::is_glued_morpheme(key, &norm) || !trailing_punct(&parts[j]).is_empty() {
+        return false;
+    }
+    let Some(next) = parts[j + 1..].iter().find(|p| !py_str_isspace(p)) else { return false };
+    crate::w2n_forms::morpheme_follows_unit(key, &crate::normalize(&rstrip_punct(next).to_lowercase())) == Some(true)
 }
 
 fn base_convert_as_written(lang: &str, norm: &str, ordinal: bool) -> Result<W2nValue, W2nError> {
@@ -1248,7 +1258,10 @@ fn base_convert_as_written(lang: &str, norm: &str, ordinal: bool) -> Result<W2nV
             // "kırkikinci" (#70). Only a genuine table hit counts.
             if norm.contains(' ') && despace_ok(lang, &norm) {
                 let despaced: String = norm.split_whitespace().collect();
-                if let Ok(Some(v)) = crate::lookup_norm(lang, &despaced, true, &[]) {
+                // A cardinal word glued is no ordinal: el "εβδομή ντα" is
+                // "εβδομήντα" (70), not the 70th (#985).
+                let cardinal = crate::lookup_norm(lang, &despaced, false, &[]).ok().flatten().is_some();
+                if let (false, Ok(Some(v))) = (cardinal, crate::lookup_norm(lang, &despaced, true, &[])) {
                     return Ok(W2nValue::Int(BigInt::from(v)));
                 }
             }
@@ -3686,7 +3699,12 @@ fn words2num_sentence_walk(
             match hit {
                 // A run never ends on a connector: "one and a half" is "1 and
                 // a half", not "1 half"; "five point" keeps its "point".
-                Some((v, ordinal)) if candidate_is_number(&converter, &clean, includable) => {
+                // fi "viisi kymmentä kuusi kymmentä": the "kuusi" a suffix
+                // morpheme follows is its unit, no end of this run (#988).
+                Some((v, ordinal))
+                    if candidate_is_number(&converter, &clean, includable)
+                        && !unit_of_next_morpheme(converter.n2w_key(), &parts, j, &clean) =>
+                {
                     best_value = Some(v);
                     best_end = j;
                     best_ordinal = ordinal;
@@ -6424,6 +6442,13 @@ mod glued_morpheme_tests {
         assert_eq!(s("lastbilen väger fem ton", "sv"), "lastbilen väger 5 ton");
         assert_eq!(s("kom hjem før ti", "nb"), "kom hjem før 10");
         assert_eq!(s("perché dici otto volte", "it"), "perché dici 8 volte");
+        // #987: a morpheme that is an everyday word stays one.
+        assert_eq!(s("ագարակում կա յոթ անասուն", "hy"), "ագարակում կա 7 անասուն");
+        assert_eq!(card("յոթ անասուն", "hy"), None);
+        // #988: a unit a suffix morpheme follows belongs to the next tens.
+        assert_eq!(s("viisi kymmentä kuusi kymmentä vuotta", "fi"), "50 60 vuotta");
+        assert_eq!(s("viis kümmend kuus kümmend aastat", "et"), "50 60 aastat");
+        assert_eq!(s("два ццаць тры ццаць", "be"), "20 30");
     }
 }
 
