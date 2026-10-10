@@ -970,8 +970,10 @@ impl Converter {
                     break;
                 }
             }
-            if read.is_none() && tok.contains('-') {
-                let subs: Vec<&str> = tok.split('-').filter(|t| !t.is_empty()).collect();
+            // "seven-two": a hyphen between two digit words. A leading or
+            // trailing one is a sign or a dash, never dropped (#697).
+            if read.is_none() && tok.contains('-') && tok.split('-').all(|t| !t.is_empty()) {
+                let subs: Vec<&str> = tok.split('-').collect();
                 let ds: Option<String> = subs.iter().map(|t| digit(t)).collect();
                 read = ds.filter(|d| !d.is_empty()).map(|d| (d, 1));
             }
@@ -1095,6 +1097,10 @@ fn base_convert(lang: &str, text: &str, ordinal: bool) -> Result<W2nValue, W2nEr
     // unsigned reading of the whole token, should one exist.
     if supported {
         if let Some((rest, glued)) = crate::strip_sign(lang, &norm) {
+            // One sign: "moins -5" is no -(-5) (#698).
+            if rest.trim_start().starts_with(['-', '+', '\u{2212}']) {
+                return Err(W2nError::Words2Num(unparseable_msg(text)));
+            }
             if glued {
                 if let Ok(v) = base_convert_unsigned(lang, &norm, ordinal) {
                     return Ok(v);
@@ -4534,6 +4540,10 @@ pub fn auto_parse(
     let resolved = resolve_lang(lang)?;
     crate::w2n_formats::check_separators(thousands_sep, decimal_sep)
         .map_err(|e| W2nError::Words2Num(e.0))?;
+    // "10²" is no 102 (#869).
+    if crate::glued_script_digit(text) {
+        return Err(W2nError::Words2Num(format!("could not auto-parse {}", py_repr_str(text))));
+    }
     // Figures read with the caller's region: es_MX groups with a comma (#423).
     let fmt_key = crate::w2n_formats::format_key(lang, &resolved);
     let fmt_lang = fmt_key.as_str();
@@ -5840,5 +5850,43 @@ mod sign_comma_tests {
         assert_eq!(crate::words2num("moins, 1.234", "fr", "cardinal").unwrap(), W2nValue::Int((-1234).into()));
         assert_eq!(crate::words2num("minus, 1.234", "de", "cardinal").unwrap(), W2nValue::Int((-1234).into()));
         assert!(crate::words2num("-، 50", "ar", "cardinal").map_or(true, |v| v != W2nValue::Int((-50).into())));
+    }
+}
+
+#[cfg(test)]
+mod sign_and_script_tests {
+    use super::words2num;
+
+    /// #698: a sign word before a signed figure is no double negative.
+    #[test]
+    fn one_sign_before_a_figure_issue_698() {
+        for (t, l) in [("moins -5", "fr"), ("минус -5", "ru"), ("- -5", "de"), ("negative -5", "fr"), ("minus -5", "en_IN"), ("moins +5", "fr")] {
+            assert!(crate::words2num(t, l, "cardinal").is_err(), "{l} {t}");
+        }
+        assert!(crate::words2num("moins -5", "fr", "year").is_err());
+        // A double negative in figures is refused too.
+        assert!(crate::words2num("-(-5)", "en", "cardinal").is_err());
+    }
+
+    /// #697: digits mode never drops a leading minus.
+    #[test]
+    fn digits_keep_their_sign_issue_697() {
+        for (t, l) in [("-five", "en"), ("-5", "en"), ("-cinq", "fr"), ("-one two three", "en")] {
+            assert!(words2num(t, l, "digits").is_err(), "{l} {t}");
+        }
+        assert!(words2num("seven-two", "en", "digits").is_ok());
+    }
+
+    /// #869: a superscript or subscript digit is no part of the figure.
+    #[test]
+    fn script_digits_are_no_digits_issue_869() {
+        for (t, l) in [("10²", "en"), ("2³", "en"), ("10⁶", "en"), ("12²", "de"), ("10₂", "en"), ("５²", "ja"), ("²5", "en"), ("10.²", "en")] {
+            assert!(crate::words2num(t, l, "cardinal").is_err(), "{l} {t}");
+        }
+        // A run of script digits alone reads as its digits.
+        assert!(crate::words2num("¹⁰", "en", "cardinal").is_ok());
+        assert!(crate::words2num("10", "en", "cardinal").is_ok());
+        let p = std::collections::HashMap::new();
+        assert!(super::auto_parse("10²", "en", &p, None, None).is_err());
     }
 }
