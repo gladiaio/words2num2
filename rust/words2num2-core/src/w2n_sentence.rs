@@ -3982,7 +3982,23 @@ fn alternative_readings(token: &str) -> &'static [&'static str] {
 /// not a unit at all is ignored.
 fn resolve_unit(unit_str: &str, prefer: &HashMap<String, String>) -> Option<(&'static UnitInfo, f64)> {
     // Direct hit, then a lowercased retry (so "°C"/"K" keep their casing).
-    let info = units_get(unit_str).or_else(|| units_get(&unit_str.to_lowercase()))?;
+    // SI symbols are case-sensitive: "Mg" (megagram) folded to "mg" is 10^9
+    // off, so a mega-or-above prefix on a base symbol ("Mg", "Ms", "Mm",
+    // "Ml") and "NM"/"Nm" (nautical mile, newton-metre; not nm) are not
+    // folded. A folded hit is never certain (#393).
+    let (info, folded) = match units_get(unit_str) {
+        Some(info) => (info, false),
+        None => {
+            let lower = unit_str.to_lowercase();
+            let c: Vec<char> = unit_str.chars().collect();
+            let si_prefixed = c.len() == 2 && "MGTPEZY".contains(c[0]) && "gmslt".contains(c[1]);
+            if si_prefixed || lower == "nm" {
+                return None;
+            }
+            (units_get(&lower)?, true)
+        }
+    };
+    let cap = |c: f64| if folded { c.min(0.8) } else { c };
 
     // prefer-override is keyed on the ORIGINAL token, not the lowercased one.
     if let Some(target) = prefer.get(unit_str).filter(|t| !t.is_empty()) {
@@ -3993,11 +4009,11 @@ fn resolve_unit(unit_str: &str, prefer: &HashMap<String, String>) -> Option<(&'s
             let reading = u.short == info.short || alternative_readings(unit_str).contains(key);
             if reading {
                 // Confidence reflects the caller stepping in.
-                return Some((u, info.confidence.max(0.9)));
+                return Some((u, cap(info.confidence.max(0.9))));
             }
         }
     }
-    Some((info, info.confidence))
+    Some((info, cap(info.confidence)))
 }
 
 /// `converters.auto._try_digit_unit`
@@ -4500,9 +4516,15 @@ pub fn auto_parse_sentence(
         match match_quantity_at(&chars, i) {
             // The pattern can never match empty (both alternatives need at
             // least one character), so no zero-width-match handling is needed.
-            Some(end) if end > i => {
+            // A number starts on a word boundary: "MP3s" holds none (#392).
+            Some(end) if end > i && !(i > 0 && chars[i - 1].is_alphanumeric() && chars[i].is_ascii_digit()) => {
                 let raw: String = chars[i..end].iter().collect();
                 match auto_parse(&raw, lang, prefer, thousands_sep, decimal_sep) {
+                    // In running text an uncertain unit is left as written:
+                    // "the 1990s", "a 5G network", "1 in 3", "Room 5 C" (#392).
+                    Ok(q) if q.unit.is_some() && (q.confidence < 0.7 || raw.ends_with(" won")) => {
+                        out.push_str(&raw)
+                    }
                     Ok(q) => out.push_str(&format_quantity(&q, expand)),
                     Err(W2nError::Words2Num(_)) => out.push_str(&raw),
                     Err(e) => return Err(e),
@@ -5222,5 +5244,39 @@ mod ambiguous_span_tests {
         assert!(crate::words2num("na miliyan goma", "ha", "ordinal").is_err());
         // Unambiguous numbers still read.
         assert_eq!(s("ina da miliyan dubu naira", "ha"), "ina da 1001000 naira");
+    }
+}
+
+#[cfg(test)]
+mod unit_misread_tests {
+    use super::{auto_parse, auto_parse_sentence};
+    use std::collections::HashMap;
+
+    fn sent(t: &str, expand: bool) -> String {
+        auto_parse_sentence(t, "en", &HashMap::new(), None, None, expand).unwrap()
+    }
+
+    /// #392: uncertain units and verbs stay as written in running text.
+    #[test]
+    fn uncertain_units_stay_in_sentences_issue_392() {
+        for t in ["in the 1990s", "a 5G network", "1 in 3 adults", "Born in 1990 in Paris", "a 4K TV", "a 3D movie", "Room 5 C is free", "Score 2 won 3", "my MP3s"] {
+            assert_eq!(sent(t, true), t, "{t}");
+        }
+        // Certain units still convert.
+        assert_eq!(sent("it weighs 5 kg", false), "it weighs 5 kg");
+        assert_eq!(sent("it weighs 5kg", true), "it weighs 5 kilograms");
+    }
+
+    /// #393: SI prefixes are case-sensitive.
+    #[test]
+    fn si_prefix_case_issue_393() {
+        let p = HashMap::new();
+        for t in ["5 Mg", "5 Mm", "5 Ms", "5 Nm", "5 NM"] {
+            assert!(auto_parse(t, "en", &p, None, None).map_or(true, |q| q.unit.is_none()), "{t}");
+        }
+        let q = auto_parse("5 KG", "en", &p, None, None).unwrap();
+        assert_eq!(q.unit.as_deref(), Some("kg"));
+        assert!(q.confidence < 1.0);
+        assert_eq!(sent("Take 5 Mg daily", false), "Take 5 Mg daily");
     }
 }
