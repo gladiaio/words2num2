@@ -51,8 +51,15 @@ pub fn words2num(
     }
     // es "1º", pt "1ª", "1.º": a figure with its ordinal indicator is that
     // figure (NFKD would make it "1o", #896).
+    // Only a whole number takes one: "1,5º" is no number (#899).
     if let Some(figure) = ordinal_indicator_figure(text) {
-        return words2num(figure, lang, to);
+        return match words2num(figure, lang, to)? {
+            v @ w2n_lang_en::W2nValue::Int(_) => Ok(v),
+            _ => Err(w2n_sentence::W2nError::Words2Num(format!(
+                "cannot parse {} as a number",
+                w2n_sentence::py_repr_str(text)
+            ))),
+        };
     }
     // de "minus 1.234": a sign word before a figure, read with the same
     // separators as "-1.234" (#309).

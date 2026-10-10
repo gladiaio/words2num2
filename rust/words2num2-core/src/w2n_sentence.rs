@@ -4630,6 +4630,9 @@ pub fn auto_parse(
     // es "1º", "1.000º": the figure, as words2num reads it (#896).
     if let Some(figure) = crate::ordinal_indicator_figure(text) {
         let mut q = auto_parse(figure, lang, prefer, thousands_sep, decimal_sep)?;
+        if !matches!(q.value, W2nValue::Int(_)) {
+            return Err(W2nError::Words2Num(format!("could not auto-parse {}", py_repr_str(text))));
+        }
         q.raw = text.to_string();
         return Ok(q);
     }
@@ -6031,6 +6034,12 @@ mod area_and_indicator_tests {
         // auto_parse reads the indicator too, with the locale's grouping.
         for (t, n) in [("1º", 1), ("1.000º", 1000), ("1ª", 1)] {
             assert_eq!(auto_parse(t, "es", &p, None, None).unwrap().value, super::W2nValue::Int(n.into()), "{t}");
+        }
+        // A fraction takes no indicator.
+        for (t, l) in [("1,5º", "es"), ("0,5º", "es"), ("2.5ª", "pt"), ("1.00º", "es"), ("1.000º", "en"), ("1.000º", "es_MX")] {
+            assert!(crate::words2num(t, l, "ordinal").is_err(), "{l} {t}");
+            assert!(crate::words2num(t, l, "cardinal").is_err(), "{l} {t}");
+            assert!(auto_parse(t, l, &p, None, None).is_err(), "{l} {t}");
         }
         // Expand mode pluralizes the foot forms.
         let ex = |t: &str| auto_parse_sentence(t, "en", &p, None, None, true).unwrap();
