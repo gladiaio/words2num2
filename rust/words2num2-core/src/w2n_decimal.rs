@@ -355,20 +355,69 @@ pub fn read(
     default_sep: char,
     cardinal: &dyn Fn(&str) -> Option<BigInt>,
 ) -> Option<(String, char, String)> {
+    // "moins zéro virgule cinq" is -0.5: the sign is read apart, so a zero
+    // integer keeps it (#364). One sign, no recursion: "moins moins …" is
+    // no decimal, and a long run of signs is refused in one step.
+    if let Some(rest) = split_sign(lang, text) {
+        if rest.is_empty() || split_sign(lang, &rest).is_some() {
+            return None;
+        }
+        let (int, sep, frac) = read_unsigned(lang, &rest, hand_sep, default_sep, cardinal)?;
+        if int.starts_with('-') {
+            return None;
+        }
+        return Some((format!("-{int}"), sep, frac));
+    }
+    read_unsigned(lang, text, hand_sep, default_sep, cardinal)
+}
+
+/// The text after a leading sign, normalized: a dash of any kind ("-",
+/// "‐", "–", "−"), the language's sign words however many ("moins", lg
+/// "wansi wa", zu "ngaphansi kwe") or one glued to the number (zh "负零点五",
+/// ja "マイナス零点五"; #703). `None` without a sign.
+fn split_sign(lang: &str, text: &str) -> Option<String> {
+    let t = text.trim_start();
+    let dash = |c: char| matches!(c, '-' | '\u{2010}'..='\u{2015}' | '\u{2212}' | '\u{FE58}' | '\u{FE63}' | '\u{FF0D}');
+    if let Some(rest) = t.strip_prefix(dash) {
+        return Some(rest.trim_start().to_string());
+    }
+    // The rest stays as written: a hyphenated compound is one fraction digit
+    // (wo "juróom-ñaar" is 7).
+    let raw: Vec<&str> = t.split_whitespace().collect();
+    let norm: Vec<String> = raw.iter().map(|w| crate::normalize(w)).collect();
+    let first = norm.first()?;
+    for p in crate::sign_prefixes(lang).iter() {
+        let words: Vec<&str> = p.text.split_whitespace().collect();
+        if words.len() <= norm.len() && norm[..words.len()].iter().zip(&words).all(|(a, b)| a == b) {
+            return Some(raw[words.len()..].join(" "));
+        }
+        if p.glued && words.len() == 1 {
+            if let Some(tail) = first.strip_prefix(words[0]).filter(|r| r.chars().next().is_some_and(char::is_alphabetic)) {
+                let mut rest = vec![tail.to_string()];
+                rest.extend(raw[1..].iter().map(|w| w.to_string()));
+                return Some(rest.join(" "));
+            }
+        }
+    }
+    None
+}
+
+/// [`read`] once any sign is off.
+fn read_unsigned(
+    lang: &str,
+    text: &str,
+    hand_sep: &dyn Fn(&str) -> Option<char>,
+    default_sep: char,
+    cardinal: &dyn Fn(&str) -> Option<BigInt>,
+) -> Option<(String, char, String)> {
     let f = forms(lang);
     // 0. ar "<int> ، <hundredths>": the fraction is a count of hundredths.
     if let Some(mark) = hundredths_mark(lang).filter(|_| has_written_mark(lang, text)) {
         // Figures with the mark as their decimal point: "٣،٥" is 3.5, as
         // "3,5" is, never 3.05 (the renderer writes no figures).
-        let t = text.trim();
-        let first = t.split_whitespace().next().unwrap_or("");
-        let spoken = crate::strip_sign(lang, &format!("{} x", crate::normalize(first))) == Some(("x", false));
-        let (sign, body) = match t.strip_prefix(['-', '\u{2212}']) {
-            Some(b) => ("-", b),
-            // "سالب ٣،٥": a spoken sign before the figures.
-            None if spoken => ("-", t[first.len()..].trim_start()),
-            None => ("", t.strip_prefix('+').unwrap_or(t)), // #805
-        };
+        // The sign is off already (see `read`); a "+" is no sign there (#805).
+        let body = text.trim();
+        let body = body.strip_prefix('+').unwrap_or(body);
         if let Some((a, b)) = body.split_once(mark) {
             let digits = |s: &str| -> Option<String> {
                 (!s.is_empty())
@@ -383,10 +432,10 @@ pub fn read(
                 }
                 let int = a.trim_start_matches('0');
                 let int = if int.is_empty() { "0" } else { int };
-                return Some((format!("{sign}{int}"), default_sep, b));
+                return Some((int.to_string(), default_sep, b));
             }
         }
-        let mut words = mark_words(text, mark);
+        let words = mark_words(text, mark);
         // Two marks are no decimal, whichever comma each is: "مائة ، , خمسون".
         if words.iter().any(|w| w == ",") {
             return None;
@@ -394,22 +443,6 @@ pub fn read(
         // Two marks are no decimal: "مائة ، ، خمسون" (#616).
         if words.iter().filter(|w| *w == mark).count() > 1 {
             return None;
-        }
-        // "سالب ، خمسون" is -0.50: the sign is read apart, so a zero integer
-        // keeps it. Glued too: "-ثلاثة ، خمسون" (#619).
-        let first = crate::normalize(&words[0]);
-        let mut negative = false;
-        if let Some((rest, glued)) = crate::strip_sign(lang, &format!("{first} x")) {
-            if !glued && rest == "x" {
-                negative = true;
-                words.remove(0);
-            }
-        }
-        if !negative {
-            if let Some(rest) = words[0].strip_prefix(['-', '\u{2212}']).filter(|r| !r.is_empty()) {
-                negative = true;
-                words[0] = rest.to_string();
-            }
         }
         let pos = words.iter().position(|t| t == mark)?;
         let forms = mark_forms(lang);
@@ -433,8 +466,7 @@ pub fn read(
             digits.filter(|d| d.len() == 2).and_then(|d| d.parse::<u32>().ok())
         };
         let n = forms.hundredths.get(&crate::normalize(&rest)).copied().or_else(figure)?;
-        let sign = if negative { "-" } else { "" };
-        return Some((format!("{sign}{int}"), default_sep, format!("{:0>2}", n)));
+        return Some((int.to_string(), default_sep, format!("{:0>2}", n)));
     }
     // Each written word normalized on its own: a hyphenated compound stays
     // one fraction digit (wo "juróom-ñeent" is 9, not 5 and 4).
@@ -602,6 +634,35 @@ mod tests {
         assert_eq!(sent("tres coma un catro", "gl"), "3,14");
         assert_eq!(sent("три запирка еден четири", "mk"), "3,14"); // mk writes a decimal comma (#424)
         assert_eq!(sent("tre komma ein fire", "nn"), "3,14");
+    }
+
+    /// #364: a negative decimal below one keeps its sign.
+    #[test]
+    fn negative_zero_integer() {
+        assert_eq!(card("moins zéro virgule cinq", "fr"), "-0.5");
+        assert_eq!(card("minus null Komma fünf", "de"), "-0.5");
+        assert_eq!(card("menos cero coma cinco", "es"), "-0.5");
+        assert_eq!(card("минус ноль целых пять десятых", "ru"), "-0.5");
+        assert_eq!(card("minus zero point five", "en_IN"), "-0.5");
+        assert_eq!(card("moins trois virgule cinq", "fr"), "-3.5");
+        assert!(crate::words2num("moins moins trois virgule cinq", "fr", "cardinal").is_err());
+        // #703: a long run of signs is refused in one step, no recursion.
+        let many = "moins ".repeat(100_000) + "zéro virgule cinq";
+        assert!(crate::words2num(&many, "fr", "cardinal").is_err());
+        let dashes = "-".repeat(100_000) + "zéro virgule cinq";
+        assert!(crate::words2num(&dashes, "fr", "cardinal").is_err());
+        // Glued, multi-word and dash-variant signs.
+        assert_eq!(card("负零点五", "zh"), "-0.5");
+        assert_eq!(card("マイナス零点五", "ja"), "-0.5");
+        assert_eq!(card("\u{2010}zéro virgule cinq", "fr"), "-0.5");
+        assert_eq!(card("\u{2013}zéro virgule cinq", "fr"), "-0.5");
+        // The rest stays as written: one hyphenated fraction digit.
+        assert_eq!(card("minus fukk ñaar point juróom-ñaar juróom", "wo"), "-12.75");
+        // ar: one sign rule for the "،" decimals too.
+        assert_eq!(card("سالب ٣،٥", "ar"), "-3.5");
+        assert!(crate::words2num("سالب سالب صفر ، خمسون", "ar", "cardinal").is_err());
+        assert_eq!(card("سالب ، خمسون", "ar"), "-0.50");
+        assert_eq!(card("-ثلاثة ، خمسون", "ar"), "-3.50");
     }
 
     /// #371: ar "،" (the renderer's separator, hundredths) and "فاصلة".
