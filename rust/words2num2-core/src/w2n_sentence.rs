@@ -1942,7 +1942,7 @@ fn en_number_words(parts: &[String], i: usize) -> Vec<EnWord> {
         if core.starts_with('-') {
             break;
         }
-        let cut = core.trim_end_matches('-');
+        let cut = core.trim_end_matches(crate::w2n_formats::is_minus);
         let ends_dash = cut.len() < core.len();
         let clean = cut.to_lowercase().replace('-', " ");
         let subs = py_split_whitespace(&clean);
@@ -1974,7 +1974,7 @@ fn en_number_words(parts: &[String], i: usize) -> Vec<EnWord> {
 /// What follows the words of a dictation run's last part: its dash, then its
 /// punctuation ("three-," gives "-,").
 fn run_tail(s: &str) -> &str {
-    let core = rstrip_punct(s).trim_end_matches('-');
+    let core = rstrip_punct(s).trim_end_matches(crate::w2n_formats::is_minus);
     &s[core.len()..]
 }
 
@@ -6052,6 +6052,9 @@ mod sign_and_script_tests {
         assert_eq!(s("zip nine four five oh four-", "digits"), "zip 94504-");
         assert_eq!(s("call one two three-, four", "cardinal"), "call 123-, 4");
         assert_eq!(s("call one two three-. Then", "cardinal"), "call 123-. Then");
+        // Any glued dash the library reads as a minus.
+        assert_eq!(s("five five five\u{2212} one two one two", "cardinal"), "555\u{2212} 1212");
+        assert_eq!(s("call one two three\u{FF0D}", "digits"), "call 123\u{FF0D}");
         assert_eq!(s("code -one two three", "digits"), "code -one 2 3");
         assert_eq!(s("x -oh three y", "digits"), "x -oh 3 y");
         // An inner hyphen still joins: "one two-three four" is 1234.
