@@ -2831,6 +2831,21 @@ fn renderer_spells(key: &str, v: &W2nValue, ordinal: bool, text: &str) -> bool {
     r.to_cardinal(n).is_ok_and(|w| canon(&w) == t) || (ordinal && r.to_ordinal(n).is_ok_and(|w| canon(&w) == t))
 }
 
+/// The run `stripped` with its last word, an ordinal (`clean`), swapped for
+/// the renderer's cardinal of that ordinal's value: bm "ba tan ni sabanan"
+/// -> "ba tan ni saba", normalized.
+fn cardinal_stem(converter: &Converter, stripped: &str, clean: &str) -> Option<String> {
+    if !converter.is_ordinal_word(clean) {
+        return None;
+    }
+    let W2nValue::Int(v) = converter.to_ordinal(clean).ok()? else { return None };
+    let r = num2words2_core::get_lang_by_key(converter.n2w_key())?;
+    let card = r.to_cardinal(&v).ok()?;
+    let words: Vec<&str> = stripped.split_whitespace().collect();
+    let (_, head) = words.split_last()?;
+    Some(crate::normalize(&format!("{} {card}", head.join(" "))))
+}
+
 /// Is `norm` a word the renderer writes in some k·10^e (ha "tiriliyan", even
 /// where the reader cannot read it alone)?
 fn renderer_vocab(key: &str, norm: &str) -> bool {
@@ -3243,6 +3258,10 @@ fn words2num_sentence_walk(
     let n = parts.len();
     let mut out = String::new();
     let mut i = 0usize;
+    // (run start, part index): a run that met a span the renderer writes for two
+    // values is regrown to stop before that span, so the number before it still
+    // reads (ha "biyar miliyan goma" is "5 miliyan goma"; #796).
+    let mut run_limit: Option<(usize, usize)> = None;
     // The run just emitted was a decimal ("two point five"): a scale word
     // right after it stays a word ("2.5 million"), it is not a new number.
     let mut after_decimal = false;
@@ -3392,6 +3411,8 @@ fn words2num_sentence_walk(
             i = k;
             continue;
         }
+        let limit = run_limit.filter(|&(start, _)| start == i).map_or(n, |(_, k)| k);
+        let regrown = limit < n;
         // Grow a number run starting at i.
         let mut best_value: Option<W2nValue> = None;
         let mut best_end = i;
@@ -3407,7 +3428,8 @@ fn words2num_sentence_walk(
         // dubu ɗari": 1 001 100 and 1 100 000): no one number, so its words
         // stay rather than read as two (#348).
         let mut ambiguous_end: Option<usize> = None;
-        while j < n {
+        let mut ambiguous_from: Option<usize> = None;
+        while j < limit {
             let tok = &parts[j];
             if py_str_isspace(tok) {
                 j += 1;
@@ -3513,8 +3535,12 @@ fn words2num_sentence_walk(
             });
             // ha "na miliyan goma": the ordinal of 10^7 and of 1 000 010 alike
             // (#348). Declined, and the span stays words.
+            // bm "ba tan ni sabanan": the span ends in its own ordinal word; its
+            // stem is the cardinal "… ni saba" (#884 M2).
             let ambiguous = postfix_scales
-                && ambiguous_stem(converter.n2w_key(), &crate::normalize(&stripped));
+                && (ambiguous_stem(converter.n2w_key(), &crate::normalize(&stripped))
+                    || cardinal_stem(&converter, &stripped, &clean)
+                        .is_some_and(|c| ambiguous_stem(converter.n2w_key(), &c)));
             let hit = hit.filter(|(_, ordinal)| !(*ordinal && ambiguous));
             match hit {
                 // A run never ends on a connector: "one and a half" is "1 and
@@ -3526,10 +3552,42 @@ fn words2num_sentence_walk(
                     failed = 0;
                 }
                 Some(_) => failed += 1,
-                None if !candidate => break,
+                None if !candidate => {
+                    // bm "ba tan ni sabanan": the span ends in its ordinal word,
+                    // which is no candidate; it starts where its cardinal stem
+                    // is ambiguous ("x saba ba tan ni naaninan" reads the 3).
+                    if ambiguous {
+                        ambiguous_end = Some(j);
+                        ambiguous_from.get_or_insert_with(|| {
+                            (i..=j)
+                                .filter(|&k| !py_str_isspace(&parts[k]))
+                                .find(|&k| {
+                                    let tail = rstrip_punct(py_strip(&parts[k..=j].concat())).to_string();
+                                    cardinal_stem(&converter, &tail, &clean).is_some_and(|c| {
+                                        crate::is_ambiguous_number(converter.n2w_key(), &c)
+                                            && converter.convert(to, &c, has_kwargs).is_err()
+                                    })
+                                })
+                                .unwrap_or(i)
+                        });
+                    }
+                    break;
+                }
                 None => {
                     if ambiguous {
                         ambiguous_end = Some(j);
+                        ambiguous_from.get_or_insert_with(|| {
+                            (i..=j)
+                                .filter(|&k| !py_str_isspace(&parts[k]))
+                                .find(|&k| {
+                                    let tail = rstrip_punct(py_strip(&parts[k..=j].concat())).to_string();
+                                    // Only a span nothing reads: "dubu tamanin" (1 080 or
+                                    // 80 000) reads, so it is no split point (#884 M1).
+                                    crate::is_ambiguous_number(converter.n2w_key(), &crate::normalize(&tail))
+                                        && converter.convert(to, &tail, has_kwargs).is_err()
+                                })
+                                .unwrap_or(i)
+                        });
                     }
                     failed += 1
                 }
@@ -3559,22 +3617,71 @@ fn words2num_sentence_walk(
             }
         }
 
+        // The regrown prefix must read right up to the ambiguous span, or the
+        // words before it stay words too: no stray "9" out of "… tara biliyan".
+        if regrown {
+            let last_before = (i..limit).rev().find(|&k| !py_str_isspace(&parts[k]));
+            if best_value.is_none() || last_before != Some(best_end) {
+                out.push_str(&parts[i..limit].concat());
+                i = limit;
+                continue;
+            }
+        }
         if let Some(mut end) = ambiguous_end.filter(|&e| e > best_end) {
+            // A number before the ambiguous span still reads: regrow the run
+            // to stop where the span starts (#796).
+            // Not where the run follows a number word left in words: in ha the
+            // multiplier comes after its scale, so "tiriliyan tara biliyan …"
+            // has no "tara" of its own.
+            // A scale word right before it (a comma there ends that number).
+            let after_number_word = parts[..i]
+                .iter()
+                .rev()
+                .find(|t| !py_str_isspace(t))
+                .is_some_and(|raw| {
+                    let p = rstrip_punct(raw).to_lowercase();
+                    trailing_punct(raw).is_empty()
+                        && (is_scale_word(&converter, &p, 1_000)
+                            || (!is_candidate(&converter, &p, includable)
+                                && renderer_vocab(converter.n2w_key(), &crate::normalize(&p))))
+                });
+            if let Some(from) = ambiguous_from.filter(|&f| f > i && !after_number_word) {
+                run_limit = Some((i, from));
+                continue;
+            }
             // The rest of the same number stays words too: bm "ba tan ni kelen
-            // ni mugan ni wolonfila" is no "ba tan ni kelen ni 27".
+            // ni mugan ni wolonfila" is no "ba tan ni kelen ni 27", nor its
+            // ordinal word ("… ni kelennan", #798). A comma ends the number:
+            // ha and bm write none inside one (#797).
+            // Two unit words side by side with no connector are two numbers:
+            // "ba tan ni kelen saba" ends before "saba" (#884 L1). Anything
+            // else may still belong to the number, so the words stay.
+            let unit = |w: &str| matches!(converter.to_cardinal(w), Ok(W2nValue::Int(v)) if v >= BigInt::from(1) && v <= BigInt::from(9));
+            let mut prev_unit = unit(&rstrip_punct(&parts[end]).to_lowercase());
+            let ends_ordinal = converter.is_ordinal_word(&rstrip_punct(&parts[end]).to_lowercase());
             let mut k = end + 1;
-            while k < n {
+            while k < n && trailing_punct(&parts[end]).is_empty() && !ends_ordinal {
                 let part = &parts[k];
                 if py_str_isspace(part) {
                     k += 1;
                     continue;
                 }
                 let clean = rstrip_punct(part).to_lowercase();
-                if tokens::is_punct_part(part) || !is_candidate(&converter, &clean, includable) {
+                let number_word = is_candidate(&converter, &clean, includable)
+                    || converter.is_ordinal_word(&clean)
+                    || converter.to_ordinal(&clean).is_ok();
+                if tokens::is_punct_part(part) || !number_word || (prev_unit && unit(&clean)) {
                     break;
                 }
-                end = k;
-                if ends_with_terminal_punct(part) {
+                prev_unit = unit(&clean);
+                if !is_includable(&clean, includable) {
+                    end = k;
+                }
+                // An ordinal word ends its number (bm "… ni kelennan saba").
+                if converter.is_ordinal_word(&clean) {
+                    break;
+                }
+                if !trailing_punct(part).is_empty() {
                     break;
                 }
                 k += 1;
@@ -5629,14 +5736,34 @@ mod ambiguous_span_tests {
     fn ambiguous_spans_stay_words() {
         let s = |t: &str, l: &str| words2num_sentence(t, l, "cardinal", false).unwrap();
         assert_eq!(s("na biya miliyan biyu dubu goma jiya", "ha"), "na biya miliyan biyu dubu goma jiya");
-        // #882: an unreadable scale word ("tiriliyan") leaves the rest of its
-        // number in words, no fragments.
-        assert_eq!(s("x tiriliyan biliyan goma y", "ha"), "x tiriliyan biliyan goma y");
-        assert_eq!(s("x tiriliyan biyar biliyan goma y", "ha"), "x tiriliyan biyar biliyan goma y");
         assert_eq!(s("x ba tan ni kelen ni mugan ni wolonfila y", "bm"), "x ba tan ni kelen ni mugan ni wolonfila y");
-        assert_eq!(s("Na biya naira miliyan talatin", "ha"), "Na biya naira 30000000");
         // Unambiguous numbers still read.
         assert_eq!(s("ina da miliyan dubu naira", "ha"), "ina da 1001000 naira");
+        assert_eq!(s("Na biya naira miliyan talatin", "ha"), "Na biya naira 30000000");
+        // #796: a number before the ambiguous span still reads.
+        assert_eq!(s("mutum biyar miliyan dubu ɗari", "ha"), "mutum 5 miliyan dubu ɗari");
+        assert_eq!(s("x dubu biyu miliyan dubu ɗari y", "ha"), "x 2000 miliyan dubu ɗari y");
+        assert_eq!(s("x mugan ba tan ni kelen y", "bm"), "x 20 ba tan ni kelen y");
+        // #884 M1: a span that reads on its own is no split point.
+        assert_eq!(s("x uku dubu tamanin y", "ha"), "x uku dubu tamanin y");
+        assert_eq!(s("dubu tamanin da dubu tamanin", "ha"), "dubu tamanin da dubu tamanin");
+        // A multiplier after a scale word left in words is not split off.
+        assert_eq!(s("x tiriliyan tara biliyan ɗari tara y", "ha"), "x tiriliyan tara biliyan ɗari tara y");
+        // #797: a comma ends the words-span.
+        assert_eq!(s("x miliyan dubu ɗari, dubu biyar y", "ha"), "x miliyan dubu ɗari, 5000 y");
+        assert_eq!(s("x ba tan ni kelen, ni mugan y", "bm"), "x ba tan ni kelen, ni 20 y");
+        // #798 and #884 M2: the number's ordinal word stays words with it.
+        assert_eq!(s("x ba tan ni kelen ni kelennan y", "bm"), "x ba tan ni kelen ni kelennan y");
+        assert_eq!(s("x ba tan ni sabanan y", "bm"), "x ba tan ni sabanan y");
+        assert_eq!(s("x saba ba tan ni naaninan y", "bm"), "x 3 ba tan ni naaninan y");
+        assert_eq!(s("x ba tan ni kelennan saba y", "bm"), "x ba tan ni kelennan 3 y");
+        // #882 pins: no fragments after an unreadable scale word.
+        assert_eq!(s("x tiriliyan biliyan goma y", "ha"), "x tiriliyan biliyan goma y");
+        assert_eq!(s("x tiriliyan biyar biliyan goma y", "ha"), "x tiriliyan biyar biliyan goma y");
+        // #884 L1: a separate number after the span reads.
+        assert_eq!(s("x ba tan ni kelen saba y", "bm"), "x ba tan ni kelen 3 y");
+        // #884 L2: a comma before the run lets the split happen.
+        assert_eq!(s("x mutum biyar, uku miliyan dubu ɗari y", "ha"), "x mutum 5, 3 miliyan dubu ɗari y");
     }
 }
 
