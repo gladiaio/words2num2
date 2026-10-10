@@ -939,6 +939,12 @@ impl Converter {
             if english && word.to_lowercase() == "o" {
                 return Some('0');
             }
+            // "-oh", "minus zero": a signed zero is no digit, its sign would
+            // be dropped (#956).
+            let norm = crate::normalize(word);
+            if word.trim_start().starts_with(['-', '+', '\u{2212}']) || crate::strip_sign(self.n2w_key(), &norm).is_some() {
+                return None;
+            }
             match self.to_cardinal(word) {
                 // A single decimal digit stringifies to exactly one ASCII digit
                 // (0-9); anything else (negatives, 10+, floats) declines.
@@ -1924,6 +1930,12 @@ fn en_number_words(parts: &[String], i: usize) -> Vec<EnWord> {
         if py_str_isspace(tok) {
             j += 1;
             continue;
+        }
+        // A dash at either end is a sign or punctuation, no hyphen between two
+        // words: "-four five six" is no 456, "three-" keeps its dash (#956).
+        let dashes: &[char] = &['-', '\u{2212}', '\u{2013}', '\u{2014}'];
+        if tok.starts_with(dashes) || tok.trim_end().ends_with(dashes) {
+            break;
         }
         let clean = rstrip_punct(tok).to_lowercase().replace('-', " ");
         let subs = py_split_whitespace(&clean);
@@ -5995,6 +6007,25 @@ mod sign_and_script_tests {
             assert!(words2num(t, l, "digits").is_err(), "{l} {t}");
         }
         assert!(words2num("seven-two", "en", "digits").is_ok());
+        // Nor a signed zero (#956).
+        for t in ["-oh three", "-zero three", "minus oh three", "-oh"] {
+            assert!(words2num(t, "en", "digits").is_err(), "{t}");
+        }
+    }
+
+    /// #956: an English dictation run stops at a dash on either edge of a
+    /// part; only a hyphen between two words joins them.
+    #[test]
+    fn dictation_run_keeps_edge_dashes_issue_956() {
+        let s = |t: &str, to: &str| super::words2num_sentence(t, "en", to, false).unwrap();
+        assert_eq!(s("it was -four five six degrees", "cardinal"), "it was -4 5 6 degrees");
+        assert_eq!(s("call one two three -four", "cardinal"), "call 123 -4");
+        assert_eq!(s("call one two three-", "cardinal"), "call 1 2 three-");
+        assert_eq!(s("code -one two three", "digits"), "code -one 2 3");
+        assert_eq!(s("x -oh three y", "digits"), "x -oh 3 y");
+        // An inner hyphen still joins: "one two-three four" is 1234.
+        assert_eq!(s("call one two-three four", "cardinal"), "call 1234");
+        assert_eq!(s("call four five six seven", "cardinal"), "call 4567");
     }
 
     /// #869: a superscript or subscript digit is no part of the figure.
