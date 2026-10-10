@@ -465,7 +465,15 @@ fn read_unsigned(
                 rest.chars().map(|c| crate::w2n_sentence::digit_value(c).map(|d| char::from(b'0' + d as u8))).collect();
             digits.filter(|d| d.len() == 2).and_then(|d| d.parse::<u32>().ok())
         };
-        let n = forms.hundredths.get(&crate::normalize(&rest)).copied().or_else(figure)?;
+        // The oblique forms of the renderer's hundredths ("خمسين", "خمس
+        // وخمسين", "اثنتين"); a masculine unit (the #617 list) is not one of
+        // them (#881). A list of tens reads as a decimal, as the nominative
+        // "عشرون ، ثلاثون" already did.
+        let norm_rest = crate::normalize(&rest);
+        let oblique = || {
+            crate::w2n_sentence::alias_rewrite(lang, &norm_rest).and_then(|r| forms.hundredths.get(&r).copied())
+        };
+        let n = forms.hundredths.get(&norm_rest).copied().or_else(oblique).or_else(figure)?;
         return Some((int.to_string(), default_sep, format!("{:0>2}", n)));
     }
     // Each written word normalized on its own: a hyphenated compound stays
@@ -718,6 +726,15 @@ mod tests {
         assert_eq!(card("12،5", "ar"), "12.5");
         assert_eq!(card("٣،٥٠", "ar"), "3.50");
         assert_eq!(card("3،05", "ar"), "3.05");
+        // #881: the oblique tens read like the renderer's.
+        for (t, v) in [("ثلاثة ، خمسين", "3.50"), ("مائة ، خمسين", "100.50"), ("ثلاثة ، عشرين", "3.20"), ("ثلاثة ، تسعين", "3.90")] {
+            assert_eq!(card(t, "ar"), v, "{t}");
+        }
+        for (t, v) in [("ثلاثة ، خمس وخمسين", "3.55"), ("ثلاثة ، اثنتين", "3.02"), ("ثلاثة ، اثنتي عشرة", "3.12")] {
+            assert_eq!(card(t, "ar"), v, "{t}");
+        }
+        assert!(crate::words2num("ثلاثة ، أربعة", "ar", "cardinal").is_err());
+        assert!(crate::words2num("ثلاثة ، اثني عشر", "ar", "cardinal").is_err());
         // #804: three digits after the mark group, they are no decimal.
         for t in ["12،500", "١٢،٥٠٠", "1،000", "1،000،000"] {
             assert!(crate::words2num(t, "ar", "cardinal").is_err(), "{t}");
