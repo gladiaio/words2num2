@@ -68,28 +68,50 @@ fn hundredths_mark(lang: &str) -> Option<&'static str> {
     (base == "ar").then_some("\u{060C}")
 }
 
-/// The hundredths as the renderer writes them after the mark, normalized ->
-/// value: ar writes them feminine ("أربع عشرة" 14, "خمس" 5), which the
-/// cardinal table (masculine) does not hold. Taken from the 0.01..0.99
-/// renderings.
-fn hundredths(lang: &str) -> &'static HashMap<String, u32> {
-    static CACHE: OnceLock<RwLock<HashMap<String, &'static HashMap<String, u32>>>> = OnceLock::new();
+/// The words the renderer writes around the mark that the cardinal table does
+/// not read, normalized -> value, taken from its own renderings.
+#[derive(Default)]
+struct MarkForms {
+    /// The hundredths after the mark: ar writes them feminine ("أربع عشرة"
+    /// 14, "خمس" 5), the cardinal table holds the masculine forms.
+    hundredths: HashMap<String, u32>,
+    /// The integer before the mark where it differs from the cardinal: the
+    /// ar dual construct "ألفا" (2000), "مليونا" (2·10^6), not "ألفان".
+    integers: HashMap<String, i64>,
+}
+
+fn mark_forms(lang: &str) -> &'static MarkForms {
+    static CACHE: OnceLock<RwLock<HashMap<String, &'static MarkForms>>> = OnceLock::new();
     let cache = CACHE.get_or_init(Default::default);
     if let Some(t) = cache.read().ok().and_then(|m| m.get(lang).copied()) {
         return t;
     }
-    let mut table = HashMap::new();
+    let mut forms = MarkForms::default();
     if let (Some(r), Some(mark)) = (num2words2_core::get_lang_by_key(lang), hundredths_mark(lang)) {
+        let render = |s: &str| {
+            let value = BigDecimal::from_str(s).expect("literal");
+            r.to_cardinal_float(&FloatValue::Decimal { value, precision: 2 }, None).ok()
+        };
         for n in 1..100u32 {
-            let value = BigDecimal::from_str(&format!("0.{:02}", n)).expect("literal");
-            let fv = FloatValue::Decimal { value, precision: 2 };
-            let Ok(text) = r.to_cardinal_float(&fv, None) else { continue };
+            let Some(text) = render(&format!("0.{:02}", n)) else { continue };
             if let Some(words) = text.trim().strip_prefix(mark) {
-                table.entry(crate::normalize(words)).or_insert(n);
+                forms.hundredths.entry(crate::normalize(words)).or_insert(n);
+            }
+        }
+        let scales = (0..=12).map(|e| 10i64.pow(e));
+        let ints = (1..1000).chain(scales.flat_map(|p| (1..=10).map(move |k| k * p)));
+        for v in ints {
+            let (Some(text), Ok(card)) = (render(&format!("{v}.5")), r.to_cardinal(&BigInt::from(v))) else {
+                continue;
+            };
+            let Some((before, _)) = text.split_once(mark) else { continue };
+            let (before, card) = (crate::normalize(before), crate::normalize(&card));
+            if before != card {
+                forms.integers.entry(before).or_insert(v);
             }
         }
     }
-    let built: &'static HashMap<String, u32> = Box::leak(Box::new(table));
+    let built: &'static MarkForms = Box::leak(Box::new(forms));
     if let Ok(mut m) = cache.write() {
         m.entry(lang.to_string()).or_insert(built);
     }
@@ -100,7 +122,10 @@ fn hundredths(lang: &str) -> &'static HashMap<String, u32> {
 /// own, which a cardinal read would silently drop ("مائة ، خمسون" is 100.50,
 /// not 150).
 pub fn has_written_mark(lang: &str, text: &str) -> bool {
-    hundredths_mark(lang).is_some_and(|m| text.split_whitespace().any(|t| t == m))
+    let Some(m) = hundredths_mark(lang) else { return false };
+    let words: Vec<&str> = text.split_whitespace().collect();
+    // A trailing mark is punctuation: "ثلاثة ،" stays 3.
+    words.iter().position(|t| *t == m).is_some_and(|pos| pos + 1 < words.len())
 }
 
 /// The derived forms of renderer key `lang`, built once and cached.
@@ -265,18 +290,35 @@ pub fn read(
 ) -> Option<(String, char, String)> {
     let f = forms(lang);
     // 0. ar "<int> ، <hundredths>": the fraction is a count of hundredths.
-    if let Some(mark) = hundredths_mark(lang) {
-        let words: Vec<&str> = text.split_whitespace().collect();
-        if let Some(pos) = words.iter().position(|t| *t == mark) {
-            let int = if pos == 0 { BigInt::from(0) } else { cardinal(&words[..pos].join(" "))? };
-            let rest = words[pos + 1..].join(" ");
-            let n = hundredths(lang)
-                .get(&crate::normalize(&rest))
-                .map(|&n| BigInt::from(n))
-                .or_else(|| cardinal(&rest))
-                .filter(|n| *n >= BigInt::from(0) && *n < BigInt::from(100))?;
-            return Some((int.to_string(), default_sep, format!("{:0>2}", n)));
+    if let Some(mark) = hundredths_mark(lang).filter(|_| has_written_mark(lang, text)) {
+        let mut words: Vec<&str> = text.split_whitespace().collect();
+        // "سالب ، خمسون" is -0.50: the sign is read apart, so a zero integer
+        // keeps it.
+        let first = crate::normalize(words[0]);
+        let negative = crate::strip_sign(lang, &format!("{first} x")) == Some(("x", false));
+        if negative {
+            words.remove(0);
         }
+        let pos = words.iter().position(|t| *t == mark)?;
+        let forms = mark_forms(lang);
+        let int = if pos == 0 {
+            BigInt::from(0)
+        } else {
+            let head = words[..pos].join(" ");
+            match forms.integers.get(&crate::normalize(&head)) {
+                Some(&v) => BigInt::from(v),
+                None => cardinal(&head).filter(|i| *i >= BigInt::from(0))?,
+            }
+        };
+        let rest = words[pos + 1..].join(" ");
+        let n = forms
+            .hundredths
+            .get(&crate::normalize(&rest))
+            .map(|&n| BigInt::from(n))
+            .or_else(|| cardinal(&rest))
+            .filter(|n| *n >= BigInt::from(0) && *n < BigInt::from(100))?;
+        let sign = if negative { "-" } else { "" };
+        return Some((format!("{sign}{int}"), default_sep, format!("{:0>2}", n)));
     }
     // Each written word normalized on its own: a hyphenated compound stays
     // one fraction digit (wo "juróom-ñeent" is 9, not 5 and 4).
@@ -458,5 +500,17 @@ mod tests {
         assert_eq!(card("ثلاثة فاصلة واحد أربعة", "ar"), "3.14");
         // A mark with no hundredths after it is no number.
         assert!(crate::words2num("مائة ، خمسمائة", "ar", "cardinal").is_err());
+        // The sign is read apart, so -0.50 keeps it.
+        assert_eq!(card("سالب ، خمسون", "ar"), "-0.50");
+        assert_eq!(card("سالب ثلاثة ، خمسون", "ar"), "-3.50");
+        // The dual construct before the mark.
+        assert_eq!(card("ألفا ، خمسون", "ar"), "2000.50");
+        assert_eq!(card("مليونا ، خمسون", "ar"), "2000000.50");
+        assert_eq!(card("مليارا ، خمسون", "ar"), "2000000000.50");
+        assert_eq!(card("تريليونا ، خمسون", "ar"), "2000000000000.50");
+        assert_eq!(card("مئتا ، خمسون", "ar"), "200.50");
+        // A trailing mark is punctuation.
+        assert_eq!(crate::words2num("ثلاثة ،", "ar", "cardinal").unwrap(), W2nValue::Int(3.into()));
+        assert_eq!(crate::words2num("مائة ،", "ar", "cardinal").unwrap(), W2nValue::Int(100.into()));
     }
 }

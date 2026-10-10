@@ -27,7 +27,7 @@ with no value that parsed before parsing differently now.
 
 ### Fixed
 
-- Arabic decimals: the renderer's "،" separator is read as the decimal mark with the hundredths after it, in the feminine forms the renderer writes ("ثلاثة ، أربع عشرة" -> 3.14, "مائة ، خمسون" -> 100.50, "، خمسون" -> 0.50); before, the mark was dropped and "مائة ، خمسون" read as 150. The standard separator "فاصلة" is read too ("ثلاثة فاصلة أربعة عشر" -> 3.14) (#371).
+- Arabic decimals: the renderer's "،" separator is read as the decimal mark with the hundredths after it, in the feminine forms the renderer writes ("ثلاثة ، أربع عشرة" -> 3.14, "مائة ، خمسون" -> 100.50, "، خمسون" -> 0.50, "سالب ، خمسون" -> -0.50, the dual "ألفا ، خمسون" -> 2000.50); before, the mark was dropped and "مائة ، خمسون" read as 150. A trailing "،" stays punctuation. The standard separator "فاصلة" is read too ("ثلاثة فاصلة أربعة عشر" -> 3.14) (#371).
 - Cardinals up to 10^18 parse: trillion, long-scale billion/billiard, the Indian kharab/padma/shankh, ja/zh 兆 and 京, ko 조 and 경 ("eine Billion", "dos billones", "one kharab", "一兆"). A power whose multipliers the renderer drops (ro "bilion" for 1, 2 and 5·10^12) is no longer learned, so it raises instead of reading a wrong value (#84, #220).
 - Stacked scale words multiply instead of adding: bn "দশ কোটি কোটি" = 10^15, ba "бер миллиард миллиард" = 10^18, eu "mila mila milioi" = 10^12, th "หนึ่งล้านสองแสนล้าน" = 1.2·10^12; the remainder after a scale word must stay below it. A stacked reading is accepted only where num2words2 spells that very number so, and languages that never stack (fr "deux mille deux mille") decline (#40, #217).
 - Scale composition never wraps around i64: an overflowing input raises instead of returning a negative or wrapped number (#72).
