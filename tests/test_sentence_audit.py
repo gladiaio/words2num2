@@ -89,6 +89,12 @@ def test_186_long_number_runs_finish_fast(lang, word, small):
     # quadratic, ~512x if cubic (cubic took 16 s for 200 de tokens).
     # Small and large runs alternate, so a burst of load hits both (#996).
     texts = {n: " ".join([word] * n) for n in (small, small * 8)}
+    # Fail fast on a real regression: the small run is under 0.6 s on main,
+    # even loaded; a quadratic or cubic walker would take minutes on the
+    # large one before the ratio is checked (#991).
+    start = time.perf_counter()
+    s(texts[small], lang)
+    assert time.perf_counter() - start < 5
     best = {n: float("inf") for n in texts}
     for _ in range(2):
         for n, text in texts.items():
