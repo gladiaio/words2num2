@@ -75,8 +75,9 @@ struct MarkForms {
     /// The hundredths after the mark: ar writes them feminine ("أربع عشرة"
     /// 14, "خمس" 5), the cardinal table holds the masculine forms.
     hundredths: HashMap<String, u32>,
-    /// The integer before the mark where it differs from the cardinal: the
-    /// ar dual construct "ألفا" (2000), "مليونا" (2·10^6), not "ألفان".
+    /// The integer before the mark as the renderer writes it, for 1..999 and
+    /// k·10^e: the ar dual construct "ألفا" (2000), "مليونا" (2·10^6), not
+    /// "ألفان", and the scales the cardinal reader does not read.
     integers: HashMap<String, i64>,
 }
 
@@ -98,17 +99,27 @@ fn mark_forms(lang: &str) -> &'static MarkForms {
                 forms.hundredths.entry(crate::normalize(words)).or_insert(n);
             }
         }
-        let scales = (0..=12).map(|e| 10i64.pow(e));
-        let ints = (1..1000).chain(scales.flat_map(|p| (1..=10).map(move |k| k * p)));
+        let mut clashes = std::collections::HashSet::new();
+        let scales = (0..=18).map(|e| 10i64.pow(e));
+        let ints = (1..1000).chain(scales.flat_map(|p| (1..=10).filter_map(move |k| p.checked_mul(k))));
         for v in ints {
-            let (Some(text), Ok(card)) = (render(&format!("{v}.5")), r.to_cardinal(&BigInt::from(v))) else {
-                continue;
-            };
+            let Some(text) = render(&format!("{v}.5")) else { continue };
             let Some((before, _)) = text.split_once(mark) else { continue };
-            let (before, card) = (crate::normalize(before), crate::normalize(&card));
-            if before != card {
-                forms.integers.entry(before).or_insert(v);
+            // Every form, not only those that differ from the cardinal: the
+            // cardinal reader does not read "كوينتليونا" (2·10^18) at all.
+            let before = crate::normalize(before);
+            match forms.integers.get(&before) {
+                Some(&w) if w != v => {
+                    clashes.insert(before);
+                }
+                _ => {
+                    forms.integers.insert(before, v);
+                }
             }
+        }
+        // Two values written alike are neither (raise beats a wrong value).
+        for c in clashes {
+            forms.integers.remove(&c);
         }
     }
     let built: &'static MarkForms = Box::leak(Box::new(forms));
@@ -125,7 +136,7 @@ pub fn has_written_mark(lang: &str, text: &str) -> bool {
     let Some(m) = hundredths_mark(lang) else { return false };
     let words: Vec<&str> = text.split_whitespace().collect();
     // A trailing mark is punctuation: "ثلاثة ،" stays 3.
-    words.iter().position(|t| *t == m).is_some_and(|pos| pos + 1 < words.len())
+    words.iter().position(|t| *t == m).is_some_and(|pos| words.get(pos + 1).is_some_and(|w| *w != m))
 }
 
 /// The derived forms of renderer key `lang`, built once and cached.
@@ -508,9 +519,12 @@ mod tests {
         assert_eq!(card("مليونا ، خمسون", "ar"), "2000000.50");
         assert_eq!(card("مليارا ، خمسون", "ar"), "2000000000.50");
         assert_eq!(card("تريليونا ، خمسون", "ar"), "2000000000000.50");
+        assert_eq!(card("كوادريليونا ، خمسون", "ar"), "2000000000000000.50");
+        assert_eq!(card("كوينتليونا ، خمسون", "ar"), "2000000000000000000.50");
         assert_eq!(card("مئتا ، خمسون", "ar"), "200.50");
         // A trailing mark is punctuation.
         assert_eq!(crate::words2num("ثلاثة ،", "ar", "cardinal").unwrap(), W2nValue::Int(3.into()));
         assert_eq!(crate::words2num("مائة ،", "ar", "cardinal").unwrap(), W2nValue::Int(100.into()));
+        assert_eq!(crate::words2num("ثلاثة ، ،", "ar", "cardinal").unwrap(), W2nValue::Int(3.into()));
     }
 }
