@@ -14,6 +14,7 @@ with no value that parsed before parsing differently now.
 
 ### Changed (behaviour callers will notice)
 
+- ha: where num2words2 writes "<scale> <10-999>" for both the product and the sum (it drops the "da" a sum takes), the product is read, as a Hausa reader does: "miliyan talatin" is 30 000 000, "miliyan ɗari biyar" 500 000 000, "miliyan biyu dubu goma" 2 010 000. These raised since #348; the renderer's own spelling of the sum (1 000 030) now reads as the product, which is the cost of the tie-break. A sum written with "da" reads as the sum ("miliyan da biyu" is 1 000 002). The thousands are unchanged ("dubu goma" still reads 1 010) (#882).
 - `auto_parse_sentence` no longer expands a unit written as a single capital letter (other than "L"; "°C" and "°F" still read), "in", or an "s" glued to a whole number ending in 0, in running text — the shapes of "Room 5 C", "1 in 3" and "the 1990s". So "it is 70 F today", "it is 300 K", "it is -5 C", "a 12in pipe", "a 5 in screen", "a 30s timeout" and "timeout=30s" stay as written; write "°F", "kelvin", "inches", "30 s", or pass `prefer` (e.g. `prefer={"in": "inch"}`) to read them (#392). Currency scales are not affected ("$5M", "€3K").
 - Documented that `words2num(..., to="digits")` returns an `int`, so leading zeros are dropped ("zero zero seven" → 7; use `words2num_sentence` to keep "007"), and that digit runs of any length are read (#195, #215).
 

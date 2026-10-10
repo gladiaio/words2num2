@@ -5566,10 +5566,9 @@ mod ambiguous_span_tests {
     #[test]
     fn ambiguous_spans_stay_words() {
         let s = |t: &str, l: &str| words2num_sentence(t, l, "cardinal", false).unwrap();
-        assert_eq!(s("na biya miliyan biyu dubu goma jiya", "ha"), "na biya miliyan biyu dubu goma jiya");
+        assert_eq!(s("na biya miliyan biyu dubu goma jiya", "ha"), "na biya 2010000 jiya"); // #882
         assert_eq!(s("x ba tan ni kelen ni mugan ni wolonfila y", "bm"), "x ba tan ni kelen ni mugan ni wolonfila y");
-        assert_eq!(s("x na miliyan goma y", "ha"), "x na miliyan goma y");
-        assert!(crate::words2num("na miliyan goma", "ha", "ordinal").is_err());
+        assert_eq!(s("Na biya naira miliyan talatin", "ha"), "Na biya naira 30000000");
         // Unambiguous numbers still read.
         assert_eq!(s("ina da miliyan dubu naira", "ha"), "ina da 1001000 naira");
     }

@@ -1273,7 +1273,12 @@ pub fn has_postfix_scales(lang: &str) -> bool {
 fn scaled_reading(lang: &str, norm: &str) -> Scaled {
     let Some(v) = scaled_value(lang, norm) else { return Scaled::None };
     let sc = scales_of(lang);
-    if w2n_forms::has_rival_reading(lang, v, norm) || postfix_rival(lang, v, norm, &sc) {
+    let v = match postfix_rival(lang, v, norm, &sc) {
+        Rival::None => v,
+        Rival::Prefer(m) => m,
+        Rival::Ambiguous => return Scaled::Ambiguous,
+    };
+    if w2n_forms::has_rival_reading(lang, v, norm) {
         return Scaled::Ambiguous; // bm "ba tan ni kelen": 10001 and 11000 render alike
     }
     // Where the multiplier may follow the scale word (ha, ff, sw, sn, bm, tet,
@@ -1317,31 +1322,47 @@ fn scaled_value(lang: &str, norm: &str) -> Option<i64> {
 /// word followed by a multiplier below 1000 ("dubu ɗari" = 1000 × 100) is a
 /// rival reading of a number read additively. True when such a rival differs
 /// from `v` and the renderer writes it as `norm` too (#348).
-fn postfix_rival(lang: &str, v: i64, norm: &str, sc: &Scales) -> bool {
+fn postfix_rival(lang: &str, v: i64, norm: &str, sc: &Scales) -> Rival {
     if sc.postfix.is_empty() {
-        return false;
+        return Rival::None;
     }
     let toks: Vec<&str> = norm.split_whitespace().collect();
-    (0..toks.len().saturating_sub(1)).any(|i| {
+    for i in 0..toks.len().saturating_sub(1) {
         if !sc.postfix.iter().any(|w| w == toks[i]) {
-            return false;
+            continue;
         }
         let Some(unit) = sc.words.iter().find(|(w, _)| w == toks[i]).map(|(_, m)| *m) else {
-            return false;
+            continue;
         };
         let Some(m) = lookup_plain(lang, &toks[i + 1..].join(" ")).filter(|m| (2..1000).contains(m)) else {
-            return false;
+            continue;
         };
         let Some(h) = (if i == 0 { Some(0) } else { parse_scaled_norm_unchecked(lang, &toks[..i].join(" ")) })
         else {
-            return false;
+            continue;
         };
-        // Both ways round: the multiplier reading ("miliyan goma" = 10^7) and
-        // the additive one (10^6 + 10) — whichever `v` is, the other rivals it.
+        // The renderer writes "miliyan talatin" for 30·10^6 and for 10^6 + 30
+        // alike: it drops the "da" a sum takes. A reader takes the multiplier
+        // after the scale word, so that reading wins (#882).
         let mult = unit.checked_mul(m).and_then(|x| h.checked_add(x));
+        if let Some(mult) = mult.filter(|&x| renders_as(lang, x, norm)) {
+            return if mult == v { Rival::None } else { Rival::Prefer(mult) };
+        }
         let add = h.checked_add(unit).and_then(|x| x.checked_add(m));
-        [mult, add].into_iter().flatten().any(|rival| rival != v && renders_as(lang, rival, norm))
-    })
+        if add.is_some_and(|x| x != v && renders_as(lang, x, norm)) {
+            return Rival::Ambiguous;
+        }
+    }
+    Rival::None
+}
+
+/// What [`postfix_rival`] makes of a reading.
+enum Rival {
+    None,
+    /// The renderer writes the text for this other value, which reads first.
+    Prefer(i64),
+    /// Two values alike, neither preferred.
+    Ambiguous,
 }
 
 /// [`parse_scaled_norm`] without its ambiguity checks, for a fragment.
@@ -2487,11 +2508,16 @@ mod tests {
         assert_eq!(parse_scaled("ha", "miliyan dubu biyu"), Some(1_002_000));
         assert_eq!(parse_scaled("ha", "miliyan dubu uku ɗari huɗu hamsin da shida"), Some(1_003_456));
         assert_eq!(parse_scaled("ha", "biliyan dubu"), Some(1_000_001_000));
-        // Spellings the renderer gives two values raise, both ways round.
-        assert_eq!(parse_scaled("ha", "miliyan goma"), None); // 1 000 010, 10^7
-        assert_eq!(parse_scaled("ha", "miliyan ɗari biyar"), None); // 1 000 500, 5·10^8
-        assert_eq!(parse_scaled("ha", "miliyan dubu ɗari"), None); // 1 001 100, 1 100 000
-        assert_eq!(parse_scaled("ha", "miliyan biyu dubu ɗari uku sha biyar"), None);
+        // #882: the renderer writes "<scale> <M>" for the product and for the
+        // sum without "da" alike; a reader takes the multiplier.
+        assert_eq!(parse_scaled("ha", "miliyan goma"), Some(10_000_000));
+        assert_eq!(parse_scaled("ha", "miliyan talatin"), Some(30_000_000));
+        assert_eq!(parse_scaled("ha", "miliyan sha biyu"), Some(12_000_000));
+        assert_eq!(parse_scaled("ha", "miliyan ɗari biyar"), Some(500_000_000));
+        assert_eq!(parse_scaled("ha", "miliyan dubu ɗari"), Some(1_100_000));
+        assert_eq!(parse_scaled("ha", "miliyan biyu dubu ɗari uku sha biyar"), Some(2_315_000));
+        // The sum is written with "da".
+        assert_eq!(parse_scaled("ha", "miliyan da biyu"), Some(1_000_002));
         assert_eq!(parse_scaled("ff", "ujunere teemerre"), Some(100_000));
         // km myriad and hundred-thousand glued to their multiplier.
         assert_eq!(parse_scaled("km", "មួយម៉ឺន ពីរពាន់ បីរយ សែសិបប្រាំ"), Some(12_345));
