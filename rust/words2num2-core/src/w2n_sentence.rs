@@ -1733,8 +1733,29 @@ fn connector_join_ok(converter: &Converter, stripped: &str, total: &W2nValue, ha
 
 /// The scale a token closes with a comma: "thousand," -> 1000, "million," ->
 /// 1000000, pt "mil," -> 1000. `None` for any other token or punctuation.
+/// Does the renderer write a comma after a scale word inside one number (en
+/// "two thousand, one hundred", pt_BR)? Elsewhere a comma there separates a
+/// list: ru "две тысячи, триста" is 2000 and 300 (#657). Read from the
+/// renderer's own output, once per language.
+fn writes_scale_comma(key: &str) -> bool {
+    static CACHE: std::sync::OnceLock<std::sync::RwLock<HashMap<String, bool>>> = std::sync::OnceLock::new();
+    let cache = CACHE.get_or_init(Default::default);
+    if let Some(b) = cache.read().ok().and_then(|m| m.get(key).copied()) {
+        return b;
+    }
+    let writes = num2words2_core::get_lang_by_key(key).is_some_and(|r| {
+        [2100i64, 12300, 1_234_567, 2_000_300]
+            .iter()
+            .any(|&n| r.to_cardinal(&BigInt::from(n)).is_ok_and(|t| t.contains(',')))
+    });
+    if let Ok(mut m) = cache.write() {
+        m.insert(key.to_string(), writes);
+    }
+    writes
+}
+
 fn comma_after_scale(converter: &Converter, tok: &str) -> Option<BigInt> {
-    if trailing_punct(tok) != "," {
+    if trailing_punct(tok) != "," || !writes_scale_comma(converter.n2w_key()) {
         return None;
     }
     let clean = rstrip_punct(tok).to_lowercase().replace('-', " ");
@@ -5154,5 +5175,23 @@ mod audit_tests {
             super::auto_parse_sentence("0.0000001 kg", "en", &prefer, None, None, false).unwrap(),
             "0.0000001 kg"
         );
+    }
+}
+
+#[cfg(test)]
+mod scale_comma_tests {
+    use super::words2num_sentence;
+
+    /// #657: a comma after a scale word is crossed only where the renderer
+    /// writes one inside a number.
+    #[test]
+    fn comma_after_scale_only_where_rendered_issue_657() {
+        let s = |t: &str, l: &str| words2num_sentence(t, l, "cardinal", false).unwrap();
+        assert_eq!(s("в две тысячи, сто человек", "ru"), "в 2000, 100 человек");
+        assert_eq!(s("Ceny: dwa tysiące, trzysta i pięćset złotych.", "pl"), "Ceny: 2000, 300 i 500 złotych.");
+        assert_eq!(s("Precios: dos mil, trescientos y quinientos euros.", "es"), "Precios: 2000, 300 y 500 euros.");
+        assert_eq!(s("две хиляди, триста", "bg"), "2000, 300");
+        // The renderers that write the comma keep reading one number (#67).
+        assert_eq!(s("twelve thousand, three hundred and forty-five", "en"), "12345");
     }
 }
