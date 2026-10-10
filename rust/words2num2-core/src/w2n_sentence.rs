@@ -4628,10 +4628,12 @@ pub fn auto_parse(
     match parse_number_string(text, thousands_sep, decimal_sep, Some(fmt_lang)) {
         Ok(value) => return Ok(Quantity::bare(value, raw)),
         // Figures the caller gave separators for are no words: "1.5" with
-        // decimal_sep="," raises, it is no float 1.5.
+        // decimal_sep="," raises, it is no float 1.5. A dash and a comma
+        // before the figure are its sign ("-, 5"), read with those separators.
         Err(e @ W2nError::Words2Num(_))
             if (thousands_sep.is_some_and(|t| !t.is_empty()) || decimal_sep.is_some_and(|d| !d.is_empty()))
-                && text.chars().all(|c| c.is_ascii_digit() || ".,'_ +-".contains(c)) =>
+                && text.chars().all(|c| c.is_ascii_digit() || ".,'_ +-".contains(c))
+                && crate::signed_figure_in(text, lang).is_none() =>
         {
             return Err(W2nError::Words2Num(format!("could not auto-parse {}: {}", py_repr_str(raw), e.message())));
         }
@@ -5959,6 +5961,11 @@ mod auto_parse_sign_tests {
         assert_eq!(dec(with("minus 1,234", "en", None, Some(","))), dec(W2nValue::Dec("-1.234".parse().unwrap())));
         assert_eq!(dec(v("menos 1.234", "es_MX")), dec(W2nValue::Dec("-1.234".parse().unwrap())));
         assert_eq!(v("menos 1,234", "es_MX"), W2nValue::Int((-1234).into()));
+        // A dash and a comma are a sign with separators given too.
+        assert_eq!(with("-, 5", "en", None, Some(".")), W2nValue::Int((-5).into()));
+        assert_eq!(dec(with("-, 1.234", "fr", None, Some(","))), dec(W2nValue::Int((-1234).into())));
+        assert_eq!(dec(with("-, 1.234", "fr", None, Some("."))), dec(W2nValue::Dec("-1.234".parse().unwrap())));
+        assert!(auto_parse("1.5", "en", &p, None, Some(",")).is_err());
         // "AR" is ar: its "،" stays the decimal mark.
         assert_eq!(format!("{:?}", crate::words2num("-، 50", "AR", "cardinal").unwrap()), format!("{:?}", crate::words2num("-، 50", "ar", "cardinal").unwrap()));
     }
