@@ -140,10 +140,10 @@ const fn nf(thousands: &'static str, decimal: &'static str) -> NumberFormat {
     NumberFormat { thousands, decimal }
 }
 
-/// CLDR-inspired per-locale defaults, in Python source order. `"_default"` is
-/// the fallback.
+/// CLDR-inspired per-locale defaults, in Python source order, then the rows
+/// added since. `"_default"` is the fallback.
 ///
-/// A slice rather than a map: 55 rows, looked up by linear scan, and the order
+/// A slice rather than a map: 97 rows, looked up by linear scan, and the order
 /// stays visibly identical to the Python dict.
 ///
 /// Every `thousands` that reads as a space here is a plain ASCII `U+0020` — the
@@ -170,13 +170,26 @@ pub static NUMBER_FORMAT_DEFAULTS: &[(&str, NumberFormat)] = &[
     ("fr_DZ", nf(" ", ",")),
     // Swiss French uses apostrophe
     ("fr_CH", nf("'", ".")),
+    ("de_CH", nf("'", ".")),
+    ("it_CH", nf("'", ".")),
     // Continental European (dot thousands, comma decimal)
     ("de", nf(".", ",")),
     ("es", nf(".", ",")),
     ("es_CO", nf(".", ",")),
     ("es_CR", nf(".", ",")),
-    ("es_GT", nf(".", ",")),
-    ("es_NI", nf(".", ",")),
+    // Central America, Mexico, the US and Caribbean Spanish write
+    // 1,234,567.5 (CLDR; #423).
+    ("es_GT", nf(",", ".")),
+    ("es_NI", nf(",", ".")),
+    ("es_HN", nf(",", ".")),
+    ("es_MX", nf(",", ".")),
+    ("es_US", nf(",", ".")),
+    ("es_PE", nf(",", ".")),
+    ("es_PR", nf(",", ".")),
+    ("es_DO", nf(",", ".")),
+    ("es_PA", nf(",", ".")),
+    ("es_SV", nf(",", ".")),
+    ("es_419", nf(",", ".")),
     ("es_VE", nf(".", ",")),
     ("it", nf(".", ",")),
     ("pt", nf(".", ",")),
@@ -188,6 +201,18 @@ pub static NUMBER_FORMAT_DEFAULTS: &[(&str, NumberFormat)] = &[
     ("sr", nf(".", ",")),
     ("tr", nf(".", ",")),
     ("el", nf(".", ",")),
+    ("id", nf(".", ",")),
+    ("ca", nf(".", ",")),
+    ("eu", nf(".", ",")),
+    ("gl", nf(".", ",")),
+    ("mk", nf(".", ",")),
+    ("az", nf(".", ",")),
+    ("bs", nf(".", ",")),
+    ("lb", nf(".", ",")),
+    ("jv", nf(".", ",")),
+    ("su", nf(".", ",")),
+    ("km", nf(".", ",")),
+    ("lo", nf(".", ",")),
     // Slavic / Scandinavian / Baltic (space thousands, comma decimal)
     ("ru", nf(" ", ",")),
     ("uk", nf(" ", ",")),
@@ -199,6 +224,7 @@ pub static NUMBER_FORMAT_DEFAULTS: &[(&str, NumberFormat)] = &[
     ("hu", nf(" ", ",")),
     ("sv", nf(" ", ",")),
     ("no", nf(" ", ",")),
+    ("nb", nf(" ", ",")),
     ("nn", nf(" ", ",")),
     ("da", nf(".", ",")),
     ("fi", nf(" ", ",")),
@@ -212,7 +238,39 @@ pub static NUMBER_FORMAT_DEFAULTS: &[(&str, NumberFormat)] = &[
     ("ar", nf(",", ".")),
     ("fa", nf(",", ".")),
     ("he", nf(",", ".")),
+    // South and Southeast Asia: comma thousands (the Indian lakh grouping
+    // included), dot decimal (CLDR; #464).
+    ("hi", nf(",", ".")),
+    ("bn", nf(",", ".")),
+    ("ta", nf(",", ".")),
+    ("te", nf(",", ".")),
+    ("kn", nf(",", ".")),
+    ("ml", nf(",", ".")),
+    ("gu", nf(",", ".")),
+    ("pa", nf(",", ".")),
+    ("or", nf(",", ".")),
+    ("ne", nf(",", ".")),
+    ("si", nf(",", ".")),
+    ("as", nf(",", ".")),
+    ("ur", nf(",", ".")),
+    ("mr", nf(",", ".")),
+    ("my", nf(",", ".")),
+    ("ms", nf(",", ".")),
+    ("tl", nf(",", ".")),
+    ("fil", nf(",", ".")),
 ];
+
+/// Language codes words2num accepts as another language's alias, for the
+/// format lookup: "dk" reads figures as "da" does (#424).
+fn format_alias(base: &str) -> &str {
+    match base {
+        "dk" => "da",
+        "cz" => "cs",
+        "jp" => "ja",
+        "cn" => "zh",
+        _ => base,
+    }
+}
 
 /// `lang in NUMBER_FORMAT_DEFAULTS` → `NUMBER_FORMAT_DEFAULTS[lang]`
 fn lookup_format(key: &str) -> Option<NumberFormat> {
@@ -224,7 +282,7 @@ fn lookup_format(key: &str) -> Option<NumberFormat> {
 
 /// The `{thousands, decimal}` row for `lang`, if the table knows it: the exact
 /// key, else its base language. Both `_` and `-` separate the region, so
-/// `pt-BR` finds `pt_BR` and `es-MX` finds `es` (#54).
+/// `pt-BR` finds `pt_BR` and `es-AR` finds `es` (#54).
 pub fn locale_format(lang: &str) -> Option<NumberFormat> {
     if lang.is_empty() || lang == "_default" {
         return None;
@@ -237,7 +295,7 @@ pub fn locale_format(lang: &str) -> Option<NumberFormat> {
         return Some(f);
     }
     let base = normalized.split('_').next().unwrap_or("");
-    lookup_format(base)
+    lookup_format(format_alias(base))
 }
 
 /// Port of `get_format`. Returns the `{thousands, decimal}` row for `lang`,
@@ -326,8 +384,8 @@ pub fn parse_number_string(
     // fails with `not a parseable number: '-42'`.
     let mut sign = 1i32;
     let first = s.chars().next().expect("non-empty");
-    let s = if first == '+' || first == '-' {
-        if first == '-' {
+    let s = if first == '+' || is_minus(first) {
+        if first != '+' {
             sign = -1;
         }
         py_lstrip(&s[first.len_utf8()..])
@@ -354,6 +412,12 @@ pub fn parse_number_string(
 
     let hint = fmt.and_then(|f| f.decimal.chars().next());
     Ok(apply_sign(sign, auto_detect_parse(&s, hint)?))
+}
+
+/// A minus sign before a figure: the ASCII hyphen-minus and the dashes and
+/// minus signs typography puts there ("−1.234", "–42"; #443).
+pub fn is_minus(c: char) -> bool {
+    matches!(c, '-' | '\u{2010}'..='\u{2015}' | '\u{2212}' | '\u{FE58}' | '\u{FE63}' | '\u{FF0D}')
 }
 
 /// Python's `sign * value`, where `sign` is the int `1` or `-1`.
@@ -402,6 +466,29 @@ fn parse_with_explicit(
     decimal_sep: Option<&str>,
 ) -> Result<W2nValue> {
     let mut cur = s.to_string();
+    let not_a_number = || Words2NumError::new(format!("not a parseable number: {}", py_repr(s)));
+
+    // The integer part must group in threes around every mark dropped from it:
+    // "1.5" with decimal_sep="," is no 15, "12,5" with thousands_sep="," no 125
+    // (#425).
+    let t = thousands_sep.filter(|t| !t.is_empty());
+    // Without a decimal_sep the decimal is the dot — unless the dot groups.
+    let d = decimal_sep.filter(|d| !d.is_empty()).or((t != Some(".")).then_some("."));
+    let int_part = d.and_then(|d| s.split_once(d)).map_or(s, |(i, _)| i);
+    let mut marks: Vec<&str> = Vec::new();
+    if let Some(t) = t.filter(|t| !is_space_like_sep(t)) {
+        marks.push(t);
+    }
+    if d.is_some_and(|d| d != ".") && t != Some(".") {
+        marks.push(".");
+    }
+    let mut groups: Vec<&str> = vec![int_part];
+    for m in &marks {
+        groups = groups.iter().flat_map(|g| g.split(m)).collect();
+    }
+    if groups.len() > 1 && !valid_grouping(&groups) {
+        return Err(not_a_number());
+    }
 
     // `if thousands_sep:` — Python truthiness: None and "" are both falsy.
     if let Some(t) = thousands_sep.filter(|t| !t.is_empty()) {
@@ -435,8 +522,12 @@ fn valid_grouping(groups: &[&str]) -> bool {
     let len = |g: &str| g.chars().count();
     match groups.split_first() {
         Some((head, rest)) => {
+            // No one groups thousands after a zero: "0.500" and "012.345"
+            // are decimals (#377).
+            let zero_head = head.chars().next().and_then(decimal_digit) == Some(0);
             (1..=3).contains(&len(head))
                 && all_digits(head)
+                && !(zero_head && !rest.is_empty())
                 && rest.iter().all(|g| len(g) == 3 && all_digits(g))
         }
         None => false,
@@ -546,7 +637,8 @@ fn auto_detect_parse(s: &str, hint: Option<char>) -> Result<W2nValue> {
             // a stray thousands mark.
             return to_number(after);
         }
-        if after_len == 3 && (1..=3).contains(&before_len) {
+        let zero_head = before.chars().next().and_then(decimal_digit) == Some(0);
+        if after_len == 3 && (1..=3).contains(&before_len) && !zero_head {
             return match hint {
                 Some(h) if h != sep => to_number(&format!("{}{}", before, after)),
                 _ => to_number(&decimal),
@@ -892,7 +984,7 @@ mod tests {
         assert_eq!(get_format("de").thousands, ".");
         assert_eq!(get_format("vi").thousands, ".");
         assert_eq!(get_format("da").thousands, "."); // dot, unlike its neighbours
-        assert_eq!(NUMBER_FORMAT_DEFAULTS.len(), 55);
+        assert_eq!(NUMBER_FORMAT_DEFAULTS.len(), 97);
     }
 
     #[test]
@@ -995,7 +1087,53 @@ mod tests {
         assert_eq!(pl("1,5", "id").unwrap(), dec("1.5"));
         // A hyphenated region finds its row (#54).
         assert_eq!(pl("1.234,56", "pt-BR").unwrap(), dec("1234.56"));
-        assert_eq!(pl("1.234,56", "es-MX").unwrap(), dec("1234.56"));
+        assert_eq!(pl("1,234.56", "es-MX").unwrap(), dec("1234.56"));
+    }
+
+    /// #423, #424, #464: regional and alias rows.
+    #[test]
+    fn regional_and_alias_rows() {
+        for lang in ["es_GT", "es_NI", "es_HN", "es-MX", "es_US", "hi", "bn", "ms", "tl", "my"] {
+            assert_eq!(pl("1,234", lang).unwrap(), int(1234), "{lang}");
+        }
+        assert_eq!(pl("1,234.5", "hi").unwrap(), dec("1234.5"));
+        for lang in ["dk", "cz", "id", "ca", "mk", "km", "jv"] {
+            assert_eq!(pl("1.234", lang).unwrap(), int(1234), "{lang}");
+        }
+        assert_eq!(pl("1.234", "de_CH").unwrap(), dec("1.234"));
+        assert_eq!(pl("1'234.5", "it_CH").unwrap(), dec("1234.5"));
+        assert_eq!(pl("1.234", "es").unwrap(), int(1234));
+    }
+
+    /// #377: a zero head group is no thousands group.
+    #[test]
+    fn zero_head_is_a_decimal() {
+        assert_eq!(pl("0.500", "de").unwrap(), dec("0.500"));
+        assert_eq!(pl("0,500", "en").unwrap(), dec("0.500"));
+        assert_eq!(pl("012.345", "de").unwrap(), dec("12.345"));
+        assert_eq!(pl("1.500", "de").unwrap(), int(1500));
+    }
+
+    /// #443: a typographic minus is a sign.
+    #[test]
+    fn typographic_minus() {
+        assert_eq!(pl("\u{2212}1.234", "de").unwrap(), int(-1234));
+        assert_eq!(pl("\u{2212}1,5", "fr").unwrap(), dec("-1.5"));
+        assert_eq!(pl("\u{2013}42", "en").unwrap(), int(-42));
+    }
+
+    /// #425: explicit separators still need groups of three.
+    #[test]
+    fn explicit_separators_are_validated() {
+        let ex = |s: &str, t: Option<&str>, d: Option<&str>| parse_number_string(s, t, d, None);
+        assert!(ex("1.5", None, Some(",")).is_err());
+        assert!(ex("3.14159", None, Some(",")).is_err());
+        assert!(ex("1.5.2026", None, Some(",")).is_err());
+        assert!(ex("12,5", Some(","), Some(".")).is_err());
+        assert_eq!(ex("1.234,5", None, Some(",")).unwrap(), dec("1234.5"));
+        assert_eq!(ex("1.234.567", Some("."), None).unwrap(), int(1234567));
+        assert_eq!(ex("1_234.56", Some("_"), None).unwrap(), dec("1234.56"));
+        assert_eq!(ex("12,5", None, Some(",")).unwrap(), dec("12.5"));
     }
 
     /// The lang branch swallows Words2NumError and falls through to

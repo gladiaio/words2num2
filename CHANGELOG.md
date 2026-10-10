@@ -27,6 +27,10 @@ with no value that parsed before parsing differently now.
 
 ### Fixed
 
+- Figures read with the locale's real separators: Mexican, Central American, US and Caribbean Spanish (`es_MX`, `es_GT`, `es_NI`, `es_HN`, `es_US`, ...) group with a comma and `de_CH`/`it_CH` with an apostrophe (#423); the alias codes `dk`/`cz` read like `da`/`cs`, and id, ca, eu, gl, mk, az, bs, lb, jv, su, km, lo group with a dot (#424); hi, bn, ta, te, kn, ml, gu, pa, or, ne, si, as, ur, mr, my, ms, tl group with a comma, so "5,000" is 5000, not 5.000 (#464).
+- A zero head group is no thousands group: "0.500" in de and "0,500" in en are 0.500, not 500 (#377).
+- `parse_number_string` with explicit separators checks the groups: `"1.5"` with `decimal_sep=","` and `"12,5"` with `thousands_sep=","` raise instead of returning 15 and 125 (#425).
+- A typographic minus (U+2212, en dash, ...) before a figure is a sign: de "−1.234" is -1234 and fr "−1,5" is -1.5, in `words2num`, `parse_number_string` and `auto_parse` (#443); a sign word before a figure reads the figure with the locale's separators: de "minus 1.234" is -1234, not -1.234 (#309).
 - Cardinals up to 10^18 parse: trillion, long-scale billion/billiard, the Indian kharab/padma/shankh, ja/zh 兆 and 京, ko 조 and 경 ("eine Billion", "dos billones", "one kharab", "一兆"). A power whose multipliers the renderer drops (ro "bilion" for 1, 2 and 5·10^12) is no longer learned, so it raises instead of reading a wrong value (#84, #220).
 - Stacked scale words multiply instead of adding: bn "দশ কোটি কোটি" = 10^15, ba "бер миллиард миллиард" = 10^18, eu "mila mila milioi" = 10^12, th "หนึ่งล้านสองแสนล้าน" = 1.2·10^12; the remainder after a scale word must stay below it. A stacked reading is accepted only where num2words2 spells that very number so, and languages that never stack (fr "deux mille deux mille") decline (#40, #217).
 - Scale composition never wraps around i64: an overflowing input raises instead of returning a negative or wrapped number (#72).
