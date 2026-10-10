@@ -169,8 +169,11 @@ pub(crate) fn signed_figure_in(text: &str, lang: &str) -> Option<String> {
     let signs = sign_prefixes(&resolved);
     // The last mark before the figure other than a comma or a space: "-.,5"
     // keeps its point out of the sign too.
-    // A closing bracket ends a sign too: kn "(-) 1 234".
-    let touches = |c: char| c.is_alphabetic() || c == '+' || c == ')' || w2n_formats::is_minus(c) || unicode_mark(c);
+    // A closing bracket ends a sign too (kn "(-) 1 234"), and a tsheg a
+    // Tibetan word (bo "མེད་ཆ་ 1 234").
+    let touches = |c: char| {
+        c.is_alphabetic() || matches!(c, '+' | ')' | '\u{0F0B}') || w2n_formats::is_minus(c) || unicode_mark(c)
+    };
     if !t[..at].chars().rev().find(|c| !c.is_whitespace() && !comma(*c)).is_some_and(touches) {
         return None;
     }
