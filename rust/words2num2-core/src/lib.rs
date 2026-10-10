@@ -41,6 +41,14 @@ pub fn words2num(
     lang: &str,
     to: &str,
 ) -> Result<w2n_lang_en::W2nValue, w2n_sentence::W2nError> {
+    // "10²" is no 102: a superscript or subscript digit glued to a figure
+    // would fold into it (#869).
+    if glued_script_digit(text) {
+        return Err(w2n_sentence::W2nError::Words2Num(format!(
+            "cannot parse {} as a number",
+            w2n_sentence::py_repr_str(text)
+        )));
+    }
     // de "minus 1.234": a sign word before a figure, read with the same
     // separators as "-1.234" (#309).
     if matches!(to, "cardinal" | "currency") {
@@ -70,6 +78,19 @@ pub fn words2num(
         };
     }
     w2n_sentence::words2num(text, lang, to)
+}
+
+/// Does `text` hold a superscript or subscript digit next to a digit or a
+/// figure separator ("10²", "2³", "10₂", "²5", "10.²")? NFKD would fold it
+/// into the figure. A run of script digits alone ("²", "¹⁰") reads as its
+/// digits.
+pub(crate) fn glued_script_digit(text: &str) -> bool {
+    let script = |c: char| {
+        matches!(c, '\u{00B2}' | '\u{00B3}' | '\u{00B9}' | '\u{2070}' | '\u{2074}'..='\u{2079}' | '\u{2080}'..='\u{2089}')
+    };
+    let figure = |c: char| (c.is_numeric() && !script(c)) || matches!(c, '.' | ',');
+    let chars: Vec<char> = text.chars().collect();
+    chars.windows(2).any(|w| (script(w[1]) && figure(w[0])) || (script(w[0]) && figure(w[1])))
 }
 
 /// Is `text` a number in figures and nothing else: an optional sign, then
