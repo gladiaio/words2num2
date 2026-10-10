@@ -86,6 +86,8 @@ thread_local! {
 /// Run `f` with numerical symbols ("①", "²") read as their digits, or not
 /// (the default). The binder sets this per call from the caller's
 /// `convert_numerical_symbols`; it is restored on return, panic included.
+/// The setting is per thread: work `f` spawns on other threads does not see
+/// it.
 pub fn with_numerical_symbols<R>(on: bool, f: impl FnOnce() -> R) -> R {
     struct Restore(bool);
     impl Drop for Restore {

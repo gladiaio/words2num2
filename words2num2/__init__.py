@@ -119,8 +119,9 @@ def words2num_sentence(
     -> ``"20,50 €"``. Off by default: the output is unchanged.
 
     Numerical symbols (``"²"``, ``"①"``, ``"½"``) stay as written; with
-    ``convert_numerical_symbols=True`` a run of them alone reads as its
-    digits (``"the ⑤ million"`` -> ``"the 5000000"``).
+    ``convert_numerical_symbols=True`` the English walker reads them as
+    digits (``"the ⑤ million"`` -> ``"the 5000000"``), other languages leave
+    them as written either way.
 
     ``lang`` and ``to`` are validated before the walk and raise
     ``NotImplementedError`` like :func:`words2num`.
@@ -160,9 +161,10 @@ def auto_parse(
     (``unit``, ``unit_long``, ``kind``). A target that is not a reading of the
     token (``{"m": "kg"}``) is ignored.
 
-    Numerical symbols (``"①"``, ``"²"``, ``"½"``) are no number and raise,
-    except a unit's power (``"5 m²"``); ``convert_numerical_symbols=True``
-    reads a run of them alone as its digits, as :func:`words2num` does.
+    Numerical symbols (``"①"``, ``"²"``, ``"½"``) are no number and raise;
+    a power after a unit's letters (``"5 m²"``) is not refused by this
+    check. ``convert_numerical_symbols=True`` reads a run of them alone as
+    its digits, as :func:`words2num` does.
     """
     return _RUST.auto_parse(
         text,
@@ -187,8 +189,8 @@ def auto_parse_sentence(
 
     Each match becomes ``"<value> <unit>"``; with ``expand=True`` units use
     their long form. Returns the rewritten string. Numerical symbols
-    (``"①"``, ``"²"``) stay as written unless ``convert_numerical_symbols``
-    is set.
+    (``"①"``, ``"²"``) always stay as written: ``convert_numerical_symbols``
+    is accepted for symmetry with the other functions and has no effect.
     """
     return _RUST.auto_parse_sentence(
         text,

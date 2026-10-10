@@ -177,3 +177,19 @@ def test_numerical_symbols_stay_as_written_in_sentences(text):
     assert words2num2.words2num_sentence(text) == text
     assert words2num2.auto_parse_sentence(text) == text
     assert words2num2.auto_parse_sentence(text, expand=True) == text
+
+
+def test_convert_numerical_symbols_scope_per_function(capsys):
+    # The keyword brings back the earlier reading, no more: the English walker
+    # reads symbols, other walkers and auto_parse_sentence never did.
+    on = {"convert_numerical_symbols": True}
+    assert words2num2.words2num_sentence("x ① y", lang="en_GB", **on) == "x 1 y"
+    for lang in ["fr", "de", "en_IN"]:
+        assert words2num2.words2num_sentence("x ① y", lang=lang, **on) == "x ① y"
+    for text in ["x ⑤ kg y", "the ⑤ million y", "items ① ② ③"]:
+        assert words2num2.auto_parse_sentence(text, **on) == text
+        assert words2num2.auto_parse_sentence(text, expand=True, **on) == text
+    # The CLI refuses them unless asked.
+    assert main(["①"]) == 1
+    assert main(["--convert-numerical-symbols", "①"]) == 0
+    assert capsys.readouterr().out.strip() == "1"

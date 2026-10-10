@@ -382,14 +382,24 @@ numbers. By default every entry point leaves them alone: `words2num` and
 `auto_parse` raise on them, alone or glued to a figure, and the sentence
 functions keep them as written (`"the ⑤ million"` stays as is).
 
-Pass `convert_numerical_symbols=True` to `words2num`, `words2num_sentence`,
-`auto_parse` or `auto_parse_sentence` to read a run of them alone as its
-digits (`"①"` → 1, `"¹⁰"` → 10, `"the ⑤ million"` → `"the 5000000"`). Even
-then, a symbol glued to a figure raises (`"10²"`, `"1①"`: folding it in
-would give 102 and 11), and vulgar fractions are not read.
+`convert_numerical_symbols=True` brings back the reading these symbols had
+before, no more:
 
-Not affected, in either mode: a power after a unit's letters (`"5 m²"`), and
-an ordinal indicator after a figure (es `"1º"`).
+| Function | With `convert_numerical_symbols=True` |
+|---|---|
+| `words2num`, `auto_parse` | A run of symbols alone reads as its digits: `"①"` → 1, `"¹⁰"` → 10. |
+| `words2num_sentence` | The English walker (`en`, `en_GB`, `en_US`, …) reads them as digits: `"the ⑤ million"` → `"the 5000000"`. Other languages leave them as written either way. |
+| `auto_parse_sentence` | No effect: its quantity scanner never read them. The keyword is accepted for symmetry. |
+| CLI | `--convert-numerical-symbols`. |
+
+A symbol glued to a figure raises in either mode (`"10²"`, `"1①"`: folding it
+in would give 102 and 11), and vulgar fractions are never read. The keyword is
+spelled `convert_numerical_symbols`; the issues that asked for it (#949, #955,
+#958) wrote `convert_numeric_symbols`, which is not accepted.
+
+This check never refuses a power after a unit's letters (`"5 m²"`) or an
+ordinal indicator after a figure (es `"1º"`); whether those read is up to the
+unit and ordinal readers.
 
 ---
 
