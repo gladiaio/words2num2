@@ -1537,7 +1537,12 @@ fn call_words2num(text: &str, lang: &str, fmt: &FigureFormat) -> Result<W2nValue
     let figure = text.trim();
     let caller_sep = |c: char| [fmt.thousands_sep, fmt.decimal_sep].iter().flatten().any(|s| s.contains(c));
     let figure_char =
-        |c: char| is_unicode_digit(c) || ".,'_ +-".contains(c) || crate::w2n_formats::is_minus(c) || caller_sep(c);
+        |c: char| {
+            is_unicode_digit(c)
+                || ".,'_ +-\u{2019}\u{00A0}\u{202F}\u{2009}".contains(c)
+                || crate::w2n_formats::is_minus(c)
+                || caller_sep(c)
+        };
     if figure.chars().any(is_unicode_digit) && figure.chars().all(figure_char) {
         let parsed = crate::w2n_formats::parse_number_string(figure, fmt.thousands_sep, fmt.decimal_sep, Some(fmt_key))
             .map(to_value)
@@ -6300,6 +6305,9 @@ mod auto_parse_sign_tests {
         assert_eq!(v("-1.", "en"), W2nValue::Int((-1).into()));
         assert!(matches!(v(".5", "de"), W2nValue::Float(f) if f == 0.5), "as on main");
         assert_eq!(auto_parse("12. km", "en", &p, None, None).unwrap().value, W2nValue::Int(12.into()));
+        // The marks the parser takes by default, with no separators given.
+        assert_eq!(dec(v("1\u{2019}234.5 kg", "en")), dec(v("1\u{2019}234.5", "en")));
+        assert_eq!(dec(v("1\u{202F}234,5 percent", "fr")), dec(v("1\u{202F}234,5", "fr")));
         // The caller's own separator characters (ar "٫", de_CH "’").
         assert_eq!(dec(auto_parse("٣٫٥ km", "ar", &p, None, Some("٫")).unwrap().value), dec(W2nValue::Dec("3.5".parse().unwrap())));
         assert_eq!(auto_parse("1٬234 km", "ar", &p, Some("٬"), Some("٫")).unwrap().value, W2nValue::Int(1234.into()));
