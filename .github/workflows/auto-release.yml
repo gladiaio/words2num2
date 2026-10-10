@@ -39,7 +39,7 @@ jobs:
     name: Tag and release the declared version
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
 
@@ -51,6 +51,10 @@ jobs:
           pkg=$(python3 -c 'import runpy; print(runpy.run_path("words2num2/_version.py")["__version__"])')
           if [ "$ver" != "$pkg" ]; then
             echo "::error::pyproject.toml says $ver but words2num2/_version.py says $pkg: bump both"
+            exit 1
+          fi
+          if ! printf '%s' "$ver" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::version must be X.Y.Z, got: $ver"
             exit 1
           fi
           echo "version=$ver" >> "$GITHUB_OUTPUT"
@@ -77,12 +81,14 @@ jobs:
 
       - name: Tag v${{ steps.v.outputs.version }}
         if: steps.v.outputs.release == 'true' && steps.v.outputs.tagged != 'true'
+        env:
+          VER: ${{ steps.v.outputs.version }}
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "v${{ steps.v.outputs.version }}" -m "words2num2 ${{ steps.v.outputs.version }}"
-          git push origin "v${{ steps.v.outputs.version }}"
+          git tag -a "v$VER" -m "words2num2 $VER"
+          git push origin "v$VER"
 
       - name: Dispatch the release workflows on the tag
         if: steps.v.outputs.release == 'true'
@@ -102,4 +108,4 @@ jobs:
           gh workflow run crates.yml --ref "v$VER"
           # aur-publish waits for the PyPI sdist itself, so it can start now.
           gh workflow run aur-publish.yml --ref "v$VER" -f version="$VER"
-          echo "Release of $VER dispatched: https://github.com/${{ github.repository }}/actions/workflows/release.yml"
+          echo "Release of $VER dispatched: https://github.com/$GITHUB_REPOSITORY/actions/workflows/release.yml"

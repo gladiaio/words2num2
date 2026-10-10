@@ -41,17 +41,17 @@ jobs:
             python-version: 'pypy-3.11'
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
       with:
         python-version: ${{ matrix.python-version }}
         allow-prereleases: true
         cache: 'pip'
 
     # `pip install -e .` compiles the Rust core with maturin.
-    - uses: dtolnay/rust-toolchain@stable
+    - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
 
     - name: Install dependencies
       run: |
@@ -67,7 +67,7 @@ jobs:
 
     - name: Upload test results
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
       with:
         name: e2e-results-${{ matrix.os }}-${{ matrix.python-version }}
         path: |
@@ -85,6 +85,6 @@ jobs:
         echo "# E2E Test Results Summary" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "## Test Configuration" >> $GITHUB_STEP_SUMMARY
-        echo "- Trigger: ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
-        echo "- Branch: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
-        echo "- Commit: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+        echo "- Trigger: $GITHUB_EVENT_NAME" >> $GITHUB_STEP_SUMMARY
+        echo "- Branch: $GITHUB_REF_NAME" >> $GITHUB_STEP_SUMMARY
+        echo "- Commit: $GITHUB_SHA" >> $GITHUB_STEP_SUMMARY

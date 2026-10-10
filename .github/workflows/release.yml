@@ -17,7 +17,7 @@ on:
         required: true
 
 permissions:
-  contents: write   # create the GitHub Release + upload assets
+  contents: read
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -27,7 +27,7 @@ jobs:
     outputs:
       version: ${{ steps.v.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - id: v
         env:
           INPUT_VERSION: ${{ github.event.inputs.version }}
@@ -47,6 +47,10 @@ jobs:
           pkg=$(python3 -c 'import runpy; print(runpy.run_path("words2num2/_version.py")["__version__"])')
           if [ "$ver" != "$py" ] || [ "$ver" != "$pkg" ]; then
             echo "::error::release $ver, but pyproject.toml says $py and words2num2/_version.py says $pkg (checked out at $GITHUB_REF_NAME): bump both and tag that commit"
+            exit 1
+          fi
+          if ! printf '%s' "$ver" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::version must be X.Y.Z, got: $ver"
             exit 1
           fi
           if [ "$GITHUB_REF_TYPE" = "tag" ] && [ "$GITHUB_REF_NAME" != "v$ver" ]; then
@@ -73,28 +77,30 @@ jobs:
           - { os: ubuntu-latest,  target: aarch64-unknown-linux-gnu, manylinux: auto }
           - { os: windows-latest, target: x86_64-pc-windows-msvc }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Set version in pyproject
         shell: bash
+        env:
+          VER: ${{ needs.version.outputs.version }}
         run: |
           python - <<'PY'
-          import re, pathlib
+          import os, re, pathlib
           p = pathlib.Path("pyproject.toml"); s = p.read_text()
           s = re.sub(r'(?m)^version = ".*"$',
-                     'version = "${{ needs.version.outputs.version }}"', s, count=1)
+                     'version = "%s"' % os.environ["VER"], s, count=1)
           p.write_text(s)
           PY
 
       - name: Build wheel
-        uses: PyO3/maturin-action@v1
+        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
           target: ${{ matrix.platform.target }}
           manylinux: ${{ matrix.platform.manylinux || '' }}
           args: --release --out dist
           sccache: "true"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: wheels-${{ matrix.platform.target }}
           path: dist/*.whl
@@ -105,21 +111,23 @@ jobs:
     needs: version
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Set version in pyproject
+        env:
+          VER: ${{ needs.version.outputs.version }}
         run: |
           python - <<'PY'
-          import re, pathlib
+          import os, re, pathlib
           p = pathlib.Path("pyproject.toml"); s = p.read_text()
           s = re.sub(r'(?m)^version = ".*"$',
-                     'version = "${{ needs.version.outputs.version }}"', s, count=1)
+                     'version = "%s"' % os.environ["VER"], s, count=1)
           p.write_text(s)
           PY
-      - uses: PyO3/maturin-action@v1
+      - uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
           command: sdist
           args: --out dist
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: sdist
           path: dist/*.tar.gz
@@ -144,12 +152,12 @@ jobs:
         # abi3: one wheel for every CPython >= 3.10; test both ends.
         python: ['3.10', '3.14']
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: ${{ matrix.python }}
           allow-prereleases: true
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: wheels-${{ matrix.platform.target }}
           path: dist
@@ -162,6 +170,8 @@ jobs:
           python -m pip install --only-binary :all: --no-index --find-links dist words2num2
       - name: Run the test suite against the installed wheel
         shell: bash
+        env:
+          VER: ${{ needs.version.outputs.version }}
         run: |
           set -euo pipefail
           # Run from a copy of tests/ outside the checkout: from the repo root
@@ -170,9 +180,9 @@ jobs:
           cp -r tests REFERENCE.md "$RUNNER_TEMP/"
           cd "$RUNNER_TEMP"
           python - <<'PY'
-          import words2num2
+          import os, words2num2
           print("testing", words2num2.__file__, words2num2.__version__)
-          assert words2num2.__version__ == "${{ needs.version.outputs.version }}", words2num2.__version__
+          assert words2num2.__version__ == os.environ["VER"], words2num2.__version__
           PY
           python -m pytest tests -q
 
@@ -181,12 +191,12 @@ jobs:
     needs: sdist
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: '3.12'
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: actions/download-artifact@v4
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: sdist
           path: dist
@@ -211,17 +221,17 @@ jobs:
     permissions:
       id-token: write   # trusted publishing (OIDC)
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: wheels-*
           path: dist
           merge-multiple: true
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: sdist
           path: dist
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
           packages-dir: dist
           skip-existing: true
@@ -232,13 +242,15 @@ jobs:
     needs: [build, sdist, test-wheels, test-sdist]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    permissions:
+      contents: write   # create the GitHub Release + upload assets
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           path: dist
           merge-multiple: true
       - name: Create/Update GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           files: |
             dist/*.whl
