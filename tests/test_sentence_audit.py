@@ -82,11 +82,22 @@ def test_79_oh_is_an_interjection(text, expected):
     ],
 )
 def test_186_long_number_runs_finish_fast(lang, word):
-    text = " ".join([word] * 2000)
-    start = time.perf_counter()
-    s(text, lang)
-    # Cubic growth took 16 s for 200 de tokens; linear is well under a second.
-    assert time.perf_counter() - start < 10
+    # Growth, not wall-clock: a loaded CI runner can take 10 s on what is a
+    # 1.5 s workload (#957). 4x the tokens costs ~4x if linear, ~16x if
+    # quadratic, ~64x if cubic (cubic took 16 s for 200 de tokens).
+    def best_of_two(n):
+        text = " ".join([word] * n)
+        times = []
+        for _ in range(2):
+            start = time.perf_counter()
+            s(text, lang)
+            times.append(time.perf_counter() - start)
+        return min(times)
+
+    small, large = best_of_two(500), best_of_two(2000)
+    assert large < 60
+    # A floor: millisecond runs (en) are all jitter.
+    assert large / max(small, 0.05) < 8, (small, large)
 
 
 # #186 with the scale composer: ~800 words of multi-scale numbers (the scale
