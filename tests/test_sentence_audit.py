@@ -71,33 +71,33 @@ def test_79_oh_is_an_interjection(text, expected):
 
 # #186: long runs of number words are linear, not cubic.
 @pytest.mark.parametrize(
-    "lang,word",
+    "lang,word,small",
     [
-        ("de", "zweitausend"),
-        ("it", "duemila"),
-        ("fr", "deux mille"),
-        ("es", "mil"),
-        ("en", "twenty first"),
-        ("en", "nineteen ninety"),
+        ("de", "zweitausend", 400),
+        ("it", "duemila", 400),
+        ("fr", "deux mille", 400),
+        ("es", "mil", 400),
+        # en is ~10x cheaper per token: a bigger run keeps the small timing
+        # well above the noise floor, so a quadratic walk shows (#995).
+        ("en", "twenty first", 4000),
+        ("en", "nineteen ninety", 4000),
     ],
 )
-def test_186_long_number_runs_finish_fast(lang, word):
+def test_186_long_number_runs_finish_fast(lang, word, small):
     # Growth, not wall-clock: a loaded CI runner can take 10 s on what is a
-    # 1.5 s workload (#957). 4x the tokens costs ~4x if linear, ~16x if
-    # quadratic, ~64x if cubic (cubic took 16 s for 200 de tokens).
-    def best_of_two(n):
-        text = " ".join([word] * n)
-        times = []
-        for _ in range(2):
+    # 1.5 s workload (#957). 8x the tokens costs ~8x if linear, ~64x if
+    # quadratic, ~512x if cubic (cubic took 16 s for 200 de tokens).
+    # Small and large runs alternate, so a burst of load hits both (#996).
+    texts = {n: " ".join([word] * n) for n in (small, small * 8)}
+    best = {n: float("inf") for n in texts}
+    for _ in range(2):
+        for n, text in texts.items():
             start = time.perf_counter()
             s(text, lang)
-            times.append(time.perf_counter() - start)
-        return min(times)
-
-    small, large = best_of_two(500), best_of_two(2000)
-    assert large < 60
-    # A floor: millisecond runs (en) are all jitter.
-    assert large / max(small, 0.05) < 8, (small, large)
+            best[n] = min(best[n], time.perf_counter() - start)
+    lo, hi = best[small], best[small * 8]
+    assert hi < 60
+    assert hi / max(lo, 0.02) < 24, (lo, hi)
 
 
 # #186 with the scale composer: ~800 words of multi-scale numbers (the scale
