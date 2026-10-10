@@ -361,7 +361,7 @@ when none is given. The table lives in the core
 |---|---|---|---|
 | `en`, `en_GB`, `en_IN`, `zh*`, `ja`, `ko`, `th` | `,` | `.` | |
 | `fr`, `fr_BE`, `fr_DZ` | ` ` (NBSP) | `,` | |
-| `fr_CH` | `'` | `.` | Swiss apostrophe |
+| `fr_CH` | `'` | `,` | Swiss apostrophe, comma decimal (CLDR) |
 | `de`, `es*`, `it`, `pt*`, `nl`, `ro`, `hr`, `sl`, `sr`, `tr`, `el`, `da`, `is`, `fo` | `.` | `,` | |
 | `ru`, `uk`, `be`, `bg`, `pl`, `cs`, `sk`, `hu`, `sv`, `no`, `nn`, `fi`, `et`, `lt`, `lv` | ` ` | `,` | |
 | anything else | `,` | `.` | Fallback. |
