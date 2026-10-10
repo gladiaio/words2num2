@@ -35,6 +35,11 @@ def _parser():
         ),
     )
     p.add_argument(
+        "--convert-numerical-symbols",
+        action="store_true",
+        help="read numerical symbols such as ① or ² as their digits",
+    )
+    p.add_argument(
         "--version", action="version", version="words2num2 {}".format(__version__)
     )
     return p
@@ -43,7 +48,12 @@ def _parser():
 def main(argv=None):
     args = _parser().parse_args(argv)
     try:
-        value = words2num(" ".join(args.text), lang=args.lang, to=args.to)
+        value = words2num(
+            " ".join(args.text),
+            lang=args.lang,
+            to=args.to,
+            convert_numerical_symbols=args.convert_numerical_symbols,
+        )
     except (Words2NumError, NotImplementedError) as exc:
         # An unparseable input or an unsupported --lang/--to is a user error:
         # one line on stderr and a non-zero status, not a traceback.
