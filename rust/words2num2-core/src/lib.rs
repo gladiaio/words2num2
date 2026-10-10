@@ -158,15 +158,29 @@ pub(crate) fn signed_figure_in(text: &str, lang: &str) -> Option<String> {
     }
     // A glued head needs a sign the renderer glues (zh "负七"), and spaced
     // text a space or comma between them ("moins 1.234", "moins, 1.234").
-    // "-5" itself is a plain figure.
+    // "-5" itself is a plain figure, and so is "-,5": a bare dash needs a
+    // space before the figure (#984).
     let spaced = t[..at].ends_with(|c: char| c.is_whitespace() || comma(c));
-    if !spaced && head.chars().all(|c| c == '+' || w2n_formats::is_minus(c)) {
+    if !t[..at].contains(char::is_whitespace) && head.chars().all(|c| c == '+' || w2n_formats::is_minus(c)) {
+        return None;
+    }
+    // What touches the figure is a space, a comma, or the sign itself: "-.5"
+    // is -0.5, its point no part of the sign, and "-(5" no number (#984).
+    let signs = sign_prefixes(&resolved);
+    let touches = |c: char| c.is_alphabetic() || c.is_whitespace() || comma(c) || c == '+' || w2n_formats::is_minus(c) || unicode_mark(c);
+    if !t[..at].chars().last().is_some_and(touches) {
         return None;
     }
     let word = normalize(head);
     let is_sign = (spaced && ["minus", "negative"].contains(&word.as_str()))
-        || sign_prefixes(&resolved).iter().any(|p| p.text == word && (spaced || p.glued));
+        || signs.iter().any(|p| p.text == word && (spaced || p.glued));
     (is_sign && is_digit_literal(figure)).then(|| format!("-{figure}"))
+}
+
+/// A combining mark (Thai, Devanagari, ... vowel signs), part of a word.
+fn unicode_mark(c: char) -> bool {
+    use unicode_normalization::char::is_combining_mark;
+    is_combining_mark(c)
 }
 
 /// Is `text` a number in figures and nothing else: an optional sign, then

@@ -6391,5 +6391,15 @@ mod glued_sign_figure_tests {
         assert_eq!(w("minus5", "en", "cardinal"), None);
         assert_eq!(w("moins1.234", "fr", "cardinal"), None);
         same("moins, 1.234", "-1.234", "fr", "cardinal");
+        // #984: a point before the figure is the figure's, a bare dash glued to
+        // a comma no sign word, and other punctuation no part of a sign.
+        assert_eq!(w("-.5", "de", "cardinal").as_deref(), Some("Float(-0.5)"), "as on main");
+        assert_eq!(w("\u{8D1F} .5", "zh", "cardinal").as_deref(), Some("Float(-0.5)"), "as on main");
+        assert_eq!(w("-.1999", "de", "cardinal").as_deref(), Some("Float(-0.1999)"), "as on main");
+        for (t, l) in [("-(5", "en"), ("-:5", "en"), ("-,5", "en"), ("\u{8D1F}.5", "zh")] {
+            assert_eq!(w(t, l, "cardinal"), None, "{l} {t}");
+        }
+        let p = std::collections::HashMap::new();
+        assert!(super::auto_parse("-,5", "fr", &p, None, Some(",")).is_err());
     }
 }
