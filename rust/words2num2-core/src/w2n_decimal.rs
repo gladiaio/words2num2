@@ -167,7 +167,24 @@ fn conjunction_comma(lang: &str, text: &str, at: usize) -> bool {
     let next = after.split_whitespace().next().unwrap_or("");
     let Some(rest) = next.strip_prefix(waw) else { return false };
     let norm = crate::normalize(next);
-    !norm.starts_with(wahid.as_str()) && crate::lookup_plain(lang, &crate::normalize(rest)).is_some()
+    if norm.starts_with(wahid.as_str()) {
+        return false;
+    }
+    let Some(r) = crate::lookup_plain(lang, &crate::normalize(rest)) else { return false };
+    // Only after a hundred or a scale, with a smaller remainder: "ألف،
+    // وخمسمائة" is 1500, but "ثلاثة، وخمسون" is a list, no 53 (#954).
+    let head = before.replace([',', '\u{060C}'], " ");
+    let Ok(crate::w2n_lang_en::W2nValue::Int(p)) = crate::words2num(&head, lang, "cardinal") else {
+        return false;
+    };
+    // The size of the number: "سالب ألف، وخمسمائة" is -1500 (#975).
+    let p = if p < num_bigint::BigInt::from(0) { -p } else { p };
+    let Ok(p) = i64::try_from(p) else { return true }; // past i64: a scale, no list
+    let mut place = 1i64;
+    while p % (place * 10) == 0 && place < i64::MAX / 10 {
+        place *= 10;
+    }
+    p >= 100 && r < place
 }
 
 /// The words of `text` with the mark as a word of its own however it is
@@ -712,6 +729,14 @@ mod tests {
         assert_eq!(crate::words2num("ثلاثة ،", "ar", "cardinal").unwrap(), W2nValue::Int(3.into()));
         assert_eq!(crate::words2num("مائة ،", "ar", "cardinal").unwrap(), W2nValue::Int(100.into()));
         assert_eq!(crate::words2num("ثلاثة ، ،", "ar", "cardinal").unwrap(), W2nValue::Int(3.into()));
+        // #954: the conjunction comma only after a hundred or a scale.
+        // "مائة وثلاثة، وعشرون" too: 20 is no smaller than the units place of 103.
+        for t in ["ثلاثة، وخمسون", "خمسة، وعشرون", "خمسة, وعشرون", "عشرون، وخمسة", "مائة وثلاثة، وعشرون"] {
+            assert!(crate::words2num(t, "ar", "cardinal").is_err(), "{t}");
+        }
+        for (t, v) in [("ألف، وخمسمائة", 1500), ("ثلاثة آلاف، وخمسمائة", 3500), ("مائة، وخمسون", 150), ("ألف، وخمسمائة، وخمسون", 1550), ("سالب ألف، وخمسمائة", -1500), ("-ألف، وخمسمائة", -1500), ("سالب مليونان، وثمانية عشر", -2000018)] {
+            assert_eq!(crate::words2num(t, "ar", "cardinal").unwrap(), W2nValue::Int(v.into()), "{t}");
+        }
         // #959: a dash before an ASCII comma leaves it the mark, as a sign word does.
         for t in ["-, خمسون", "- , خمسون", "\u{2212}, خمسون", "-,خمسون", "سالب , خمسون", "\u{2013}, خمسون", "\u{FF0D}, خمسون"] {
             assert_eq!(format!("{:?}", crate::words2num(t, "ar", "cardinal").unwrap()), format!("{:?}", crate::words2num("-، خمسون", "ar", "cardinal").unwrap()), "{t}");
