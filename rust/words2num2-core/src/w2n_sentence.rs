@@ -1878,9 +1878,10 @@ fn scale_comma_words(key: &str) -> std::sync::Arc<Vec<String>> {
             let Ok(text) = r.to_cardinal(&BigInt::from(n)) else { continue };
             for tok in text.split_whitespace().filter(|t| t.ends_with(',')) {
                 let clean = rstrip_punct(tok).to_lowercase().replace('-', " ");
-                if let Some(last) = py_split_whitespace(&clean).last() {
-                    if !words.iter().any(|w| w == last) {
-                        words.push(last.to_string());
+                // Normalized: unaccented or NFD text matches too, pt "milhoes," (#948).
+                if let Some(last) = py_split_whitespace(&clean).last().map(|l| crate::normalize(l)) {
+                    if !words.contains(&last) {
+                        words.push(last);
                     }
                 }
             }
@@ -1901,7 +1902,8 @@ fn comma_after_scale(converter: &Converter, tok: &str) -> Option<BigInt> {
     }
     let clean = rstrip_punct(tok).to_lowercase().replace('-', " ");
     let last = *py_split_whitespace(&clean).last()?;
-    if !scale_comma_words(converter.n2w_key()).iter().any(|w| w == last) {
+    let norm = crate::normalize(last);
+    if !scale_comma_words(converter.n2w_key()).iter().any(|w| *w == norm) {
         return None;
     }
     if !is_scale_word(converter, last, 1_000) {
@@ -6346,5 +6348,20 @@ mod region_decimal_word_tests {
             let fig = out.split_whitespace().nth(1).unwrap();
             assert_eq!(format!("{:?}", crate::words2num(fig, l, "cardinal").unwrap()), format!("{:?}", crate::words2num(&t[2..t.len() - 2], l, "cardinal").unwrap()), "{l} {fig}");
         }
+    }
+}
+
+#[cfg(test)]
+mod scale_comma_normalize_tests {
+    /// #948: the comma num2words2 writes after a scale word is crossed
+    /// whatever the accents: pt "milhoes," as "milhões,", and NFD text.
+    #[test]
+    fn scale_comma_ignores_accents_issue_948() {
+        let s = |t: &str| super::words2num_sentence(t, "pt_BR", "cardinal", false).unwrap();
+        assert_eq!(s("dois milhoes, trezentos mil"), "2300000");
+        assert_eq!(s("um milhao, duzentos mil"), "1200000");
+        assert_eq!(s("dois bilhoes, trezentos milhoes"), "2300000000");
+        assert_eq!(s("dois milho\u{303}es, trezentos mil"), "2300000");
+        assert_eq!(s("em dois mil, cinco pessoas vieram"), "em 2000, 5 pessoas vieram");
     }
 }
