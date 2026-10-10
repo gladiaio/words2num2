@@ -1158,7 +1158,8 @@ fn base_convert_as_written(lang: &str, norm: &str, ordinal: bool) -> Result<W2nV
     let supported = crate::is_supported_lang(lang);
     if !ordinal && supported {
         if let Some(canon) = canonical_apocopes_norm(lang, &norm) {
-            if let Ok(v) = base_convert(lang, &canon, false) {
+            // The sign is already off: es "menos menos un" is no -(-1) (#298).
+            if let Ok(v) = base_convert_unsigned(lang, &canon, false) {
                 return Ok(v);
             }
         }
@@ -5430,6 +5431,21 @@ mod audit_tests {
         assert_eq!(
             super::auto_parse_sentence("0.0000001 kg", "en", &prefer, None, None, false).unwrap(),
             "0.0000001 kg"
+        );
+    }
+}
+
+#[cfg(test)]
+mod double_sign_tests {
+    /// #298: an apocope does not let a second sign through.
+    #[test]
+    fn double_negative_raises_issue_298() {
+        for (t, l) in [("menos menos un", "es"), ("menos menos un millón", "es"), ("menos menos veintiún", "es"), ("meno meno un", "it")] {
+            assert!(crate::words2num(t, l, "cardinal").is_err(), "{l} {t}");
+        }
+        assert_eq!(
+            format!("{:?}", crate::words2num("menos un millón", "es", "cardinal").unwrap()),
+            format!("{:?}", crate::words2num("-1000000", "es", "cardinal").unwrap())
         );
     }
 }
