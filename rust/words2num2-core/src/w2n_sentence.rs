@@ -3879,7 +3879,46 @@ pub static UNITS: &[(&str, UnitInfo)] = &[
     ("gal", ui("gal", "gallon", "volume", 1.0)),
     // Percent
     ("%", ui("%", "percent", "percent", 1.0)),
+    // Area and volume (#896): "m2", "m^2" are read as "m²".
+    ("mm\u{b2}", ui("mm\u{b2}", "square millimeter", "area", 1.0)),
+    ("cm\u{b2}", ui("cm\u{b2}", "square centimeter", "area", 1.0)),
+    ("m\u{b2}", ui("m\u{b2}", "square meter", "area", 1.0)),
+    ("km\u{b2}", ui("km\u{b2}", "square kilometer", "area", 1.0)),
+    ("ft\u{b2}", ui("ft\u{b2}", "square foot", "area", 1.0)),
+    ("in\u{b2}", ui("in\u{b2}", "square inch", "area", 1.0)),
+    ("mm\u{b3}", ui("mm\u{b3}", "cubic millimeter", "volume", 1.0)),
+    ("cm\u{b3}", ui("cm\u{b3}", "cubic centimeter", "volume", 1.0)),
+    ("m\u{b3}", ui("m\u{b3}", "cubic meter", "volume", 1.0)),
+    ("km\u{b3}", ui("km\u{b3}", "cubic kilometer", "volume", 1.0)),
+    ("ft\u{b3}", ui("ft\u{b3}", "cubic foot", "volume", 1.0)),
+    ("in\u{b3}", ui("in\u{b3}", "cubic inch", "volume", 1.0)),
 ];
+
+/// A unit's power suffix after its letters: "²"/"³", "^2"/"^3", or a glued
+/// "2"/"3" at the end ("m2"), as the superscript. `None` when there is none.
+fn eat_unit_power(cur: &mut Cursor) -> Option<char> {
+    let sup = |c: char| match c {
+        '\u{b2}' | '2' => Some('\u{b2}'),
+        '\u{b3}' | '3' => Some('\u{b3}'),
+        _ => None,
+    };
+    match cur.peek() {
+        Some(c @ ('\u{b2}' | '\u{b3}')) => {
+            cur.i += 1;
+            sup(c)
+        }
+        Some('^') if cur.at(1).and_then(sup).is_some() && !cur.at(2).is_some_and(|c| c.is_alphanumeric()) => {
+            let c = cur.at(1);
+            cur.i += 2;
+            c.and_then(sup)
+        }
+        Some(c @ ('2' | '3')) if !cur.at(1).is_some_and(|c| c.is_alphanumeric()) => {
+            cur.i += 1;
+            sup(c)
+        }
+        _ => None,
+    }
+}
 
 /// `UNITS.get(key)`.
 pub fn units_get(key: &str) -> Option<&'static UnitInfo> {
@@ -4368,7 +4407,16 @@ fn try_digit_unit(
         cur.i += 2;
         String::from("\u{b5}m")
     } else if cur.peek().is_some_and(|c| c.is_ascii_alphabetic()) {
-        cur.take_while(|c| c.is_ascii_alphabetic())
+        let mut letters = cur.take_while(|c| c.is_ascii_alphabetic());
+        let save = cur.i;
+        if let Some(p) = eat_unit_power(&mut cur) {
+            if units_get(&format!("{letters}{p}")).is_some() {
+                letters.push(p);
+            } else {
+                cur.i = save;
+            }
+        }
+        letters
     } else if cur.peek() == Some('%') {
         cur.i += 1;
         String::from("%")
@@ -4707,7 +4755,13 @@ fn match_quantity_at(chars: &[char], pos: usize) -> Option<usize> {
                 .peek()
                 .is_some_and(|c| c.is_ascii_alphabetic() || c == '\u{b5}')
             {
-                cur.take_while(|c| c.is_ascii_alphabetic() || c == '\u{b5}');
+                let letters = cur.take_while(|c| c.is_ascii_alphabetic() || c == '\u{b5}');
+                // "5 m²", "5 m2": the power belongs to the unit (#896).
+                let save = cur.i;
+                match eat_unit_power(&mut cur) {
+                    Some(p) if units_get(&format!("{letters}{p}")).is_some() => {}
+                    _ => cur.i = save,
+                }
                 true
             } else {
                 false
@@ -5899,5 +5953,30 @@ mod sign_and_script_tests {
         assert!(crate::words2num("10", "en", "cardinal").is_ok());
         let p = std::collections::HashMap::new();
         assert!(super::auto_parse("10²", "en", &p, None, None).is_err());
+    }
+}
+
+#[cfg(test)]
+mod area_and_indicator_tests {
+    use super::{auto_parse, auto_parse_sentence};
+    use std::collections::HashMap;
+
+    /// #896: area and volume units, and ordinal indicators.
+    #[test]
+    fn area_units_and_ordinal_indicators_issue_896() {
+        let p = HashMap::new();
+        for (t, u) in [("5 m²", "m²"), ("5m²", "m²"), ("5 km²", "km²"), ("10 m³", "m³"), ("5 m2", "m²"), ("5 m^2", "m²"), ("2 cm³", "cm³")] {
+            let q = auto_parse(t, "en", &p, None, None).unwrap();
+            assert_eq!(q.unit.as_deref(), Some(u), "{t}");
+        }
+        assert_eq!(auto_parse_sentence("a 50 m² flat", "en", &p, None, None, true).unwrap(), "a 50 square meters flat");
+        assert_eq!(auto_parse_sentence("a 50 m² flat", "en", &p, None, None, false).unwrap(), "a 50 m² flat");
+        // "5 m" is still metres, "5 m 2" no area.
+        assert_eq!(auto_parse("5 m", "en", &p, None, None).unwrap().unit.as_deref(), Some("m"));
+        for (t, l) in [("1º", "es"), ("1ª", "pt"), ("1.º", "es"), ("21º", "es")] {
+            let v = crate::words2num(t, l, "ordinal").unwrap();
+            let n: i64 = if t.starts_with("21") { 21 } else { 1 };
+            assert_eq!(v, crate::w2n_lang_en::W2nValue::Int(n.into()), "{l} {t}");
+        }
     }
 }

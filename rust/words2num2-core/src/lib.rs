@@ -49,6 +49,16 @@ pub fn words2num(
             w2n_sentence::py_repr_str(text)
         )));
     }
+    // es "1º", pt "1ª", "1.º": a figure with its ordinal indicator is that
+    // figure (NFKD would make it "1o", #896).
+    if let Some(figure) = text
+        .trim()
+        .strip_suffix(['\u{00BA}', '\u{00AA}'])
+        .map(|f| f.strip_suffix('.').unwrap_or(f))
+        .filter(|f| !f.is_empty() && f.chars().all(|c| c.is_ascii_digit()))
+    {
+        return words2num(figure, lang, to);
+    }
     // de "minus 1.234": a sign word before a figure, read with the same
     // separators as "-1.234" (#309).
     if matches!(to, "cardinal" | "currency") {

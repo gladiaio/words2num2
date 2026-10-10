@@ -29,6 +29,7 @@ with no value that parsed before parsing differently now.
 
 ### Fixed
 
+- `auto_parse` reads area and volume units: "5 m²", "5 m2", "5 m^2", "10 m³", "2 cm³", km², ft², in² (#896). A figure with its ordinal indicator reads as that figure: es "1º", "1.º", pt "1ª" are 1 (NFKD made them "1o"/"1a", which raised) (#896).
 - A comma after a sign before a figure is punctuation, whether the sign is a word or a dash: fr "moins, 1.234" and de "-, 1.234" are -1234, not the float -1.234; fa "منفی، 1,234.5" reads again. Where "،" is the decimal mark (ar), "-، 50" stays -0.50 (#896).
 - A superscript or subscript digit glued to a figure is no part of it: `words2num("10²")` and `auto_parse("10²")` raise instead of returning 102 (#869). A sign word or a minus before a signed figure is no double negative: fr "moins -5" and "-(-5)" raise instead of reading 5 (#698). `to="digits"` keeps a leading minus: "-five" raises instead of reading 5 (#697).
 - Ambiguous ha/bm spans in sentence mode, follow-ups to #506: a number before a span nothing reads still reads ("mutum biyar miliyan dubu ɗari" is "mutum 5 miliyan dubu ɗari"); a span that reads on its own ("dubu tamanin", 1 080 and 80 000 alike) is no split point and stays words with what precedes it; no split after a scale word (#796). A comma ends the words-span (#797); the number's ordinal word stays words with it, including a span ending in its own ordinal ("ba tan ni sabanan") (#798); two unit words side by side are two numbers ("ba tan ni kelen saba" reads the "saba").
