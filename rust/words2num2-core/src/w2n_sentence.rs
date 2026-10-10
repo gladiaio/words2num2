@@ -1498,7 +1498,27 @@ fn py_float(s: &str) -> Option<f64> {
 /// and run its `to_cardinal`.
 fn call_words2num(text: &str, lang: &str) -> Result<W2nValue, W2nError> {
     let resolved = resolve_lang(lang)?;
-    converter_for(&resolved).to_cardinal(text)
+    // A sign before a figure, and the ar "،" decimal, read as words2num reads
+    // them: fr "moins 1.234" is -1234, ar "-، 50" is -0.50 (#896).
+    let fmt_key = crate::w2n_formats::format_key(lang, &resolved);
+    if let Some(signed) = crate::signed_figure_in(text, lang) {
+        let to_value = |v: crate::w2n_formats::W2nValue| match v {
+            crate::w2n_formats::W2nValue::Int(i) => W2nValue::Int(i),
+            crate::w2n_formats::W2nValue::Dec(d) => W2nValue::Dec(d),
+            crate::w2n_formats::W2nValue::Float(f) => W2nValue::Float(f),
+        };
+        return crate::w2n_formats::parse_number_string(&signed, None, None, Some(&fmt_key))
+            .map(to_value)
+            .map_err(|e| W2nError::Words2Num(e.0));
+    }
+    let converter = converter_for(&resolved);
+    if crate::w2n_decimal::has_written_mark(converter.n2w_key(), text) {
+        return table_decimal(&converter, &resolved, &fmt_key, text)
+            .and_then(|(int, _, frac)| BigDecimal::from_str(&format!("{}.{}", int, frac)).ok())
+            .map(W2nValue::Dec)
+            .ok_or_else(|| W2nError::Words2Num(unparseable_msg(text)));
+    }
+    converter.to_cardinal(text)
 }
 
 /// Port of the public `words2num2.words2num(text, lang, to)` — the single-token
@@ -5899,5 +5919,26 @@ mod sign_and_script_tests {
         assert!(crate::words2num("10", "en", "cardinal").is_ok());
         let p = std::collections::HashMap::new();
         assert!(super::auto_parse("10²", "en", &p, None, None).is_err());
+    }
+}
+
+#[cfg(test)]
+mod auto_parse_sign_tests {
+    use super::{auto_parse, W2nValue};
+    use std::collections::HashMap;
+
+    /// #896: auto_parse reads a sign before a figure, and the ar decimal,
+    /// as words2num does; a comma split from the sign is punctuation.
+    #[test]
+    fn auto_parse_sign_word_figure_issue_896() {
+        let p = HashMap::new();
+        let v = |t: &str, l: &str| auto_parse(t, l, &p, None, None).unwrap().value;
+        assert_eq!(v("moins 1.234", "fr"), W2nValue::Int((-1234).into()));
+        assert_eq!(v("moins , 1.234", "fr"), W2nValue::Int((-1234).into()));
+        assert_eq!(v("moins ,1.234", "fr"), W2nValue::Int((-1234).into()));
+        assert_eq!(format!("{:?}", v("-، 50", "ar")), format!("{:?}", W2nValue::Dec("-0.50".parse().unwrap())));
+        let q = auto_parse("moins 1.234 kg", "fr", &p, None, None).unwrap();
+        assert_eq!(q.value, W2nValue::Int((-1234).into()));
+        assert_eq!(crate::words2num("moins , 1.234", "fr", "cardinal").unwrap(), crate::w2n_lang_en::W2nValue::Int((-1234).into()));
     }
 }
