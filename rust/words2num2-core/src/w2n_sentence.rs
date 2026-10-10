@@ -1881,9 +1881,10 @@ fn scale_comma_words(key: &str) -> std::sync::Arc<Vec<String>> {
             let Ok(text) = r.to_cardinal(&BigInt::from(n)) else { continue };
             for tok in text.split_whitespace().filter(|t| t.ends_with(',')) {
                 let clean = rstrip_punct(tok).to_lowercase().replace('-', " ");
-                if let Some(last) = py_split_whitespace(&clean).last() {
-                    if !words.iter().any(|w| w == last) {
-                        words.push(last.to_string());
+                // Normalized: unaccented or NFD text matches too, pt "milhoes," (#948).
+                if let Some(last) = py_split_whitespace(&clean).last().map(|l| crate::normalize(l)) {
+                    if !words.contains(&last) {
+                        words.push(last);
                     }
                 }
             }
@@ -1904,7 +1905,12 @@ fn comma_after_scale(converter: &Converter, tok: &str) -> Option<BigInt> {
     }
     let clean = rstrip_punct(tok).to_lowercase().replace('-', " ");
     let last = *py_split_whitespace(&clean).last()?;
-    if !scale_comma_words(converter.n2w_key()).iter().any(|w| w == last) {
+    let words = scale_comma_words(converter.n2w_key());
+    if words.is_empty() {
+        return None; // the renderer writes no scale comma (ru, pl, es, ...)
+    }
+    let norm = crate::normalize(last);
+    if !words.iter().any(|w| *w == norm) {
         return None;
     }
     if !is_scale_word(converter, last, 1_000) {
@@ -6370,5 +6376,21 @@ mod glued_morpheme_tests {
         assert_eq!(s("hän on kolme kymmentä viisi vuotta", "fi"), "hän on 35 vuotta");
         assert_eq!(s("trei zeci de oameni", "ro"), "30 de oameni");
         assert_eq!(s("x d eux y", "fr"), "x d eux y");
+    }
+}
+
+#[cfg(test)]
+mod scale_comma_normalize_tests {
+    /// #948: the comma num2words2 writes after a scale word is crossed
+    /// whatever the accents: pt "milhoes," as "milhões,", and NFD text.
+    #[test]
+    fn scale_comma_ignores_accents_issue_948() {
+        let s = |t: &str| super::words2num_sentence(t, "pt_BR", "cardinal", false).unwrap();
+        assert_eq!(s("dois milhoes, trezentos mil"), "2300000");
+        assert_eq!(s("um milhao, duzentos mil"), "1200000");
+        assert_eq!(s("dois bilhoes, trezentos milhoes"), "2300000000");
+        assert_eq!(s("dois milho\u{303}es, trezentos mil"), "2300000");
+        assert_eq!(s("DOIS MILHOES, TREZENTOS MIL"), "2300000");
+        assert_eq!(s("em dois mil, cinco pessoas vieram"), "em 2000, 5 pessoas vieram");
     }
 }
