@@ -1094,6 +1094,13 @@ fn base_convert(lang: &str, text: &str, ordinal: bool) -> Result<W2nValue, W2nEr
     base_convert_unsigned(lang, &norm, ordinal)
 }
 
+/// Is `norm`, or what is left of it after its first words (an ordinal
+/// prefix: ha "na miliyan goma"), a spelling the renderer gives two values?
+fn ambiguous_stem(key: &str, norm: &str) -> bool {
+    let words: Vec<&str> = norm.split_whitespace().collect();
+    (0..words.len().saturating_sub(1)).any(|k| crate::is_ambiguous_number(key, &words[k..].join(" ")))
+}
+
 /// `-v` for an int or float reading. The table path never yields a decimal;
 /// should one appear it is declined rather than returned unsigned.
 fn negate(v: W2nValue) -> Option<W2nValue> {
@@ -1551,6 +1558,9 @@ pub fn words2num(
                 // A currency amount was read above; what is left is the cardinal.
                 "currency" => base_convert(lang, text, false),
                 "year" => table_year(lang, text),
+                "ordinal" if crate::has_postfix_scales(lang) && ambiguous_stem(lang, &crate::normalize(text)) => {
+                    Err(W2nError::Words2Num(unparseable_msg(text)))
+                }
                 "ordinal" => base_convert(lang, text, true),
                 "digits" => converter.to_digits(text),
                 _ => converter.to_ordinal_num(text),
@@ -3026,6 +3036,7 @@ fn words2num_sentence_walk(
 ) -> Result<String, W2nError> {
     let resolved = resolve_lang(lang)?;
     let converter = converter_for(&resolved);
+    let postfix_scales = matches!(converter, Converter::Table(l) if crate::has_postfix_scales(l));
     // Regional English reads with the English grammar where its table
     // declines (#193), so it takes the English run rules too.
     let en_grammar = matches!(converter, Converter::En) || en_variant(&resolved);
@@ -3216,6 +3227,10 @@ fn words2num_sentence_walk(
         let mut failed = 0usize;
         // The commas the run crossed after a scale word, with that scale (#67).
         let mut commas: Vec<(usize, BigInt)> = Vec::new();
+        // The end of a span the renderer writes for two values (ha "miliyan
+        // dubu ɗari": 1 001 100 and 1 100 000): no one number, so its words
+        // stay rather than read as two (#348).
+        let mut ambiguous_end: Option<usize> = None;
         while j < n {
             let tok = &parts[j];
             if py_str_isspace(tok) {
@@ -3300,6 +3315,11 @@ fn words2num_sentence_walk(
             let hit = hit.filter(|_| !two_digit_words(&converter, &parts[i..=j]));
             let hit = hit.filter(|(v, _)| connector_join_ok(&converter, &stripped, v, hand_includable));
             let hit = hit.filter(|_| comma_groups_ok(&converter, &parts, j, &commas));
+            // ha "na miliyan goma": the ordinal of 10^7 and of 1 000 010 alike
+            // (#348). Declined, and the span stays words.
+            let ambiguous = postfix_scales
+                && ambiguous_stem(converter.n2w_key(), &crate::normalize(&stripped));
+            let hit = hit.filter(|(_, ordinal)| !(*ordinal && ambiguous));
             match hit {
                 // A run never ends on a connector: "one and a half" is "1 and
                 // a half", not "1 half"; "five point" keeps its "point".
@@ -3311,7 +3331,12 @@ fn words2num_sentence_walk(
                 }
                 Some(_) => failed += 1,
                 None if !candidate => break,
-                None => failed += 1,
+                None => {
+                    if ambiguous {
+                        ambiguous_end = Some(j);
+                    }
+                    failed += 1
+                }
             }
             // A token ending in terminal punctuation closes the run — except
             // the comma num2words2 itself writes after a scale word ("twelve
@@ -3336,6 +3361,31 @@ fn words2num_sentence_walk(
                     best_end = end;
                 }
             }
+        }
+
+        if let Some(mut end) = ambiguous_end.filter(|&e| e > best_end) {
+            // The rest of the same number stays words too: bm "ba tan ni kelen
+            // ni mugan ni wolonfila" is no "ba tan ni kelen ni 27".
+            let mut k = end + 1;
+            while k < n {
+                let part = &parts[k];
+                if py_str_isspace(part) {
+                    k += 1;
+                    continue;
+                }
+                let clean = rstrip_punct(part).to_lowercase();
+                if tokens::is_punct_part(part) || !is_candidate(&converter, &clean, includable) {
+                    break;
+                }
+                end = k;
+                if ends_with_terminal_punct(part) {
+                    break;
+                }
+                k += 1;
+            }
+            out.push_str(&parts[i..=end].concat());
+            i = end + 1;
+            continue;
         }
 
         // ru "двадцать первый", pl "dwadzieścia pierwszy": a cardinal followed
@@ -5157,5 +5207,23 @@ mod audit_tests {
             super::auto_parse_sentence("0.0000001 kg", "en", &prefer, None, None, false).unwrap(),
             "0.0000001 kg"
         );
+    }
+}
+
+#[cfg(test)]
+mod ambiguous_span_tests {
+    use super::words2num_sentence;
+
+    /// #348: a span the renderer writes for two values stays words, with the
+    /// rest of the same number, and its ordinal is declined too.
+    #[test]
+    fn ambiguous_spans_stay_words() {
+        let s = |t: &str, l: &str| words2num_sentence(t, l, "cardinal", false).unwrap();
+        assert_eq!(s("na biya miliyan biyu dubu goma jiya", "ha"), "na biya miliyan biyu dubu goma jiya");
+        assert_eq!(s("x ba tan ni kelen ni mugan ni wolonfila y", "bm"), "x ba tan ni kelen ni mugan ni wolonfila y");
+        assert_eq!(s("x na miliyan goma y", "ha"), "x na miliyan goma y");
+        assert!(crate::words2num("na miliyan goma", "ha", "ordinal").is_err());
+        // Unambiguous numbers still read.
+        assert_eq!(s("ina da miliyan dubu naira", "ha"), "ina da 1001000 naira");
     }
 }
