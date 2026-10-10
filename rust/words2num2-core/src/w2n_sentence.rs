@@ -1520,13 +1520,22 @@ fn call_words2num(text: &str, lang: &str, fmt: &FigureFormat) -> Result<W2nValue
     // them, with the caller's region and separators: fr "moins 1.234" is
     // -1234, ar "-، 50" is -0.50 (#896).
     let fmt_key = fmt.key;
+    let to_value = |v: crate::w2n_formats::W2nValue| match v {
+        crate::w2n_formats::W2nValue::Int(i) => W2nValue::Int(i),
+        crate::w2n_formats::W2nValue::Dec(d) => W2nValue::Dec(d),
+        crate::w2n_formats::W2nValue::Float(f) => W2nValue::Float(f),
+    };
     if let Some(signed) = crate::signed_figure_in(text, lang) {
-        let to_value = |v: crate::w2n_formats::W2nValue| match v {
-            crate::w2n_formats::W2nValue::Int(i) => W2nValue::Int(i),
-            crate::w2n_formats::W2nValue::Dec(d) => W2nValue::Dec(d),
-            crate::w2n_formats::W2nValue::Float(f) => W2nValue::Float(f),
-        };
         return crate::w2n_formats::parse_number_string(&signed, fmt.thousands_sep, fmt.decimal_sep, Some(fmt_key))
+            .map(to_value)
+            .map_err(|e| W2nError::Words2Num(e.0));
+    }
+    // A figure the caller gave separators for reads with them or not at all:
+    // "1.5 km" with decimal_sep="," is no float 1.5 (#952).
+    let explicit = fmt.thousands_sep.is_some_and(|t| !t.is_empty()) || fmt.decimal_sep.is_some_and(|d| !d.is_empty());
+    let figure = text.trim();
+    if explicit && !figure.is_empty() && figure.chars().all(|c| c.is_ascii_digit() || ".,'_ +-".contains(c)) {
+        return crate::w2n_formats::parse_number_string(figure, fmt.thousands_sep, fmt.decimal_sep, Some(fmt_key))
             .map(to_value)
             .map_err(|e| W2nError::Words2Num(e.0));
     }
@@ -6242,6 +6251,14 @@ mod auto_parse_sign_tests {
         assert_eq!(dec(with("-, 1.234", "fr", None, Some(","))), dec(W2nValue::Int((-1234).into())));
         assert_eq!(dec(with("-, 1.234", "fr", None, Some("."))), dec(W2nValue::Dec("-1.234".parse().unwrap())));
         assert!(auto_parse("1.5", "en", &p, None, Some(",")).is_err());
+        // #952: a figure before a unit reads with the caller's separators or
+        // not at all, as a bare one does.
+        for (t, l, ts, ds) in [("1.5 km", "en", None, Some(",")), ("3.14159 kg", "en", None, Some(",")), ("12.5 km", "de", Some("."), Some(",")), ("-2.5 kg", "en", None, Some(","))] {
+            assert!(auto_parse(t, l, &p, ts, ds).is_err(), "{l} {t}");
+        }
+        assert_eq!(dec(with("1,5 km", "en", None, Some(","))), dec(W2nValue::Dec("1.5".parse().unwrap())));
+        assert_eq!(with("12.500 km", "de", Some("."), Some(",")), W2nValue::Int(12500.into()));
+        assert_eq!(with("five km", "en", None, Some(",")), W2nValue::Int(5.into()));
         // "AR" is ar: its "،" stays the decimal mark.
         assert_eq!(format!("{:?}", crate::words2num("-، 50", "AR", "cardinal").unwrap()), format!("{:?}", crate::words2num("-، 50", "ar", "cardinal").unwrap()));
     }
