@@ -143,7 +143,7 @@ const fn nf(thousands: &'static str, decimal: &'static str) -> NumberFormat {
 /// CLDR-inspired per-locale defaults, in Python source order, then the rows
 /// added since. `"_default"` is the fallback.
 ///
-/// A slice rather than a map: 97 rows, looked up by linear scan, and the order
+/// A slice rather than a map: 100 rows, looked up by linear scan, and the order
 /// stays visibly identical to the Python dict.
 ///
 /// Every `thousands` that reads as a space here is a plain ASCII `U+0020` — the
@@ -172,6 +172,7 @@ pub static NUMBER_FORMAT_DEFAULTS: &[(&str, NumberFormat)] = &[
     ("fr_CH", nf("'", ".")),
     ("de_CH", nf("'", ".")),
     ("it_CH", nf("'", ".")),
+    ("de_LI", nf("'", ".")),
     // Continental European (dot thousands, comma decimal)
     ("de", nf(".", ",")),
     ("es", nf(".", ",")),
@@ -190,6 +191,8 @@ pub static NUMBER_FORMAT_DEFAULTS: &[(&str, NumberFormat)] = &[
     ("es_PA", nf(",", ".")),
     ("es_SV", nf(",", ".")),
     ("es_419", nf(",", ".")),
+    ("es_CU", nf(",", ".")),
+    ("es_BZ", nf(",", ".")),
     ("es_VE", nf(".", ",")),
     ("it", nf(".", ",")),
     ("pt", nf(".", ",")),
@@ -211,7 +214,6 @@ pub static NUMBER_FORMAT_DEFAULTS: &[(&str, NumberFormat)] = &[
     ("lb", nf(".", ",")),
     ("jv", nf(".", ",")),
     ("su", nf(".", ",")),
-    ("km", nf(".", ",")),
     ("lo", nf(".", ",")),
     // Slavic / Scandinavian / Baltic (space thousands, comma decimal)
     ("ru", nf(" ", ",")),
@@ -238,8 +240,9 @@ pub static NUMBER_FORMAT_DEFAULTS: &[(&str, NumberFormat)] = &[
     ("ar", nf(",", ".")),
     ("fa", nf(",", ".")),
     ("he", nf(",", ".")),
-    // South and Southeast Asia: comma thousands (the Indian lakh grouping
-    // included), dot decimal (CLDR; #464).
+    // South and Southeast Asia: comma thousands, dot decimal (CLDR; #464).
+    // Where CLDR groups in lakhs ("12,34,567.5"), the lakh shape is read too:
+    // see `lakh_grouping`.
     ("hi", nf(",", ".")),
     ("bn", nf(",", ".")),
     ("ta", nf(",", ".")),
@@ -257,6 +260,7 @@ pub static NUMBER_FORMAT_DEFAULTS: &[(&str, NumberFormat)] = &[
     ("my", nf(",", ".")),
     ("ms", nf(",", ".")),
     ("tl", nf(",", ".")),
+    ("km", nf(",", ".")),
     ("fil", nf(",", ".")),
 ];
 
@@ -296,6 +300,22 @@ pub fn locale_format(lang: &str) -> Option<NumberFormat> {
     }
     let base = normalized.split('_').next().unwrap_or("");
     lookup_format(format_alias(base))
+}
+
+/// The key to look a format row up by for a caller's `requested` code, once
+/// the language is resolved: the resolved language plus the region the
+/// caller named, so "es-MX" (resolved to "es") finds the es_MX row and
+/// "de_CH" the de_CH row (#423). Without a region it is `resolved`.
+pub fn format_key(requested: &str, resolved: &str) -> String {
+    let base = resolved.split(&['_', '-'][..]).next().unwrap_or(resolved);
+    let region = requested.split(&['_', '-'][..]).skip(1).find(|p| {
+        (p.len() == 2 && p.chars().all(|c| c.is_ascii_alphabetic()))
+            || (p.len() == 3 && p.chars().all(|c| c.is_ascii_digit()))
+    });
+    region
+        .map(|r| format!("{base}_{}", r.to_ascii_uppercase()))
+        .filter(|key| lookup_format(key).is_some())
+        .unwrap_or_else(|| resolved.to_string())
 }
 
 /// Port of `get_format`. Returns the `{thousands, decimal}` row for `lang`,
@@ -405,7 +425,7 @@ pub fn parse_number_string(
 
     let fmt = lang.and_then(locale_format);
     if let Some(fmt) = fmt {
-        if let Some(v) = parse_locale_strict(&s, fmt) {
+        if let Some(v) = parse_locale_strict(&s, fmt, lang.is_some_and(groups_in_lakhs)) {
             return Ok(apply_sign(sign, v?));
         }
     }
@@ -486,7 +506,8 @@ fn parse_with_explicit(
     for m in &marks {
         groups = groups.iter().flat_map(|g| g.split(m)).collect();
     }
-    if groups.len() > 1 && !valid_grouping(&groups) {
+    let lakh = || t == Some(",") && lakh_grouping(&groups);
+    if groups.len() > 1 && !grouped(&groups, true) && !lakh() {
         return Err(not_a_number());
     }
 
@@ -518,6 +539,32 @@ fn parse_with_explicit(
 /// groups of exactly 3? `["1", "234", "567"]` yes; `["1", "5", "2026"]`,
 /// `["1234", "567"]`, `["1", "", "234"]` no.
 fn valid_grouping(groups: &[&str]) -> bool {
+    grouped(groups, false)
+}
+
+/// The Indian lakh grouping CLDR writes for hi, bn, ta, ... and en_IN:
+/// "12,34,567" — a head of 1-2 digits, groups of 2, a last group of 3.
+fn lakh_grouping(groups: &[&str]) -> bool {
+    let digits = |g: &str, n: usize| g.chars().count() == n && g.chars().all(|c| decimal_digit(c).is_some());
+    let Some((last, rest)) = groups.split_last() else { return false };
+    let Some((head, mid)) = rest.split_first() else { return false };
+    groups.len() >= 3
+        && digits(last, 3)
+        && (digits(head, 1) || digits(head, 2))
+        && head.chars().next().and_then(decimal_digit) != Some(0)
+        && mid.iter().all(|g| digits(g, 2))
+}
+
+/// Locales whose figures CLDR groups in lakhs.
+fn groups_in_lakhs(lang: &str) -> bool {
+    let norm = lang.replace('-', "_");
+    let base = norm.split('_').next().unwrap_or("");
+    norm == "en_IN" || matches!(base, "hi" | "bn" | "ta" | "te" | "ml" | "gu" | "pa" | "or" | "ne" | "as" | "mr")
+}
+
+/// [`valid_grouping`]; `zero_head_ok` where the caller named the thousands
+/// mark, so "0,234" with `thousands_sep=","` is 234 as before.
+fn grouped(groups: &[&str], zero_head_ok: bool) -> bool {
     let all_digits = |g: &str| g.chars().all(|c| decimal_digit(c).is_some());
     let len = |g: &str| g.chars().count();
     match groups.split_first() {
@@ -527,7 +574,7 @@ fn valid_grouping(groups: &[&str]) -> bool {
             let zero_head = head.chars().next().and_then(decimal_digit) == Some(0);
             (1..=3).contains(&len(head))
                 && all_digits(head)
-                && !(zero_head && !rest.is_empty())
+                && (zero_head_ok || !(zero_head && !rest.is_empty()))
                 && rest.iter().all(|g| len(g) == 3 && all_digits(g))
         }
         None => false,
@@ -539,7 +586,7 @@ fn valid_grouping(groups: &[&str]) -> bool {
 /// `None` when the string does not fit — the caller then auto-detects, so
 /// `"3.14"` in French (whose separators are space and comma) is read by the
 /// auto-detect rules rather than having its dot dropped (#53).
-fn parse_locale_strict(s: &str, fmt: NumberFormat) -> Option<Result<W2nValue>> {
+fn parse_locale_strict(s: &str, fmt: NumberFormat, lakh: bool) -> Option<Result<W2nValue>> {
     let t = fmt.thousands;
     let space_t = is_space_like_sep(t);
     let d = fmt.decimal;
@@ -562,7 +609,7 @@ fn parse_locale_strict(s: &str, fmt: NumberFormat) -> Option<Result<W2nValue>> {
     let ok = if groups.len() == 1 {
         !groups[0].is_empty() && groups[0].chars().all(|c| decimal_digit(c).is_some())
     } else {
-        valid_grouping(&groups)
+        valid_grouping(&groups) || (lakh && lakh_grouping(&groups))
     };
     if !ok {
         return None;
@@ -984,7 +1031,7 @@ mod tests {
         assert_eq!(get_format("de").thousands, ".");
         assert_eq!(get_format("vi").thousands, ".");
         assert_eq!(get_format("da").thousands, "."); // dot, unlike its neighbours
-        assert_eq!(NUMBER_FORMAT_DEFAULTS.len(), 97);
+        assert_eq!(NUMBER_FORMAT_DEFAULTS.len(), 100);
     }
 
     #[test]
@@ -1097,12 +1144,18 @@ mod tests {
             assert_eq!(pl("1,234", lang).unwrap(), int(1234), "{lang}");
         }
         assert_eq!(pl("1,234.5", "hi").unwrap(), dec("1234.5"));
-        for lang in ["dk", "cz", "id", "ca", "mk", "km", "jv"] {
+        for lang in ["dk", "cz", "id", "ca", "mk", "jv"] {
             assert_eq!(pl("1.234", lang).unwrap(), int(1234), "{lang}");
         }
         assert_eq!(pl("1.234", "de_CH").unwrap(), dec("1.234"));
         assert_eq!(pl("1'234.5", "it_CH").unwrap(), dec("1234.5"));
         assert_eq!(pl("1.234", "es").unwrap(), int(1234));
+        // km groups with a comma (CLDR).
+        assert_eq!(pl("1,234", "km").unwrap(), int(1234));
+        assert_eq!(pl("1.234", "km").unwrap(), dec("1.234"));
+        // Lakh grouping where CLDR uses it.
+        assert_eq!(pl("12,34,567.5", "hi").unwrap(), dec("1234567.5"));
+        assert_eq!(pl("1,00,000", "en_IN").unwrap(), int(100000));
     }
 
     /// #377: a zero head group is no thousands group.
@@ -1134,6 +1187,11 @@ mod tests {
         assert_eq!(ex("1.234.567", Some("."), None).unwrap(), int(1234567));
         assert_eq!(ex("1_234.56", Some("_"), None).unwrap(), dec("1234.56"));
         assert_eq!(ex("12,5", None, Some(",")).unwrap(), dec("12.5"));
+        // The lakh shape with a stated comma, and a zero head the caller
+        // grouped, read as before.
+        assert_eq!(ex("12,34,567", Some(","), Some(".")).unwrap(), int(1234567));
+        assert_eq!(ex("12,34,567.5", Some(","), Some(".")).unwrap(), dec("1234567.5"));
+        assert_eq!(ex("0,234", Some(","), Some(".")).unwrap(), int(234));
     }
 
     /// The lang branch swallows Words2NumError and falls through to

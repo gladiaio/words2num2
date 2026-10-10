@@ -1530,7 +1530,7 @@ pub fn words2num(
                 // A decimal spoken in words, read as the sentence walker
                 // reads it: fr "trois virgule un quatre" -> 3.14 (#191).
                 "cardinal" => base_convert(lang, text, false).or_else(|e| {
-                    table_decimal(&converter, &resolved, text)
+                    table_decimal(&converter, &resolved, &crate::w2n_formats::format_key(lang, &resolved), text)
                         .and_then(|(int, _, frac)| BigDecimal::from_str(&format!("{}.{}", int, frac)).ok())
                         .map(W2nValue::Dec)
                         .ok_or(e)
@@ -2094,9 +2094,10 @@ fn decimal_word(resolved: &str, word: &str) -> Option<char> {
 fn table_decimal(
     converter: &Converter,
     resolved: &str,
+    fmt_key: &str,
     text: &str,
 ) -> Option<(String, char, String)> {
-    let default_sep = crate::w2n_formats::locale_format(resolved)
+    let default_sep = crate::w2n_formats::locale_format(fmt_key)
         .and_then(|f| f.decimal.chars().next())
         .unwrap_or('.');
     let cardinal = |words: &str| match converter.to_cardinal(words).ok()? {
@@ -3012,6 +3013,7 @@ fn words2num_sentence_walk(
     has_kwargs: bool,
 ) -> Result<String, W2nError> {
     let resolved = resolve_lang(lang)?;
+    let fmt_key = crate::w2n_formats::format_key(lang, &resolved);
     let converter = converter_for(&resolved);
     // Regional English reads with the English grammar where its table
     // declines (#193), so it takes the English run rules too.
@@ -3264,7 +3266,7 @@ fn words2num_sentence_walk(
                 }
                 Err(_) if plain && !en_cardinal => {
                     // "trois virgule cinq": a decimal spoken in a table language.
-                    let dec = table_decimal(&converter, &resolved, &stripped).and_then(
+                    let dec = table_decimal(&converter, &resolved, &fmt_key, &stripped).and_then(
                         |(int, sep, frac)| {
                             BigDecimal::from_str(&format!("{}.{}", int, frac))
                                 .ok()
@@ -4146,6 +4148,9 @@ pub fn auto_parse(
     let resolved = resolve_lang(lang)?;
     crate::w2n_formats::check_separators(thousands_sep, decimal_sep)
         .map_err(|e| W2nError::Words2Num(e.0))?;
+    // Figures read with the caller's region: es_MX groups with a comma (#423).
+    let fmt_key = crate::w2n_formats::format_key(lang, &resolved);
+    let fmt_lang = fmt_key.as_str();
     let lang = resolved.as_str();
     let raw = text;
     let text = py_strip(text);
@@ -4159,7 +4164,7 @@ pub fn auto_parse(
         // NB: only Words2NumError is swallowed here. A KeyError out of
         // _apply_scale ("$5kn") escapes auto_parse entirely.
         match (|| -> Result<Quantity, W2nError> {
-            let mut value = parse_number_string(&num_str, thousands_sep, decimal_sep, Some(lang))?;
+            let mut value = parse_number_string(&num_str, thousands_sep, decimal_sep, Some(fmt_lang))?;
             if let Some(s) = scale.as_deref().filter(|s| !s.is_empty()) {
                 value = apply_scale(value, s)?;
             }
@@ -4173,7 +4178,7 @@ pub fn auto_parse(
 
     // 2. Currency-suffix form: 12.50 € / 45 USD
     if let Some((sym, num_str)) = try_currency_suffix(&chars) {
-        match parse_number_string(&num_str, thousands_sep, decimal_sep, Some(lang)) {
+        match parse_number_string(&num_str, thousands_sep, decimal_sep, Some(fmt_lang)) {
             Ok(value) => return Ok(quantity_currency(value, &sym, raw)),
             Err(W2nError::Words2Num(_)) => {}
             Err(e) => return Err(e),
@@ -4181,7 +4186,7 @@ pub fn auto_parse(
     }
 
     // 3. Number + unit suffix (digit form): "5cm", "20°C", "42%", "3.5 km"
-    if let Some(mut res) = try_digit_unit(&chars, prefer, thousands_sep, decimal_sep, lang)? {
+    if let Some(mut res) = try_digit_unit(&chars, prefer, thousands_sep, decimal_sep, fmt_lang)? {
         res.raw = raw.to_string();
         return Ok(res);
     }
@@ -4193,7 +4198,7 @@ pub fn auto_parse(
     }
 
     // 5. Pure number — digit form, then word form.
-    match parse_number_string(text, thousands_sep, decimal_sep, Some(lang)) {
+    match parse_number_string(text, thousands_sep, decimal_sep, Some(fmt_lang)) {
         Ok(value) => return Ok(Quantity::bare(value, raw)),
         Err(W2nError::Words2Num(_)) => {}
         Err(e) => return Err(e),

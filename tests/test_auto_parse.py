@@ -353,3 +353,29 @@ def test_unknown_lang_raises_not_implemented(call):
     # #204
     with pytest.raises(NotImplementedError):
         call()
+
+
+# ---------------------------------------------------------------------------
+# Regional separators reach every entry point (#423)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "lang,text,expected",
+    [
+        ("es_MX", "1,234", 1234),
+        ("es-MX", "1,234", 1234),
+        ("es_US", "1,234", 1234),
+        ("es_419", "1,234", 1234),
+        ("de_CH", "1.234", Decimal("1.234")),
+        ("de_CH", "1'234", 1234),
+        ("es", "1.234", 1234),
+        ("km", "1,234", 1234),
+        ("hi", "12,34,567.5", Decimal("1234567.5")),
+    ],
+)
+def test_regional_separators_in_words2num_and_auto_parse(lang, text, expected):
+    from words2num2 import words2num
+
+    assert words2num(text, lang=lang) == expected
+    assert auto_parse(text, lang=lang).value == expected

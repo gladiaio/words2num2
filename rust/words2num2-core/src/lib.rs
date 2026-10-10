@@ -57,7 +57,8 @@ pub fn words2num(
     }
     if matches!(to, "cardinal" | "ordinal" | "year" | "currency") && is_digit_literal(text) {
         let resolved = w2n_sentence::resolve_lang(lang)?;
-        return match w2n_formats::parse_number_string(text, None, None, Some(&resolved)) {
+        let key = w2n_formats::format_key(lang, &resolved);
+        return match w2n_formats::parse_number_string(text, None, None, Some(&key)) {
             Ok(w2n_formats::W2nValue::Int(i)) => Ok(w2n_lang_en::W2nValue::Int(i)),
             Ok(w2n_formats::W2nValue::Dec(d)) => {
                 Ok(w2n_lang_en::W2nValue::Dec(w2n_lang_en::PyDec::from_bigdecimal(&d)))
