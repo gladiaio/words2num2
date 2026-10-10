@@ -331,6 +331,22 @@ pub fn read(
         let sign = if negative { "-" } else { "" };
         return Some((format!("{sign}{int}"), default_sep, format!("{:0>2}", n)));
     }
+    // "moins zéro virgule cinq" is -0.5: the sign is read apart, so a zero
+    // integer keeps it (#364). Once: "moins moins …" is no decimal.
+    let first = text.split_whitespace().next().unwrap_or("");
+    let spaced = crate::strip_sign(lang, &format!("{} x", crate::normalize(first))) == Some(("x", false));
+    let rest = if spaced {
+        Some(text.trim_start()[first.len()..].trim_start())
+    } else {
+        text.trim_start().strip_prefix(['-', '\u{2212}']).filter(|r| !r.starts_with(char::is_whitespace))
+    };
+    if let Some(rest) = rest.filter(|r| !r.is_empty()) {
+        let (int, sep, frac) = read(lang, rest, hand_sep, default_sep, cardinal)?;
+        if int.starts_with('-') {
+            return None;
+        }
+        return Some((format!("-{int}"), sep, frac));
+    }
     // Each written word normalized on its own: a hyphenated compound stays
     // one fraction digit (wo "juróom-ñeent" is 9, not 5 and 4).
     let units: Vec<String> = text
@@ -497,6 +513,18 @@ mod tests {
         assert_eq!(sent("tres coma un catro", "gl"), "3,14");
         assert_eq!(sent("три запирка еден четири", "mk"), "3.14");
         assert_eq!(sent("tre komma ein fire", "nn"), "3,14");
+    }
+
+    /// #364: a negative decimal below one keeps its sign.
+    #[test]
+    fn negative_zero_integer() {
+        assert_eq!(card("moins zéro virgule cinq", "fr"), "-0.5");
+        assert_eq!(card("minus null Komma fünf", "de"), "-0.5");
+        assert_eq!(card("menos cero coma cinco", "es"), "-0.5");
+        assert_eq!(card("минус ноль целых пять десятых", "ru"), "-0.5");
+        assert_eq!(card("minus zero point five", "en_IN"), "-0.5");
+        assert_eq!(card("moins trois virgule cinq", "fr"), "-3.5");
+        assert!(crate::words2num("moins moins trois virgule cinq", "fr", "cardinal").is_err());
     }
 
     /// #371: ar "،" (the renderer's separator, hundredths) and "فاصلة".
