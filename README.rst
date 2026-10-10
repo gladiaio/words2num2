@@ -537,6 +537,10 @@ Function / class                   Purpose
 ``Words2NumError``                 Raised when input cannot be parsed.
 ================================== =================================================
 
+Numerical symbols (``①``, ``²``, ``½``) are never read as numbers unless
+you pass ``convert_numerical_symbols=True``; see "Numerical symbols" in
+``REFERENCE.md``.
+
 See `REFERENCE.md` for the full API reference with parameters,
 return types, and examples.
 
