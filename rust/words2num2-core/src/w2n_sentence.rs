@@ -5118,8 +5118,13 @@ pub fn auto_parse_sentence(
     let resolved = resolve_lang(lang)?;
     crate::w2n_formats::check_separators(thousands_sep, decimal_sep)
         .map_err(|e| W2nError::Words2Num(e.0))?;
+    // The mark this same call reads as the decimal: the caller's, else the
+    // point when only a thousands separator other than it is given (as
+    // `parse_with_explicit` reads), else the locale's.
+    let ts = thousands_sep.filter(|t| !t.is_empty());
     let mark = decimal_sep
         .and_then(|d| d.chars().next())
+        .or_else(|| ts.filter(|t| *t != ".").map(|_| '.'))
         .or_else(|| {
             crate::w2n_formats::locale_format(&crate::w2n_formats::format_key(lang, &resolved))
                 .and_then(|f| f.decimal.chars().next())
@@ -6511,5 +6516,10 @@ mod auto_sentence_mark_tests {
         }
         // The caller's decimal mark wins.
         assert_eq!(super::auto_parse_sentence("3,5 kg", "en", &p, None, Some(","), false).unwrap(), "3,5 kg");
+        // A thousands separator alone makes the point the decimal, as the
+        // parser reads it.
+        let ts = |t: &str| super::auto_parse_sentence(t, "de", &p, Some(","), None, false).unwrap();
+        assert_eq!(ts("3.125 kg"), "3.125 kg");
+        assert_eq!(ts(&ts("3.125 kg")), "3.125 kg");
     }
 }

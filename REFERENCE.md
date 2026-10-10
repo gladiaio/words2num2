@@ -212,8 +212,9 @@ between matches is preserved.
 'Total: 1234,56 EUR.'
 ```
 
-A decimal is written with the locale's decimal mark (or `decimal_sep`), so
-the output reads back as the same number in that locale.
+A decimal is written with the mark the same call reads as the decimal
+(`decimal_sep`, else `.` when only `thousands_sep` is given, else the
+locale's), so the output reads back as the same number.
 
 In short form, percent and bare degree are tightly glued
 (`70%`, `20°`); other units are space-separated (`5 kg`).
