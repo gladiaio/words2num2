@@ -62,8 +62,8 @@ pub fn words2num(
         };
     }
     // de "minus 1.234": a sign word before a figure, read with the same
-    // separators as "-1.234" (#309).
-    if matches!(to, "cardinal" | "currency") {
+    // separators as "-1.234" (#309); th "ติดลบ1999" a year too (#950).
+    if matches!(to, "cardinal" | "currency" | "year") {
         if let Some(signed) = signed_figure_in(text, lang) {
             return words2num(&signed, lang, to);
         }
@@ -145,24 +145,28 @@ pub(crate) fn holds_compat_digit(text: &str) -> bool {
 pub(crate) fn signed_figure_in(text: &str, lang: &str) -> Option<String> {
     let resolved = w2n_sentence::resolve_lang(lang).ok()?;
     let mark_is_decimal = w2n_decimal::has_hundredths_mark(&resolved);
-    let (h, f) = text.trim().split_once(char::is_whitespace)?;
+    let t = text.trim();
+    // The figure starts at the first digit; the sign is everything before it,
+    // one word or several, spaced or glued: zh "负1234", ja "マイナス2.75", zu
+    // "ngaphansi kwe 1.5" (#950).
+    let at = t.char_indices().find(|(_, c)| w2n_sentence::is_unicode_digit(*c)).map(|(i, _)| i)?;
+    let (h, figure) = (t[..at].trim_end(), &t[at..]);
     let comma = |c: char| c == ',' || (c == '\u{060C}' && !mark_is_decimal);
-    let head = h.strip_suffix(comma).unwrap_or(h);
+    let head = h.strip_suffix(comma).map(str::trim_end).unwrap_or(h);
     if head.is_empty() || head.contains([',', '\u{060C}']) {
         return None;
     }
-    let mut figure = f.trim_start();
-    if !h.ends_with(comma) {
-        // "moins , 1.234", "moins ,1.234": the comma split from the word.
-        if let Some(rest) = figure.strip_prefix(comma) {
-            figure = rest.trim_start();
-        }
+    // A glued head needs a sign the renderer glues (zh "负七"), and spaced
+    // text a space or comma between them ("moins 1.234", "moins, 1.234").
+    // "-5" itself is a plain figure.
+    let spaced = t[..at].ends_with(|c: char| c.is_whitespace() || comma(c));
+    if !spaced && head.chars().all(|c| c == '+' || w2n_formats::is_minus(c)) {
+        return None;
     }
     let word = normalize(head);
-    let is_sign = ["minus", "negative"].contains(&word.as_str())
-        || strip_sign(&resolved, &format!("{word} x")).is_some_and(|(r, glued)| r == "x" && !glued);
-    let unsigned = figure.chars().next().is_some_and(|c| c != '+' && !w2n_formats::is_minus(c));
-    (is_sign && unsigned && is_digit_literal(figure)).then(|| format!("-{figure}"))
+    let is_sign = (spaced && ["minus", "negative"].contains(&word.as_str()))
+        || sign_prefixes(&resolved).iter().any(|p| p.text == word && (spaced || p.glued));
+    (is_sign && is_digit_literal(figure)).then(|| format!("-{figure}"))
 }
 
 /// Is `text` a number in figures and nothing else: an optional sign, then

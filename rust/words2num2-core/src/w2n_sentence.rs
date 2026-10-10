@@ -6370,3 +6370,26 @@ mod scale_comma_normalize_tests {
         assert_eq!(s("em dois mil, cinco pessoas vieram"), "em 2000, 5 pessoas vieram");
     }
 }
+
+#[cfg(test)]
+mod glued_sign_figure_tests {
+    /// #950: a sign glued to a figure, or of several words, reads as "-figure".
+    #[test]
+    fn glued_and_multiword_signs_issue_950() {
+        let w = |t: &str, l: &str, to: &str| crate::words2num(t, l, to).ok().map(|v| format!("{v:?}"));
+        let same = |a: &str, b: &str, l: &str, to: &str| assert_eq!(w(a, l, to), w(b, l, to), "{l} {a}");
+        same("负1234", "-1234", "zh", "cardinal");
+        same("負1234", "-1234", "zh_TW", "cardinal");
+        same("マイナス2.75", "-2.75", "ja", "cardinal");
+        same("ติดลบ1234", "-1234", "th", "cardinal");
+        same("ติดลบ1999", "-1999", "th", "year");
+        same("ngaphansi kwe 1.5", "-1.5", "zu", "cardinal");
+        same("ngaphansi kwe 1 234", "-1 234", "zu", "cardinal");
+        same("wansi wa 2.75", "-2.75", "lg", "cardinal");
+        assert!(w("-1234", "zh", "cardinal").is_some());
+        // Unchanged: a word sign glued to a figure where the renderer spaces it.
+        assert_eq!(w("minus5", "en", "cardinal"), None);
+        assert_eq!(w("moins1.234", "fr", "cardinal"), None);
+        same("moins, 1.234", "-1.234", "fr", "cardinal");
+    }
+}
