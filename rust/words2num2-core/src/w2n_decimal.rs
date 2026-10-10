@@ -185,7 +185,10 @@ fn mark_words(text: &str, mark: &str) -> Vec<String> {
             let letter = |d: Option<&char>| d.is_some_and(|c| c.is_alphabetic());
             let before = chars[..k].iter().rev().find(|c| !c.is_whitespace());
             let after = chars[k + 1..].iter().find(|c| !c.is_whitespace());
-            if c == ',' && (letter(before) || before.is_none()) && letter(after) {
+            // A sign alone before it is no word: "-, خمسون" is minus ", خمسون" (#959).
+            let lead: Vec<&char> = chars[..k].iter().filter(|c| !c.is_whitespace()).collect();
+            let sign_only = matches!(lead.as_slice(), [s] if matches!(s, '-' | '+' | '\u{2212}'));
+            if c == ',' && (letter(before) || before.is_none() || sign_only) && letter(after) {
                 mark.to_string()
             } else {
                 c.to_string()
@@ -705,6 +708,10 @@ mod tests {
         assert_eq!(crate::words2num("ثلاثة ،", "ar", "cardinal").unwrap(), W2nValue::Int(3.into()));
         assert_eq!(crate::words2num("مائة ،", "ar", "cardinal").unwrap(), W2nValue::Int(100.into()));
         assert_eq!(crate::words2num("ثلاثة ، ،", "ar", "cardinal").unwrap(), W2nValue::Int(3.into()));
+        // #959: a dash before an ASCII comma leaves it the mark, as a sign word does.
+        for t in ["-, خمسون", "- , خمسون", "\u{2212}, خمسون", "-,خمسون", "سالب , خمسون"] {
+            assert_eq!(format!("{:?}", crate::words2num(t, "ar", "cardinal").unwrap()), format!("{:?}", crate::words2num("-، خمسون", "ar", "cardinal").unwrap()), "{t}");
+        }
         // #617: only the renderer's hundredths follow the mark; a list stays one.
         for list in ["ثلاثة ، أربعة", "، ثلاثة", "ثلاثة ، ثلاثة", "ثلاثة ، خمسة"] {
             assert!(crate::words2num(list, "ar", "cardinal").is_err(), "{list}");
