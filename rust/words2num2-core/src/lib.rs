@@ -41,9 +41,24 @@ pub fn words2num(
     lang: &str,
     to: &str,
 ) -> Result<w2n_lang_en::W2nValue, w2n_sentence::W2nError> {
+    // de "minus 1.234": a sign word before a figure, read with the same
+    // separators as "-1.234" (#309).
+    if matches!(to, "cardinal" | "currency") {
+        if let Some((head, figure)) = text.trim().split_once(char::is_whitespace) {
+            let resolved = w2n_sentence::resolve_lang(lang)?;
+            let word = normalize(head);
+            let is_sign = ["minus", "negative"].contains(&word.as_str())
+                || strip_sign(&resolved, &format!("{word} x")).is_some_and(|(r, glued)| r == "x" && !glued);
+            let unsigned = figure.trim_start().chars().next().is_some_and(|c| c != '+' && !w2n_formats::is_minus(c));
+            if is_sign && unsigned && is_digit_literal(figure) {
+                return words2num(&format!("-{}", figure.trim_start()), lang, to);
+            }
+        }
+    }
     if matches!(to, "cardinal" | "ordinal" | "year" | "currency") && is_digit_literal(text) {
         let resolved = w2n_sentence::resolve_lang(lang)?;
-        return match w2n_formats::parse_number_string(text, None, None, Some(&resolved)) {
+        let key = w2n_formats::format_key(lang, &resolved);
+        return match w2n_formats::parse_number_string(text, None, None, Some(&key)) {
             Ok(w2n_formats::W2nValue::Int(i)) => Ok(w2n_lang_en::W2nValue::Int(i)),
             Ok(w2n_formats::W2nValue::Dec(d)) => {
                 Ok(w2n_lang_en::W2nValue::Dec(w2n_lang_en::PyDec::from_bigdecimal(&d)))
@@ -62,7 +77,7 @@ pub fn words2num(
 /// numbers side by side — is not one and is left to the word grammar.
 fn is_digit_literal(text: &str) -> bool {
     let t = text.trim();
-    let body = t.strip_prefix(['-', '+']).map(str::trim_start).unwrap_or(t);
+    let body = t.strip_prefix(|c| c == '+' || w2n_formats::is_minus(c)).map(str::trim_start).unwrap_or(t);
     let is_digit = |c: char| c.is_numeric() && w2n_sentence::digit_value(c).is_some();
     let is_sep = |c: char| matches!(c, '.' | ',' | '\'' | '\u{2019}' | '_') || c.is_whitespace();
     let (Some(first), Some(last)) = (body.chars().next(), body.chars().last()) else {
