@@ -53,8 +53,8 @@ jobs:
             echo "::error::pyproject.toml says $ver but words2num2/_version.py says $pkg: bump both"
             exit 1
           fi
-          if ! printf '%s' "$ver" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-            echo "::error::version must be X.Y.Z, got: $ver"
+          if [[ ! "$ver" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::version must be X.Y.Z"
             exit 1
           fi
           echo "version=$ver" >> "$GITHUB_OUTPUT"

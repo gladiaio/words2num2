@@ -16,11 +16,16 @@ on:
         required: true
         type: string
 
+permissions:
+  contents: read
+
 jobs:
   aur:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       # Inputs and step outputs reach the shell through env, never by
       # ${{ }} substitution into the script, and the version must be a
@@ -35,8 +40,8 @@ jobs:
           else
             VER="${GITHUB_REF#refs/tags/v}"
           fi
-          if ! printf '%s' "$VER" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-            echo "::error::version must be X.Y.Z, got: $VER"
+          if [[ ! "$VER" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::version must be X.Y.Z"
             exit 1
           fi
           echo "version=$VER" >> "$GITHUB_OUTPUT"
@@ -68,7 +73,7 @@ jobs:
         run: |
           set -euo pipefail
           SHA=$(curl -sfL "https://files.pythonhosted.org/packages/source/w/words2num2/words2num2-${VER}.tar.gz" | sha256sum | awk '{print $1}')
-          echo "sha=$SHA" >> $GITHUB_OUTPUT
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
           echo "sha256: $SHA"
 
       - name: Update PKGBUILD + .SRCINFO
@@ -76,7 +81,7 @@ jobs:
           VER: ${{ steps.ver.outputs.version }}
           SHA: ${{ steps.sha.outputs.sha }}
         run: |
-          printf '%s' "$SHA" | grep -Eq '^[0-9a-f]{64}$' || { echo "::error::bad sha256: $SHA"; exit 1; }
+          [[ "$SHA" =~ ^[0-9a-f]{64}$ ]] || { echo "::error::bad sha256"; exit 1; }
           cd packaging/aur/python-words2num2
           sed -i -E "s/^pkgver=.*/pkgver=${VER}/" PKGBUILD
           sed -i -E "s/^pkgrel=.*/pkgrel=1/" PKGBUILD

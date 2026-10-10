@@ -49,8 +49,8 @@ jobs:
             echo "::error::release $ver, but pyproject.toml says $py and words2num2/_version.py says $pkg (checked out at $GITHUB_REF_NAME): bump both and tag that commit"
             exit 1
           fi
-          if ! printf '%s' "$ver" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-            echo "::error::version must be X.Y.Z, got: $ver"
+          if [[ ! "$ver" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::version must be X.Y.Z"
             exit 1
           fi
           if [ "$GITHUB_REF_TYPE" = "tag" ] && [ "$GITHUB_REF_NAME" != "v$ver" ]; then
