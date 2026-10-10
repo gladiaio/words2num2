@@ -6031,7 +6031,7 @@ mod sign_and_script_tests {
             assert_eq!(super::words2num_sentence("x ㈢ y", l, "cardinal", false).unwrap(), "x ㈢ y");
         }
         assert_eq!(crate::words2num("五十", "zh", "cardinal").unwrap(), crate::w2n_lang_en::W2nValue::Int(50.into()));
-        // A compatibility ideograph is its ideograph, no symbol.
+        // A compatibility ideograph is `Lo`, its ideograph, no symbol.
         for c in ['\u{F9B2}', '\u{F9D1}', '\u{F973}'] {
             assert!(!crate::is_compat_digit(c), "{c}");
         }

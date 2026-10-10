@@ -86,17 +86,13 @@ pub fn words2num(
 /// A numerical symbol, no digit of a figure: a superscript or subscript
 /// ("²", "₂"), a circled or parenthesized digit ("①", "⑩", "⒈"), a vulgar
 /// fraction ("½"), a circled or parenthesized ideograph ("㊀", "㈩", "〸",
-/// #965), a Roman numeral ("Ⅻ") — any numeric non-`Nd` character that only
-/// a compatibility mapping rewrites. A CJK compatibility ideograph ("零" at
-/// U+F9B2) maps canonically to its ideograph: a numeral, no symbol.
+/// #965), a Roman numeral ("Ⅻ") — any `Nl`/`No` character NFKD rewrites.
+/// A CJK compatibility ideograph ("零" at U+F9B2) is `Lo`, no numeric
+/// character, so it reads as its ideograph does.
 pub fn is_compat_digit(c: char) -> bool {
     use unicode_normalization::UnicodeNormalization;
     let one = || std::iter::once(c);
-    !c.is_ascii()
-        && c.is_numeric()
-        && !w2n_sentence::is_unicode_digit(c)
-        && one().nfd().eq(one())
-        && !one().nfkd().eq(one())
+    !c.is_ascii() && c.is_numeric() && !w2n_sentence::is_unicode_digit(c) && !one().nfkd().eq(one())
 }
 
 thread_local! {

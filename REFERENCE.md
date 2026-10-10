@@ -381,13 +381,16 @@ or ISO code (`USD`, `EUR`, `GBP`, …). Ambiguous tokens (`m`, `g`, `t`,
 Superscript, subscript, circled and parenthesized digits (`"²"`, `"₂"`,
 `"①"`, `"⑩"`, `"⒈"`), circled and parenthesized ideographs (`"㊀"`,
 `"㈩"`, `"〸"`), Roman numerals (`"Ⅻ"`) and vulgar fractions (`"½"`) are
-symbols, not numbers: any numeric character, other than a script's own
-digits (`"５"`, `"٥"`, `"५"`), that NFKD rewrites. By default every parsing
+symbols, not numbers: any character of Unicode category `Nl` or `No` that
+NFKD rewrites. A script's own digits (`"５"`, `"٥"`, `"५"`, category `Nd`)
+and the CJK compatibility ideographs (`"零"` at U+F9B2, category `Lo`) are
+not symbols. By default every parsing
 entry point leaves them alone: `words2num` and `auto_parse` raise on them,
 alone or glued to a figure, and the sentence functions keep them as written
-(`"the ⑤ million"` stays as is). `normalize()` is no parser: it is the plain
-NFKD the lookup tables use, and folds them like any other character
-(`normalize("①")` is `"1"`).
+(`"the ⑤ million"` stays as is). `normalize()` is no parser: it is the
+NFKD-based normalization the lookup tables use (it also lowercases, strips
+marks and turns hyphens into spaces), and folds them like any other
+character (`normalize("①")` is `"1"`).
 
 `convert_numerical_symbols=True` brings back the reading these symbols had
 before, no more:
