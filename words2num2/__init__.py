@@ -65,7 +65,7 @@ __all__ = [
 ]
 
 
-def words2num(text, lang="en", to="cardinal"):
+def words2num(text, lang="en", to="cardinal", convert_numerical_symbols=False):
     """Parse ``text`` (a number written in words) into a numeric value.
 
     Args:
@@ -79,6 +79,12 @@ def words2num(text, lang="en", to="cardinal"):
             ``"two seven five"`` -> ``275``; the result is an ``int``, so
             leading zeros are dropped — use :func:`words2num_sentence` to keep
             ``"zero seven"`` as ``07``).
+        convert_numerical_symbols: Read numerical symbols — superscript,
+            subscript, circled and parenthesized digits (``"²"``, ``"①"``,
+            ``"⑩"``) — as their digits. Off by default: they are no number,
+            so ``"①"`` and ``"1①"`` raise. Even when on, a symbol glued to a
+            figure (``"10²"``, ``"1①"``) raises; vulgar fractions (``"½"``)
+            are never read. A power after a unit (``"m²"``) is the unit's.
 
     Returns:
         ``int``, ``float`` or ``Decimal`` depending on the input. ``to="currency"``
@@ -92,10 +98,14 @@ def words2num(text, lang="en", to="cardinal"):
         NotImplementedError: if ``lang`` or ``to`` is not supported.
         Words2NumError: if ``text`` cannot be parsed.
     """
-    return _RUST.words2num(text, lang, to, None)
+    return _RUST.words2num(
+        text, lang, to, None, convert_numerical_symbols=convert_numerical_symbols
+    )
 
 
-def words2num_sentence(sentence, lang="en", to="cardinal", currency=False):
+def words2num_sentence(
+    sentence, lang="en", to="cardinal", currency=False, convert_numerical_symbols=False
+):
     """Convert every word-number in ``sentence`` to numeric form.
 
     Walks the sentence, matching the longest run of number tokens at each
@@ -108,10 +118,21 @@ def words2num_sentence(sentence, lang="en", to="cardinal", currency=False):
     dollars et vingt centimes"`` -> ``"43,20 $"``, de ``"zwanzig euro fünfzig"``
     -> ``"20,50 €"``. Off by default: the output is unchanged.
 
+    Numerical symbols (``"²"``, ``"①"``, ``"½"``) stay as written; with
+    ``convert_numerical_symbols=True`` a run of them alone reads as its
+    digits (``"the ⑤ million"`` -> ``"the 5000000"``).
+
     ``lang`` and ``to`` are validated before the walk and raise
     ``NotImplementedError`` like :func:`words2num`.
     """
-    return _RUST.words2num_sentence(sentence, lang, to, None, currency)
+    return _RUST.words2num_sentence(
+        sentence,
+        lang,
+        to,
+        None,
+        currency,
+        convert_numerical_symbols=convert_numerical_symbols,
+    )
 
 
 # Aliases (parity with num2words2)
@@ -119,7 +140,14 @@ convert_sentence = words2num_sentence
 sentence_to_words = words2num_sentence
 
 
-def auto_parse(text, lang="en", prefer=None, thousands_sep=None, decimal_sep=None):
+def auto_parse(
+    text,
+    lang="en",
+    prefer=None,
+    thousands_sep=None,
+    decimal_sep=None,
+    convert_numerical_symbols=False,
+):
     """Parse a single quantity expression, e.g. ``"$12,345.00"`` or ``"5cm"``.
 
     Returns a :class:`Quantity`; raises ``Words2NumError`` if unparseable or
@@ -131,20 +159,45 @@ def auto_parse(text, lang="en", prefer=None, thousands_sep=None, decimal_sep=Non
     ``{"m": "minute"}``): the preferred unit replaces the whole reading
     (``unit``, ``unit_long``, ``kind``). A target that is not a reading of the
     token (``{"m": "kg"}``) is ignored.
+
+    Numerical symbols (``"①"``, ``"²"``, ``"½"``) are no number and raise,
+    except a unit's power (``"5 m²"``); ``convert_numerical_symbols=True``
+    reads a run of them alone as its digits, as :func:`words2num` does.
     """
-    return _RUST.auto_parse(text, lang, prefer, thousands_sep, decimal_sep)
+    return _RUST.auto_parse(
+        text,
+        lang,
+        prefer,
+        thousands_sep,
+        decimal_sep,
+        convert_numerical_symbols=convert_numerical_symbols,
+    )
 
 
 def auto_parse_sentence(
-    text, lang="en", prefer=None, thousands_sep=None, decimal_sep=None, expand=False
+    text,
+    lang="en",
+    prefer=None,
+    thousands_sep=None,
+    decimal_sep=None,
+    expand=False,
+    convert_numerical_symbols=False,
 ):
     """Walk free text and rewrite every quantity expression in place.
 
     Each match becomes ``"<value> <unit>"``; with ``expand=True`` units use
-    their long form. Returns the rewritten string.
+    their long form. Returns the rewritten string. Numerical symbols
+    (``"①"``, ``"²"``) stay as written unless ``convert_numerical_symbols``
+    is set.
     """
     return _RUST.auto_parse_sentence(
-        text, lang, prefer, thousands_sep, decimal_sep, expand
+        text,
+        lang,
+        prefer,
+        thousands_sep,
+        decimal_sep,
+        expand,
+        convert_numerical_symbols=convert_numerical_symbols,
     )
 
 

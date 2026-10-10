@@ -1683,8 +1683,10 @@ fn sentence_to_en_value(v: W2nValue) -> crate::w2n_lang_en::W2nValue {
 /// is a literal: it never starts or extends a run. Without this, adjacent
 /// numerals were summed ("calling from 850 820 9095" came out as "10765").
 fn holds_digit(token: &str) -> bool {
-    // Any script's digits: "twenty ２" is no 22, "one hundred ٥" no 105 (#288).
-    token.chars().any(is_unicode_digit)
+    // Any script's digits: "twenty ２" is no 22, "one hundred ٥" no 105 (#288);
+    // nor "⑤ million" 5 000 000: a numerical symbol stays as written unless
+    // the caller asks for them (#949).
+    token.chars().any(|c| is_unicode_digit(c) || (crate::is_compat_digit(c) && !crate::numerical_symbols()))
 }
 
 /// `SentenceConverter._starts_run` — a run must open with a real number word
@@ -4571,7 +4573,7 @@ pub fn auto_parse(
     crate::w2n_formats::check_separators(thousands_sep, decimal_sep)
         .map_err(|e| W2nError::Words2Num(e.0))?;
     // "10²" is no 102 (#869).
-    if crate::glued_script_digit(text) {
+    if crate::holds_compat_digit(text) {
         return Err(W2nError::Words2Num(format!("could not auto-parse {}", py_repr_str(text))));
     }
     // Figures read with the caller's region: es_MX groups with a comma (#423).
@@ -5927,8 +5929,28 @@ mod sign_and_script_tests {
         for (t, l) in [("10²", "en"), ("2³", "en"), ("10⁶", "en"), ("12²", "de"), ("10₂", "en"), ("５²", "ja"), ("²5", "en"), ("10.²", "en")] {
             assert!(crate::words2num(t, l, "cardinal").is_err(), "{l} {t}");
         }
-        // A run of script digits alone reads as its digits.
-        assert!(crate::words2num("¹⁰", "en", "cardinal").is_ok());
+        // Nor alone, nor any other compatibility digit (#955).
+        for t in ["¹⁰", "²", "①", "⑩", "1①", "1⑩", "1⒈", "19⑨⑨", "½", "1½", "2⑤"] {
+            assert!(crate::words2num(t, "en", "cardinal").is_err(), "{t}");
+            assert!(super::auto_parse(t, "en", &std::collections::HashMap::new(), None, None).is_err(), "{t}");
+        }
+        assert!(crate::words2num("1①", "en", "year").is_err());
+        assert!(crate::words2num("1①", "en", "ordinal").is_err());
+        // In running text they stay as written (#949).
+        for t in ["the ⑤ million y", "see note ³ below", "E = mc ²", "three ⁵", "x ½ y", "x 𝟓 hundred y"] {
+            assert_eq!(super::words2num_sentence(t, "en", "cardinal", false).unwrap().replace("three", "3"), t.replace("three", "3"), "{t}");
+        }
+        // The caller may ask for them: a run alone reads, a glued one never.
+        crate::with_numerical_symbols(true, || {
+            assert!(crate::words2num("①", "en", "cardinal").is_ok());
+            assert!(crate::words2num("¹⁰", "en", "cardinal").is_ok());
+            for t in ["1①", "10²", "½", "1½"] {
+                assert!(crate::words2num(t, "en", "cardinal").is_err(), "{t}");
+            }
+            assert_eq!(super::words2num_sentence("the ⑤ million y", "en", "cardinal", false).unwrap(), "the 5000000 y");
+        });
+        // And the default is back after the call.
+        assert!(crate::words2num("①", "en", "cardinal").is_err());
         assert!(crate::words2num("10", "en", "cardinal").is_ok());
         let p = std::collections::HashMap::new();
         assert!(super::auto_parse("10²", "en", &p, None, None).is_err());

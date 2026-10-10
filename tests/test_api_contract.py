@@ -7,6 +7,7 @@ import sys
 
 import pytest
 
+import words2num2
 from words2num2 import (
     CONVERTER_TYPES,
     Words2NumError,
@@ -137,3 +138,31 @@ def test_cli_module_entry_point_issue_200():
 
 def test_words2num_error_is_a_value_error():
     assert issubclass(Words2NumError, ValueError)
+
+
+@pytest.mark.parametrize("text", ["①", "⑩", "²", "¹⁰", "1①", "10²", "½", "1½", "1⒈"])
+def test_numerical_symbols_are_no_number_by_default(text):
+    with pytest.raises(Words2NumError):
+        words2num2.words2num(text)
+    with pytest.raises(Words2NumError):
+        words2num2.auto_parse(text)
+
+
+def test_convert_numerical_symbols_opt_in():
+    assert words2num2.words2num("①", convert_numerical_symbols=True) == 1
+    assert words2num2.words2num("¹⁰", convert_numerical_symbols=True) == 10
+    assert words2num2.auto_parse("⑩", convert_numerical_symbols=True).value == 10
+    # Glued to a figure it is no number even when asked.
+    for text in ["1①", "10²"]:
+        with pytest.raises(Words2NumError):
+            words2num2.words2num(text, convert_numerical_symbols=True)
+    s = "the ⑤ million y"
+    assert words2num2.words2num_sentence(s) == s
+    assert words2num2.auto_parse_sentence("x ① y") == "x ① y"
+    assert (
+        words2num2.words2num_sentence(s, convert_numerical_symbols=True)
+        == "the 5000000 y"
+    )
+    # The flag does not leak into the next call.
+    with pytest.raises(Words2NumError):
+        words2num2.words2num("①")
