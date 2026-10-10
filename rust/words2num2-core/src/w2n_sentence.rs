@@ -498,7 +498,15 @@ fn rstrip_punct(s: &str) -> &str {
     s.trim_end_matches(|c: char| {
         matches!(c, '.' | ',' | ';' | ':' | '!' | '?' | '"' | '\'' | '\u{2019}')
             || crate::is_clause_punctuation(c)
+            || is_format_char(c)
     })
+}
+
+/// An invisible format character (ZWSP, ZWNJ, ZWJ, word joiner, BOM, soft
+/// hyphen): it rides with the punctuation around it, so "twenty,\u{200b} one"
+/// still ends its number at the comma and keeps the ZWSP (#870).
+fn is_format_char(c: char) -> bool {
+    matches!(c, '\u{200B}'..='\u{200D}' | '\u{2060}' | '\u{FEFF}' | '\u{00AD}')
 }
 
 /// The piece opens with a bracket, quote or other mark `normalize` drops
@@ -522,7 +530,7 @@ fn trailing_punct(s: &str) -> &str {
 /// characters, unlike the strip above: `forty-two"` does not close a run.
 fn ends_with_terminal_punct(s: &str) -> bool {
     matches!(
-        s.chars().next_back(),
+        s.trim_end_matches(is_format_char).chars().next_back(),
         Some('.') | Some(',') | Some(';') | Some(':') | Some('!') | Some('?')
     )
 }
@@ -6473,5 +6481,20 @@ mod glued_sign_figure_tests {
         }
         let p = std::collections::HashMap::new();
         assert!(super::auto_parse("-,5", "fr", &p, None, Some(",")).is_err());
+    }
+}
+
+#[cfg(test)]
+mod format_char_punct_tests {
+    /// #870: an invisible format character after a mark rides with it.
+    #[test]
+    fn format_char_after_mark_issue_870() {
+        let s = |t: &str, l: &str| super::words2num_sentence(t, l, "cardinal", false).unwrap();
+        assert_eq!(s("one hundred.\u{200B} Five people", "en"), "100.\u{200B} 5 people");
+        assert_eq!(s("twenty,\u{200B} one", "en"), "20,\u{200B} one");
+        assert_eq!(s("twenty;\u{00AD} one", "en"), "20;\u{00AD} one");
+        assert_eq!(s("zwanzig.\u{2060} Drei Leute", "de"), "20.\u{2060} 3 Leute");
+        assert_eq!(s("x five\u{200B} y", "en"), "x 5\u{200B} y");
+        assert_eq!(s("twenty one", "en"), "21");
     }
 }
