@@ -1139,6 +1139,10 @@ fn negate(v: W2nValue) -> Option<W2nValue> {
 
 /// [`base_convert`] on normalized text with any sign already stripped.
 fn base_convert_unsigned(lang: &str, norm: &str, ordinal: bool) -> Result<W2nValue, W2nError> {
+    // th "หมื่นห้า": 15 000, the digit one place below the bare scale word (#875).
+    if let Some((false, v)) = crate::elided_place(lang, norm).filter(|_| !ordinal) {
+        return Ok(W2nValue::Int(BigInt::from(v)));
+    }
     let first = base_convert_as_written(lang, norm, ordinal);
     if first.is_ok() || ordinal || !crate::is_supported_lang(lang) {
         return first;
@@ -3762,6 +3766,19 @@ fn words2num_sentence_walk(
             }
         }
 
+        // th "สองพันห้า": 2005 as written, 2500 as spoken; no one number, so
+        // the words stay (#875). A year too: unspaced text gives no sure year
+        // label ("ต่อปี" is "per year"), so none is guessed (#967, #968).
+        if best_value.is_some() && !best_ordinal {
+            let run = parts[i..=best_end].concat();
+            let norm = crate::normalize(rstrip_punct(py_strip(&run)));
+            if matches!(crate::elided_place(converter.n2w_key(), &norm), Some((true, _))) {
+                out.push_str(&run);
+                i = best_end + 1;
+                continue;
+            }
+        }
+
         if let Some(v) = best_value {
             // Preserve trailing punctuation that was stripped during parse.
             let run = parts[i..=best_end].concat();
@@ -6073,6 +6090,66 @@ mod sign_and_script_tests {
         assert!(crate::words2num("10", "en", "cardinal").is_ok());
         let p = std::collections::HashMap::new();
         assert!(super::auto_parse("10²", "en", &p, None, None).is_err());
+    }
+}
+
+#[cfg(test)]
+mod elided_place_tests {
+    /// #875: th / lo / km elide the place of a digit after a bare scale
+    /// word; after a multiplier the spelling is also the renderer's units
+    /// reading, so it is no one number in running text.
+    #[test]
+    fn digit_after_scale_word_issue_875() {
+        let card = |t: &str, l: &str| match crate::words2num(t, l, "cardinal") {
+            Ok(crate::w2n_lang_en::W2nValue::Int(v)) => Some(v.to_string()),
+            _ => None,
+        };
+        for (t, l, v) in [
+            ("หมื่นห้า", "th", "15000"),
+            ("ล้านสอง", "th", "1200000"),
+            ("พันห้า", "th", "1500"),
+            ("ติดลบหมื่นห้า", "th", "-15000"),
+            ("ໝື່ນຫ້າ", "lo", "15000"),
+            ("ម៉ឺនប្រាំ", "km", "15000"),
+            ("ពាន់ប្រាំពីរ", "km", "1700"),
+            // The renderer's own spellings keep their reading.
+            ("สองพันห้า", "th", "2005"),
+            ("หนึ่งหมื่นห้า", "th", "10005"),
+            ("ສອງພັນ ຫ້າ", "lo", "2005"),
+            ("ពីរពាន់ ប្រាំ", "km", "2005"),
+            ("สองพันห้าร้อย", "th", "2500"),
+        ] {
+            assert_eq!(card(t, l).as_deref(), Some(v), "{l} {t}");
+        }
+        let sent = |t: &str, l: &str| super::words2num_sentence(t, l, "cardinal", false).unwrap();
+        for (t, l, want) in [
+            ("ราคาสองพันห้า", "th", "ราคาสองพันห้า"),
+            ("รถคันนี้ราคาแปดแสนห้า", "th", "รถคันนี้ราคาแปดแสนห้า"),
+            ("เงินเดือนประมาณหมื่นห้า", "th", "เงินเดือนประมาณ15000"),
+            ("บ้านหลังนี้ราคาล้านสอง", "th", "บ้านหลังนี้ราคา1200000"),
+            ("ราคาสองพันห้าร้อยบาท", "th", "ราคา2500บาท"),
+            ("ລາຄາ ສອງພັນ ຫ້າ ກີບ", "lo", "ລາຄາ ສອງພັນ ຫ້າ ກີບ"),
+            ("ម៉ឺនប្រាំ រៀល", "km", "15000 រៀល"),
+            ("តម្លៃ ពីរពាន់ ប្រាំ រៀល", "km", "តម្លៃ ពីរពាន់ ប្រាំ រៀល"),
+        ] {
+            assert_eq!(sent(t, l), want, "{l} {t}");
+        }
+        // No year label is guessed: "per year" amounts and year ranges stay
+        // words alike (#967, #968).
+        for (t, l) in [
+            ("ปีสองพันห้า", "th"),
+            ("ค่าธรรมเนียมต่อปีสองพันห้าบาท", "th"),
+            ("ปีสองพันห้าถึงสองพันหก", "th"),
+            ("ຄ່າທຳນຽມຕໍ່ປີ ສອງພັນ ຫ້າ ກີບ", "lo"),
+            ("ថ្លៃប្រចាំឆ្នាំ ពីរពាន់ ប្រាំ រៀល", "km"),
+        ] {
+            assert_eq!(sent(t, l), t, "{l} {t}");
+        }
+        // A decimal's whole part takes the same reading (a bare scale word is
+        // never the renderer's).
+        assert_eq!(format!("{:?}", crate::words2num("หมื่นห้าจุดห้า", "th", "cardinal").unwrap()), format!("{:?}", crate::words2num("15000.5", "en", "cardinal").unwrap()));
+        // Not my: "နှစ်ထောင့်ငါး" is 2005.
+        assert!(crate::elided_place("my", "နှစ်ထောင့်ငါး").is_none());
     }
 }
 

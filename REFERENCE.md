@@ -498,6 +498,22 @@ plural rules to a long-form unit name. Invoked automatically by
 
 ---
 
+## Thai, Lao and Khmer: a digit after a scale word
+
+Spoken th/lo/km elide the place of a digit after a scale word of a thousand
+or more: "หมื่นห้า" is 15 000 and "ล้านสอง" 1 200 000. Without a multiplier
+before the scale word that is the only reading, in every function. With
+one ("สองพันห้า", lo "ສອງພັນ ຫ້າ", km "ពីរពាន់ ប្រាំ") num2words2 writes the
+same words for the digit as units (2005), so:
+
+- `words2num` returns the renderer's reading (2005) and gives no sign that
+  the speaker may have meant 2500: "พันห้า" is 1500, "หนึ่งพันห้า" 1005;
+- the sentence functions leave such a span as words, a year included
+  ("ปีสองพันห้า"): unspaced text gives no sure year label ("ต่อปี" is
+  "per year"), so none is guessed.
+
+---
+
 ## Conversion types
 
 The `to=` parameter on `words2num` and `words2num_sentence` accepts
