@@ -90,7 +90,8 @@ pub(crate) fn glued_script_digit(text: &str) -> bool {
 /// (ar "-، 50" is -0.50). The caller reads the result with the locale's
 /// separators (#309, #896).
 pub(crate) fn signed_figure_in(text: &str, lang: &str) -> Option<String> {
-    let mark_is_decimal = w2n_decimal::has_hundredths_mark(lang);
+    let resolved = w2n_sentence::resolve_lang(lang).ok()?;
+    let mark_is_decimal = w2n_decimal::has_hundredths_mark(&resolved);
     let (h, f) = text.trim().split_once(char::is_whitespace)?;
     let comma = |c: char| c == ',' || (c == '\u{060C}' && !mark_is_decimal);
     let head = h.strip_suffix(comma).unwrap_or(h);
@@ -104,7 +105,6 @@ pub(crate) fn signed_figure_in(text: &str, lang: &str) -> Option<String> {
             figure = rest.trim_start();
         }
     }
-    let resolved = w2n_sentence::resolve_lang(lang).ok()?;
     let word = normalize(head);
     let is_sign = ["minus", "negative"].contains(&word.as_str())
         || strip_sign(&resolved, &format!("{word} x")).is_some_and(|(r, glued)| r == "x" && !glued);

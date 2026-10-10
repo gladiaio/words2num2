@@ -396,3 +396,12 @@ def test_comma_after_sign_word_is_punctuation():
 
     assert words2num("moins, 1.234", lang="fr") == -1234
     assert words2num("minus, 1.234", lang="de") == -1234
+
+
+def test_auto_parse_sign_word_keeps_separators_and_region():
+    assert auto_parse("moins 1.234", lang="fr").value == -1234
+    assert auto_parse("moins 1.234", lang="fr", decimal_sep=".").value == Decimal(
+        "-1.234"
+    )
+    assert auto_parse("menos 1.234", lang="es_MX").value == Decimal("-1.234")
+    assert auto_parse("menos 1,234", lang="es_MX").value == -1234
