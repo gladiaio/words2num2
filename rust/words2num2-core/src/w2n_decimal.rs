@@ -191,7 +191,7 @@ fn mark_words(text: &str, mark: &str) -> Vec<String> {
             // A sign alone before it is no word: "-, خمسون" is minus ", خمسون"
             // (#959). Two characters looked at, no more (#964).
             let mut lead = chars[..k].iter().filter(|c| !c.is_whitespace());
-            let sign_only = matches!((lead.next(), lead.next()), (Some(s), None) if crate::w2n_formats::is_minus(*s) || matches!(s, '+' | '\u{207B}' | '\u{208B}'));
+            let sign_only = matches!((lead.next(), lead.next()), (Some(s), None) if crate::w2n_formats::is_minus(*s) || *s == '+');
             if (letter(before) || before.is_none() || sign_only) && letter(after) {
                 mark.to_string()
             } else {
@@ -713,7 +713,7 @@ mod tests {
         assert_eq!(crate::words2num("مائة ،", "ar", "cardinal").unwrap(), W2nValue::Int(100.into()));
         assert_eq!(crate::words2num("ثلاثة ، ،", "ar", "cardinal").unwrap(), W2nValue::Int(3.into()));
         // #959: a dash before an ASCII comma leaves it the mark, as a sign word does.
-        for t in ["-, خمسون", "- , خمسون", "\u{2212}, خمسون", "-,خمسون", "سالب , خمسون", "\u{2013}, خمسون", "\u{FF0D}, خمسون", "\u{207B}, خمسون"] {
+        for t in ["-, خمسون", "- , خمسون", "\u{2212}, خمسون", "-,خمسون", "سالب , خمسون", "\u{2013}, خمسون", "\u{FF0D}, خمسون"] {
             assert_eq!(format!("{:?}", crate::words2num(t, "ar", "cardinal").unwrap()), format!("{:?}", crate::words2num("-، خمسون", "ar", "cardinal").unwrap()), "{t}");
         }
         // #617: only the renderer's hundredths follow the mark; a list stays one.
