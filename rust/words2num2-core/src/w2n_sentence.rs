@@ -1902,8 +1902,12 @@ fn comma_after_scale(converter: &Converter, tok: &str) -> Option<BigInt> {
     }
     let clean = rstrip_punct(tok).to_lowercase().replace('-', " ");
     let last = *py_split_whitespace(&clean).last()?;
+    let words = scale_comma_words(converter.n2w_key());
+    if words.is_empty() {
+        return None; // the renderer writes no scale comma (ru, pl, es, ...)
+    }
     let norm = crate::normalize(last);
-    if !scale_comma_words(converter.n2w_key()).iter().any(|w| *w == norm) {
+    if !words.iter().any(|w| *w == norm) {
         return None;
     }
     if !is_scale_word(converter, last, 1_000) {
@@ -6362,6 +6366,7 @@ mod scale_comma_normalize_tests {
         assert_eq!(s("um milhao, duzentos mil"), "1200000");
         assert_eq!(s("dois bilhoes, trezentos milhoes"), "2300000000");
         assert_eq!(s("dois milho\u{303}es, trezentos mil"), "2300000");
+        assert_eq!(s("DOIS MILHOES, TREZENTOS MIL"), "2300000");
         assert_eq!(s("em dois mil, cinco pessoas vieram"), "em 2000, 5 pessoas vieram");
     }
 }
