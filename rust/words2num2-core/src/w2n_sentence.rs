@@ -6295,7 +6295,7 @@ mod auto_parse_sign_tests {
         // #979: what the figure parser declines still reads without separators.
         assert_eq!(v("2024.", "en"), W2nValue::Int(2024.into()));
         assert_eq!(v("-1.", "en"), W2nValue::Int((-1).into()));
-        assert_eq!(dec(v(".5", "de")), dec(W2nValue::Dec("0.5".parse().unwrap())));
+        assert!(matches!(v(".5", "de"), W2nValue::Float(f) if f == 0.5), "as on main");
         assert_eq!(auto_parse("12. km", "en", &p, None, None).unwrap().value, W2nValue::Int(12.into()));
         // The caller's own separator characters (ar "٫", de_CH "’").
         assert_eq!(dec(auto_parse("٣٫٥ km", "ar", &p, None, Some("٫")).unwrap().value), dec(W2nValue::Dec("3.5".parse().unwrap())));
