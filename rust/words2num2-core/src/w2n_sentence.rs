@@ -800,7 +800,9 @@ impl Converter {
             Converter::En => false,
             Converter::Table(lang) => {
                 let norm = crate::normalize(token);
-                crate::w2n_forms::is_number_part(lang, &norm) || crate::w2n_forms::is_bound_form(lang, &norm)
+                crate::w2n_forms::is_number_part(lang, &norm)
+                    || crate::w2n_forms::is_bound_form(lang, &norm)
+                    || crate::w2n_forms::is_glued_morpheme(lang, &norm)
             }
         }
     }
@@ -1171,6 +1173,7 @@ fn despace_ok(lang: &str, norm: &str) -> bool {
             || crate::token_may_be_number(lang, p)
             || crate::w2n_forms::is_number_part(lang, p)
             || crate::w2n_forms::is_bound_form(lang, p)
+            || crate::w2n_forms::is_glued_morpheme(lang, p)
             || apocope_word(lang, p).is_some()
     })
 }
@@ -6346,5 +6349,26 @@ mod region_decimal_word_tests {
             let fig = out.split_whitespace().nth(1).unwrap();
             assert_eq!(format!("{:?}", crate::words2num(fig, l, "cardinal").unwrap()), format!("{:?}", crate::words2num(&t[2..t.len() - 2], l, "cardinal").unwrap()), "{l} {fig}");
         }
+    }
+}
+
+#[cfg(test)]
+mod glued_morpheme_tests {
+    /// #947: a tens morpheme the renderer writes glued may be spoken apart;
+    /// a stray fragment still is no number (#285).
+    #[test]
+    fn spaced_tens_morpheme_issue_947() {
+        let card = |t: &str, l: &str| crate::words2num(t, l, "cardinal").ok().map(|v| format!("{v:?}"));
+        let int = |n: i64| Some(format!("{:?}", crate::w2n_lang_en::W2nValue::Int(n.into())));
+        for (t, l, n) in [("kolme kymmentä", "fi", 30), ("două zeci", "ro", 20), ("kaks kümmend", "et", 20), ("huszon kettő", "hu", 22), ("veinti tres", "es", 23), ("ოცდა ათი", "ka", 30)] {
+            assert_eq!(card(t, l), int(n), "{l} {t}");
+        }
+        for (t, l) in [("d eux", "fr"), ("ba y", "vi"), ("twee de", "nl")] {
+            assert_eq!(card(t, l), None, "{l} {t}");
+        }
+        let s = |t: &str, l: &str| super::words2num_sentence(t, l, "cardinal", false).unwrap();
+        assert_eq!(s("hän on kolme kymmentä viisi vuotta", "fi"), "hän on 35 vuotta");
+        assert_eq!(s("trei zeci de oameni", "ro"), "30 de oameni");
+        assert_eq!(s("x d eux y", "fr"), "x d eux y");
     }
 }

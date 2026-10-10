@@ -287,6 +287,9 @@ struct Derived {
     /// "ನೂರ", mn "дөчин", he "עשרת". The sentence walker lets such a token
     /// carry a run on, since only the full phrase is a number.
     parts: HashSet<String>,
+    /// The tokens of the renderings below 100: the tens morphemes the
+    /// renderer only writes glued live inside them (fi "kolmekymmentä").
+    small_tokens: Vec<String>,
 }
 
 fn derived_cache() -> &'static RwLock<HashMap<String, Arc<Derived>>> {
@@ -478,6 +481,14 @@ fn derive(lang: &str, tab: &HashMap<String, i64>) -> Derived {
         }
     }
     d.parts = parts;
+    let mut small: Vec<String> = tab
+        .iter()
+        .filter(|(_, v)| **v < 100)
+        .flat_map(|(k, _)| k.split_whitespace().map(str::to_string).collect::<Vec<_>>())
+        .collect();
+    small.sort();
+    small.dedup();
+    d.small_tokens = small;
     d
 }
 
@@ -601,6 +612,21 @@ pub fn is_bound_form(lang: &str, norm: &str) -> bool {
 /// run on; connectors and words under three letters are left out.
 pub fn is_number_part(lang: &str, norm: &str) -> bool {
     crate::with_cardinal_table(lang, |tab| derived(lang, tab).parts.contains(norm)).unwrap_or(false)
+}
+
+/// Is `norm` (one token) a morpheme the renderer only writes glued into its
+/// number words, as spoken text may split it off: fi "kymmentä" (in
+/// "kolmekymmentä", "neljäkymmentä", ...), ro "zeci", es "veinti", hu
+/// "huszon" (#947)? Inside three different words below 100 at least, and
+/// three letters long, so a stray piece is none: fr "eux" lives in "deux"
+/// only, nl "de" and vi "y" are too short (#285).
+pub fn is_glued_morpheme(lang: &str, norm: &str) -> bool {
+    norm.chars().count() >= 3
+        && !norm.contains(' ')
+        && crate::with_cardinal_table(lang, |tab| {
+            derived(lang, tab).small_tokens.iter().filter(|t| t.as_str() != norm && t.contains(norm)).take(3).count() >= 3
+        })
+        .unwrap_or(false)
 }
 
 /// Does the renderer spell another value exactly like `norm` too? Where the
