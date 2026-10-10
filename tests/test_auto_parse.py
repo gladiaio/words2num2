@@ -379,3 +379,13 @@ def test_regional_separators_in_words2num_and_auto_parse(lang, text, expected):
 
     assert words2num(text, lang=lang) == expected
     assert auto_parse(text, lang=lang).value == expected
+
+
+def test_explicit_separators_never_fall_back_to_a_float():
+    with pytest.raises(Words2NumError):
+        auto_parse("1.5", lang="en", decimal_sep=",")
+
+
+def test_lowercase_region_in_parse_number_string():
+    assert parse_number_string("1,234", lang="es-mx") == 1234
+    assert parse_number_string("12,34,567", lang="en-in") == 1234567

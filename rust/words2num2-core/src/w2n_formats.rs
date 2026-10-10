@@ -298,8 +298,16 @@ pub fn locale_format(lang: &str) -> Option<NumberFormat> {
     if let Some(f) = lookup_format(&normalized) {
         return Some(f);
     }
-    let base = normalized.split('_').next().unwrap_or("");
-    lookup_format(format_alias(base))
+    // Any case: "es-mx" finds es_MX as words2num does.
+    let mut parts = normalized.split('_');
+    let base = parts.next().unwrap_or("").to_ascii_lowercase();
+    if let Some(region) = parts.next() {
+        let region = if region.len() == 2 { region.to_ascii_uppercase() } else { region.to_string() };
+        if let Some(f) = lookup_format(&format!("{base}_{region}")) {
+            return Some(f);
+        }
+    }
+    lookup_format(format_alias(&base))
 }
 
 /// The key to look a format row up by for a caller's `requested` code, once
@@ -559,7 +567,7 @@ fn lakh_grouping(groups: &[&str]) -> bool {
 fn groups_in_lakhs(lang: &str) -> bool {
     let norm = lang.replace('-', "_");
     let base = norm.split('_').next().unwrap_or("");
-    norm == "en_IN" || matches!(base, "hi" | "bn" | "ta" | "te" | "ml" | "gu" | "pa" | "or" | "ne" | "as" | "mr")
+    norm.eq_ignore_ascii_case("en_IN") || matches!(base, "hi" | "bn" | "ta" | "te" | "ml" | "gu" | "pa" | "or" | "ne" | "as" | "mr")
 }
 
 /// [`valid_grouping`]; `zero_head_ok` where the caller named the thousands
@@ -1152,6 +1160,9 @@ mod tests {
         assert_eq!(pl("1.234", "es").unwrap(), int(1234));
         // km groups with a comma (CLDR).
         assert_eq!(pl("1,234", "km").unwrap(), int(1234));
+        // A region in any case.
+        assert_eq!(pl("1,234", "es-mx").unwrap(), int(1234));
+        assert_eq!(pl("12,34,567", "en-in").unwrap(), int(1234567));
         assert_eq!(pl("1.234", "km").unwrap(), dec("1.234"));
         // Lakh grouping where CLDR uses it.
         assert_eq!(pl("12,34,567.5", "hi").unwrap(), dec("1234567.5"));

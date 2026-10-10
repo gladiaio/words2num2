@@ -4271,6 +4271,14 @@ pub fn auto_parse(
     // 5. Pure number — digit form, then word form.
     match parse_number_string(text, thousands_sep, decimal_sep, Some(fmt_lang)) {
         Ok(value) => return Ok(Quantity::bare(value, raw)),
+        // Figures the caller gave separators for are no words: "1.5" with
+        // decimal_sep="," raises, it is no float 1.5.
+        Err(e @ W2nError::Words2Num(_))
+            if (thousands_sep.is_some_and(|t| !t.is_empty()) || decimal_sep.is_some_and(|d| !d.is_empty()))
+                && text.chars().all(|c| c.is_ascii_digit() || ".,'_ +-".contains(c)) =>
+        {
+            return Err(W2nError::Words2Num(format!("could not auto-parse {}: {}", py_repr_str(raw), e.message())));
+        }
         Err(W2nError::Words2Num(_)) => {}
         Err(e) => return Err(e),
     }
