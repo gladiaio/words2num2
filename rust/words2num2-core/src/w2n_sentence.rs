@@ -6468,7 +6468,7 @@ mod glued_sign_figure_tests {
         assert_eq!(w("-.5", "de", "cardinal").as_deref(), Some("Float(-0.5)"), "as on main");
         assert_eq!(w("\u{8D1F} .5", "zh", "cardinal").as_deref(), Some("Float(-0.5)"), "as on main");
         assert_eq!(w("-.1999", "de", "cardinal").as_deref(), Some("Float(-0.1999)"), "as on main");
-        for (t, l) in [("-(5", "en"), ("-:5", "en"), ("-,5", "en"), ("\u{8D1F}.5", "zh")] {
+        for (t, l) in [("-(5", "en"), ("-:5", "en"), ("-,5", "en"), ("\u{8D1F}.5", "zh"), ("-.,5", "en"), ("-(,5", "en"), ("- .,5", "en")] {
             assert_eq!(w(t, l, "cardinal"), None, "{l} {t}");
         }
         let p = std::collections::HashMap::new();
