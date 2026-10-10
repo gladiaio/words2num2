@@ -1551,12 +1551,22 @@ pub fn words2num(
             let table = match to {
                 // A decimal spoken in words, read as the sentence walker
                 // reads it: fr "trois virgule un quatre" -> 3.14 (#191).
-                "cardinal" => base_convert(lang, text, false).or_else(|e| {
-                    table_decimal(&converter, &resolved, text)
-                        .and_then(|(int, _, frac)| BigDecimal::from_str(&format!("{}.{}", int, frac)).ok())
-                        .map(W2nValue::Dec)
-                        .ok_or(e)
-                }),
+                "cardinal" => {
+                    let decimal = || {
+                        table_decimal(&converter, &resolved, text)
+                            .and_then(|(int, _, frac)| BigDecimal::from_str(&format!("{}.{}", int, frac)).ok())
+                            .map(W2nValue::Dec)
+                    };
+                    // ar "مائة ، خمسون": the mark normalizing drops makes it a
+                    // decimal, never the cardinal 150 (#371).
+                    if crate::w2n_decimal::has_written_mark(converter.n2w_key(), text) {
+                        decimal().ok_or_else(|| {
+                            W2nError::Words2Num(format!("cannot parse {} as a number", py_repr_str(text)))
+                        })
+                    } else {
+                        base_convert(lang, text, false).or_else(|e| decimal().ok_or(e))
+                    }
+                }
                 // A currency amount was read above; what is left is the cardinal.
                 "currency" => base_convert(lang, text, false),
                 "year" => table_year(lang, text),
