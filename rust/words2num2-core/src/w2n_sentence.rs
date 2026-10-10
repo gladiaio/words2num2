@@ -3023,6 +3023,7 @@ fn words2num_sentence_walk(
 ) -> Result<String, W2nError> {
     let resolved = resolve_lang(lang)?;
     let converter = converter_for(&resolved);
+    let postfix_scales = matches!(converter, Converter::Table(l) if crate::has_postfix_scales(l));
     // Regional English reads with the English grammar where its table
     // declines (#193), so it takes the English run rules too.
     let en_grammar = matches!(converter, Converter::En) || en_variant(&resolved);
@@ -3213,6 +3214,10 @@ fn words2num_sentence_walk(
         let mut failed = 0usize;
         // The commas the run crossed after a scale word, with that scale (#67).
         let mut commas: Vec<(usize, BigInt)> = Vec::new();
+        // The end of a span the renderer writes for two values (ha "miliyan
+        // dubu ɗari": 1 001 100 and 1 100 000): no one number, so its words
+        // stay rather than read as two (#348).
+        let mut ambiguous_end: Option<usize> = None;
         while j < n {
             let tok = &parts[j];
             if py_str_isspace(tok) {
@@ -3308,7 +3313,14 @@ fn words2num_sentence_walk(
                 }
                 Some(_) => failed += 1,
                 None if !candidate => break,
-                None => failed += 1,
+                None => {
+                    if postfix_scales
+                        && crate::is_ambiguous_number(converter.n2w_key(), &crate::normalize(&stripped))
+                    {
+                        ambiguous_end = Some(j);
+                    }
+                    failed += 1
+                }
             }
             // A token ending in terminal punctuation closes the run — except
             // the comma num2words2 itself writes after a scale word ("twelve
@@ -3333,6 +3345,12 @@ fn words2num_sentence_walk(
                     best_end = end;
                 }
             }
+        }
+
+        if let Some(end) = ambiguous_end.filter(|&e| e > best_end) {
+            out.push_str(&parts[i..=end].concat());
+            i = end + 1;
+            continue;
         }
 
         // ru "двадцать первый", pl "dwadzieścia pierwszy": a cardinal followed

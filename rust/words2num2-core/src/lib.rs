@@ -1222,6 +1222,54 @@ pub fn parse_scaled(lang: &str, text: &str) -> Option<i64> {
 
 /// [`parse_scaled`] on normalized text.
 pub fn parse_scaled_norm(lang: &str, norm: &str) -> Option<i64> {
+    match scaled_reading(lang, norm) {
+        Scaled::Value(v) => Some(v),
+        Scaled::Ambiguous | Scaled::None => None,
+    }
+}
+
+/// A scaled reading: one value, a spelling the renderer gives two values, or
+/// none.
+enum Scaled {
+    Value(i64),
+    Ambiguous,
+    None,
+}
+
+/// Does the renderer write `norm` for two different values, so that it is
+/// no one number (ha "miliyan goma": 1 000 010 and 10 000 000)? The sentence
+/// walker then leaves the words alone rather than reading them as two
+/// numbers (#348).
+pub fn is_ambiguous_number(lang: &str, norm: &str) -> bool {
+    matches!(scaled_reading(lang, norm), Scaled::Ambiguous)
+}
+
+/// Whether `lang` puts a multiplier after its scale word (ha, bm, sw, ...),
+/// the only languages [`is_ambiguous_number`] can answer yes for.
+pub fn has_postfix_scales(lang: &str) -> bool {
+    is_supported_lang(lang) && {
+        let sc = scales_of(lang);
+        !sc.postfix.is_empty() || !sc.one_after.is_empty()
+    }
+}
+
+fn scaled_reading(lang: &str, norm: &str) -> Scaled {
+    let Some(v) = scaled_value(lang, norm) else { return Scaled::None };
+    let sc = scales_of(lang);
+    if w2n_forms::has_rival_reading(lang, v, norm) || postfix_rival(lang, v, norm, &sc) {
+        return Scaled::Ambiguous; // bm "ba tan ni kelen": 10001 and 11000 render alike
+    }
+    // Where the multiplier may follow the scale word (ha, ff, sw, sn, bm, tet,
+    // eu), a spelling can split several ways and num2words2 sometimes renders
+    // two values alike. Only a reading the renderer spells this way is kept:
+    // a raise beats a wrong number.
+    if (!sc.postfix.is_empty() || !sc.one_after.is_empty()) && !renders_as(lang, v, norm) {
+        return Scaled::None;
+    }
+    Scaled::Value(v)
+}
+
+fn scaled_value(lang: &str, norm: &str) -> Option<i64> {
     if !is_supported_lang(lang) {
         return None;
     }
@@ -1245,16 +1293,6 @@ pub fn parse_scaled_norm(lang: &str, norm: &str) -> Option<i64> {
             (None, None) => return None,
         },
     };
-    if w2n_forms::has_rival_reading(lang, v, norm) || postfix_rival(lang, v, norm, &sc) {
-        return None; // bm "ba tan ni kelen": 10001 and 11000 render alike
-    }
-    // Where the multiplier may follow the scale word (ha, ff, sw, sn, bm, tet,
-    // eu), a spelling can split several ways and num2words2 sometimes renders
-    // two values alike. Only a reading the renderer spells this way is kept:
-    // a raise beats a wrong number.
-    if (!sc.postfix.is_empty() || !sc.one_after.is_empty()) && !renders_as(lang, v, norm) {
-        return None;
-    }
     Some(v)
 }
 
@@ -1277,9 +1315,15 @@ fn postfix_rival(lang: &str, v: i64, norm: &str, sc: &Scales) -> bool {
         let Some(m) = lookup_plain(lang, &toks[i + 1..].join(" ")).filter(|m| (2..1000).contains(m)) else {
             return false;
         };
-        let head = if i == 0 { Some(0) } else { parse_scaled_norm_unchecked(lang, &toks[..i].join(" ")) };
-        head.and_then(|h| h.checked_add(unit.checked_mul(m)?))
-            .is_some_and(|rival| rival != v && renders_as(lang, rival, norm))
+        let Some(h) = (if i == 0 { Some(0) } else { parse_scaled_norm_unchecked(lang, &toks[..i].join(" ")) })
+        else {
+            return false;
+        };
+        // Both ways round: the multiplier reading ("miliyan goma" = 10^7) and
+        // the additive one (10^6 + 10) — whichever `v` is, the other rivals it.
+        let mult = unit.checked_mul(m).and_then(|x| h.checked_add(x));
+        let add = h.checked_add(unit).and_then(|x| x.checked_add(m));
+        [mult, add].into_iter().flatten().any(|rival| rival != v && renders_as(lang, rival, norm))
     })
 }
 
@@ -2426,6 +2470,11 @@ mod tests {
         assert_eq!(parse_scaled("ha", "miliyan dubu biyu"), Some(1_002_000));
         assert_eq!(parse_scaled("ha", "miliyan dubu uku ɗari huɗu hamsin da shida"), Some(1_003_456));
         assert_eq!(parse_scaled("ha", "biliyan dubu"), Some(1_000_001_000));
+        // Spellings the renderer gives two values raise, both ways round.
+        assert_eq!(parse_scaled("ha", "miliyan goma"), None); // 1 000 010, 10^7
+        assert_eq!(parse_scaled("ha", "miliyan ɗari biyar"), None); // 1 000 500, 5·10^8
+        assert_eq!(parse_scaled("ha", "miliyan dubu ɗari"), None); // 1 001 100, 1 100 000
+        assert_eq!(parse_scaled("ha", "miliyan biyu dubu ɗari uku sha biyar"), None);
         assert_eq!(parse_scaled("ff", "ujunere teemerre"), Some(100_000));
         // km myriad and hundred-thousand glued to their multiplier.
         assert_eq!(parse_scaled("km", "មួយម៉ឺន ពីរពាន់ បីរយ សែសិបប្រាំ"), Some(12_345));
