@@ -1745,7 +1745,8 @@ fn connector_join_ok(converter: &Converter, stripped: &str, total: &W2nValue, ha
 }
 
 /// The words the renderer writes a comma after inside one number (en
-/// "thousand", it "miliardo" only), normalized and lowercased. Elsewhere a
+/// "thousand" and every larger scale, it "miliardo" and the scales above
+/// it), normalized and lowercased. Elsewhere a
 /// comma there separates a list: ru "две тысячи, триста" is 2000 and 300
 /// (#657). Read from the renderer's own output, once per language.
 fn scale_comma_words(key: &str) -> std::sync::Arc<Vec<String>> {
