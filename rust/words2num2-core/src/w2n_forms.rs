@@ -287,9 +287,12 @@ struct Derived {
     /// "ನೂರ", mn "дөчин", he "עשרת". The sentence walker lets such a token
     /// carry a run on, since only the full phrase is a number.
     parts: HashSet<String>,
-    /// The tokens of the renderings below 100: the tens morphemes the
-    /// renderer only writes glued live inside them (fi "kolmekymmentä").
-    small_tokens: Vec<String>,
+    /// The tens morphemes the renderer only writes glued: what is left of a
+    /// tens word after its leading unit (fi "kolme|kymmentä", ro
+    /// "doua|zeci"), or of a word from 21 to 99 after its trailing unit (es
+    /// "veinti|tres", hu "huszon|ketto"). Never a teen's piece: sv "ton" of
+    /// "femton" is also the word for a tonne (#982).
+    morphemes: HashSet<String>,
 }
 
 fn derived_cache() -> &'static RwLock<HashMap<String, Arc<Derived>>> {
@@ -481,14 +484,31 @@ fn derive(lang: &str, tab: &HashMap<String, i64>) -> Derived {
         }
     }
     d.parts = parts;
-    let mut small: Vec<String> = tab
-        .iter()
-        .filter(|(_, v)| **v < 100)
-        .flat_map(|(k, _)| k.split_whitespace().map(str::to_string).collect::<Vec<_>>())
-        .collect();
-    small.sort();
-    small.dedup();
-    d.small_tokens = small;
+    let units: Vec<(i64, &str)> = tab.iter().filter(|(k, v)| (1..=10).contains(*v) && !k.contains(' ')).map(|(k, v)| (*v, k.as_str())).collect();
+    let mut morphemes: HashSet<String> = HashSet::new();
+    let mut keep = |m: &str| {
+        // Four letters at least: hu "van" (60 = "hat|van") is also "is".
+        if m.chars().count() >= 4 && !tab.contains_key(m) && !conns.contains(&m) {
+            morphemes.insert(m.to_string());
+        }
+    };
+    for (k, v) in tab.iter().filter(|(k, v)| (20..=99).contains(*v) && !k.contains(' ')) {
+        for (u, uw) in &units {
+            if v % 10 == 0 && (2..=9).contains(u) && *v == u * 10 {
+                if let Some(rest) = k.strip_prefix(uw) {
+                    keep(rest);
+                }
+            }
+            // Units 1-9 only: nb "førti" less "ti" (10) leaves "før", which
+            // is the word for "before" (#982).
+            if *v % 10 != 0 && (1..=9).contains(u) && *v % 10 == *u {
+                if let Some(head) = k.strip_suffix(uw) {
+                    keep(head);
+                }
+            }
+        }
+    }
+    d.morphemes = morphemes;
     d
 }
 
@@ -614,19 +634,13 @@ pub fn is_number_part(lang: &str, norm: &str) -> bool {
     crate::with_cardinal_table(lang, |tab| derived(lang, tab).parts.contains(norm)).unwrap_or(false)
 }
 
-/// Is `norm` (one token) a morpheme the renderer only writes glued into its
-/// number words, as spoken text may split it off: fi "kymmentä" (in
-/// "kolmekymmentä", "neljäkymmentä", ...), ro "zeci", es "veinti", hu
-/// "huszon" (#947)? Inside three different words below 100 at least, and
-/// three letters long, so a stray piece is none: fr "eux" lives in "deux"
-/// only, nl "de" and vi "y" are too short (#285).
+/// Is `norm` (one token) a tens morpheme the renderer only writes glued, as
+/// spoken text may split it off: fi "kymmentä", ro "zeci", es "veinti", hu
+/// "huszon" (#947)? See `Derived::morphemes`; a stray piece is none: fr
+/// "eux", sv "ton", de "sie", nb "før" (#285, #982).
 pub fn is_glued_morpheme(lang: &str, norm: &str) -> bool {
-    norm.chars().count() >= 3
-        && !norm.contains(' ')
-        && crate::with_cardinal_table(lang, |tab| {
-            derived(lang, tab).small_tokens.iter().filter(|t| t.as_str() != norm && t.contains(norm)).take(3).count() >= 3
-        })
-        .unwrap_or(false)
+    !norm.contains(' ')
+        && crate::with_cardinal_table(lang, |tab| derived(lang, tab).morphemes.contains(norm)).unwrap_or(false)
 }
 
 /// Does the renderer spell another value exactly like `norm` too? Where the
