@@ -1262,10 +1262,7 @@ fn base_convert_as_written(lang: &str, norm: &str, ordinal: bool) -> Result<W2nV
             // "kırkikinci" (#70). Only a genuine table hit counts.
             if norm.contains(' ') && despace_ok(lang, &norm) {
                 let despaced: String = norm.split_whitespace().collect();
-                // A cardinal word glued is no ordinal: el "εβδομή ντα" is
-                // "εβδομήντα" (70), not the 70th (#985).
-                let cardinal = crate::lookup_norm(lang, &despaced, false, &[]).ok().flatten().is_some();
-                if let (false, Ok(Some(v))) = (cardinal, crate::lookup_norm(lang, &despaced, true, &[])) {
+                if let Ok(Some(v)) = crate::lookup_norm(lang, &despaced, true, &[]) {
                     return Ok(W2nValue::Int(BigInt::from(v)));
                 }
             }
