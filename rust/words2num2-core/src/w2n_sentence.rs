@@ -2264,9 +2264,8 @@ fn table_decimal(
     fmt_key: &str,
     text: &str,
 ) -> Option<(String, char, String)> {
-    let default_sep = crate::w2n_formats::locale_format(fmt_key)
-        .and_then(|f| f.decimal.chars().next())
-        .unwrap_or('.');
+    let region_sep = crate::w2n_formats::locale_format(fmt_key).and_then(|f| f.decimal.chars().next());
+    let default_sep = region_sep.unwrap_or('.');
     let cardinal = |words: &str| match converter.to_cardinal(words).ok()? {
         W2nValue::Int(i) => Some(i),
         _ => None,
@@ -2274,7 +2273,11 @@ fn table_decimal(
     crate::w2n_decimal::read(
         converter.n2w_key(),
         text,
-        &|w| decimal_word(resolved, w),
+        // A "comma" word writes the region's mark, so the output reads back
+        // as written: es_MX "tres coma uno cuatro uno" is "3.141", which es_MX
+        // reads as 3.141, never 3141 (#951). "punto" keeps the point the
+        // speaker chose; a language with no format row (af) its own comma.
+        &|w| decimal_word(resolved, w).map(|c| if c == ',' { region_sep.unwrap_or(c) } else { c }),
         default_sep,
         &cardinal,
     )
@@ -6261,5 +6264,27 @@ mod auto_parse_sign_tests {
         assert!(auto_parse("1.5", "en", &p, None, Some(",")).is_err());
         // "AR" is ar: its "،" stays the decimal mark.
         assert_eq!(format!("{:?}", crate::words2num("-، 50", "AR", "cardinal").unwrap()), format!("{:?}", crate::words2num("-، 50", "ar", "cardinal").unwrap()));
+    }
+}
+
+#[cfg(test)]
+mod region_decimal_word_tests {
+    /// #951: a spoken decimal is written with the region's mark, so the
+    /// figure reads back as the same number in that region.
+    #[test]
+    fn spoken_decimal_takes_the_region_mark_issue_951() {
+        let s = |t: &str, l: &str| super::words2num_sentence(t, l, "cardinal", false).unwrap();
+        for (t, l, want) in [
+            ("x tres coma uno cuatro uno y", "es_MX", "x 3.141 y"),
+            ("x drei Komma eins vier eins y", "de_CH", "x 3.141 y"),
+            ("x tre virgola uno quattro uno y", "it_CH", "x 3.141 y"),
+            ("x un virgule deux trois quatre y", "fr_CH", "x 1.234 y"),
+            ("x drei Komma fünf y", "de", "x 3,5 y"),
+        ] {
+            let out = s(t, l);
+            assert_eq!(out, want, "{l} {t}");
+            let fig = out.split_whitespace().nth(1).unwrap();
+            assert_eq!(format!("{:?}", crate::words2num(fig, l, "cardinal").unwrap()), format!("{:?}", crate::words2num(&t[2..t.len() - 2], l, "cardinal").unwrap()), "{l} {fig}");
+        }
     }
 }
