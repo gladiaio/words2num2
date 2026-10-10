@@ -1496,9 +1496,38 @@ fn py_float(s: &str) -> Option<f64> {
 
 /// `from .. import words2num; words2num(text, lang=lang)` — resolve the locale
 /// and run its `to_cardinal`.
-fn call_words2num(text: &str, lang: &str) -> Result<W2nValue, W2nError> {
+/// The separators and the region-aware format key `auto_parse` reads its
+/// figures with, for the paths that fall back to the word reader.
+struct FigureFormat<'a> {
+    key: &'a str,
+    thousands_sep: Option<&'a str>,
+    decimal_sep: Option<&'a str>,
+}
+
+fn call_words2num(text: &str, lang: &str, fmt: &FigureFormat) -> Result<W2nValue, W2nError> {
     let resolved = resolve_lang(lang)?;
-    converter_for(&resolved).to_cardinal(text)
+    // A sign before a figure, and the ar "،" decimal, read as words2num reads
+    // them, with the caller's region and separators: fr "moins 1.234" is
+    // -1234, ar "-، 50" is -0.50 (#896).
+    let fmt_key = fmt.key;
+    if let Some(signed) = crate::signed_figure_in(text, lang) {
+        let to_value = |v: crate::w2n_formats::W2nValue| match v {
+            crate::w2n_formats::W2nValue::Int(i) => W2nValue::Int(i),
+            crate::w2n_formats::W2nValue::Dec(d) => W2nValue::Dec(d),
+            crate::w2n_formats::W2nValue::Float(f) => W2nValue::Float(f),
+        };
+        return crate::w2n_formats::parse_number_string(&signed, fmt.thousands_sep, fmt.decimal_sep, Some(fmt_key))
+            .map(to_value)
+            .map_err(|e| W2nError::Words2Num(e.0));
+    }
+    let converter = converter_for(&resolved);
+    if crate::w2n_decimal::has_written_mark(converter.n2w_key(), text) {
+        return table_decimal(&converter, &resolved, fmt_key, text)
+            .and_then(|(int, _, frac)| BigDecimal::from_str(&format!("{}.{}", int, frac)).ok())
+            .map(W2nValue::Dec)
+            .ok_or_else(|| W2nError::Words2Num(unparseable_msg(text)));
+    }
+    converter.to_cardinal(text)
 }
 
 /// Port of the public `words2num2.words2num(text, lang, to)` — the single-token
@@ -4507,6 +4536,7 @@ fn try_word_unit(
     text: &str,
     lang: &str,
     prefer: &HashMap<String, String>,
+    fmt: &FigureFormat,
 ) -> Result<Option<Quantity>, W2nError> {
     let parts = py_rsplit_once_ws(text);
     if parts.len() != 2 {
@@ -4533,7 +4563,7 @@ fn try_word_unit(
 
     // `words2num(head, lang=lang)` — a raised Exception (unparseable /
     // unsupported locale) is swallowed to "not a unit expression".
-    let value = match call_words2num(head, lang) {
+    let value = match call_words2num(head, lang, fmt) {
         Ok(v) => v,
         Err(_) => return Ok(None),
     };
@@ -4647,7 +4677,8 @@ pub fn auto_parse(
     }
 
     // 4. Word-form number + unit: "forty-two kg", "twenty-three percent"
-    if let Some(mut res) = try_word_unit(text, lang, prefer)? {
+    let fmt = FigureFormat { key: fmt_lang, thousands_sep, decimal_sep };
+    if let Some(mut res) = try_word_unit(text, lang, prefer, &fmt)? {
         res.raw = raw.to_string();
         return Ok(res);
     }
@@ -4656,10 +4687,12 @@ pub fn auto_parse(
     match parse_number_string(text, thousands_sep, decimal_sep, Some(fmt_lang)) {
         Ok(value) => return Ok(Quantity::bare(value, raw)),
         // Figures the caller gave separators for are no words: "1.5" with
-        // decimal_sep="," raises, it is no float 1.5.
+        // decimal_sep="," raises, it is no float 1.5. A dash and a comma
+        // before the figure are its sign ("-, 5"), read with those separators.
         Err(e @ W2nError::Words2Num(_))
             if (thousands_sep.is_some_and(|t| !t.is_empty()) || decimal_sep.is_some_and(|d| !d.is_empty()))
-                && text.chars().all(|c| c.is_ascii_digit() || ".,'_ +-".contains(c)) =>
+                && text.chars().all(|c| c.is_ascii_digit() || ".,'_ +-".contains(c))
+                && crate::signed_figure_in(text, lang).is_none() =>
         {
             return Err(W2nError::Words2Num(format!("could not auto-parse {}: {}", py_repr_str(raw), e.message())));
         }
@@ -4667,7 +4700,7 @@ pub fn auto_parse(
         Err(e) => return Err(e),
     }
 
-    match call_words2num(text, lang) {
+    match call_words2num(text, lang, &fmt) {
         Ok(v) => Ok(Quantity::bare(v, raw)),
         // raise Words2NumError("could not auto-parse %r: %s" % (raw, exc))
         Err(e) => Err(W2nError::Words2Num(format!(
@@ -6013,5 +6046,41 @@ mod area_and_indicator_tests {
         // A folded powered unit is no certain reading.
         let q = auto_parse("5 KM²", "en", &p, None, None).unwrap();
         assert_eq!((q.unit.as_deref(), q.confidence), (Some("km²"), 0.8));
+    }
+}
+
+#[cfg(test)]
+mod auto_parse_sign_tests {
+    use super::{auto_parse, W2nValue};
+    use std::collections::HashMap;
+
+    /// #896: auto_parse reads a sign before a figure, and the ar decimal,
+    /// as words2num does; a comma split from the sign is punctuation.
+    #[test]
+    fn auto_parse_sign_word_figure_issue_896() {
+        let p = HashMap::new();
+        let v = |t: &str, l: &str| auto_parse(t, l, &p, None, None).unwrap().value;
+        assert_eq!(v("moins 1.234", "fr"), W2nValue::Int((-1234).into()));
+        assert_eq!(v("moins , 1.234", "fr"), W2nValue::Int((-1234).into()));
+        assert_eq!(v("moins ,1.234", "fr"), W2nValue::Int((-1234).into()));
+        assert_eq!(format!("{:?}", v("-، 50", "ar")), format!("{:?}", W2nValue::Dec("-0.50".parse().unwrap())));
+        let q = auto_parse("moins 1.234 kg", "fr", &p, None, None).unwrap();
+        assert_eq!(q.value, W2nValue::Int((-1234).into()));
+        assert_eq!(crate::words2num("moins , 1.234", "fr", "cardinal").unwrap(), crate::w2n_lang_en::W2nValue::Int((-1234).into()));
+        // The caller's separators and region hold on this path too.
+        let dec = |v: W2nValue| format!("{v:?}");
+        let with = |t: &str, l: &str, ts: Option<&str>, ds: Option<&str>| auto_parse(t, l, &p, ts, ds).unwrap().value;
+        assert_eq!(dec(with("moins 1.234", "fr", None, Some("."))), dec(W2nValue::Dec("-1.234".parse().unwrap())));
+        assert_eq!(dec(with("moins 1.234 kg", "fr", None, Some("."))), dec(W2nValue::Dec("-1.234".parse().unwrap())));
+        assert_eq!(dec(with("minus 1,234", "en", None, Some(","))), dec(W2nValue::Dec("-1.234".parse().unwrap())));
+        assert_eq!(dec(v("menos 1.234", "es_MX")), dec(W2nValue::Dec("-1.234".parse().unwrap())));
+        assert_eq!(v("menos 1,234", "es_MX"), W2nValue::Int((-1234).into()));
+        // A dash and a comma are a sign with separators given too.
+        assert_eq!(with("-, 5", "en", None, Some(".")), W2nValue::Int((-5).into()));
+        assert_eq!(dec(with("-, 1.234", "fr", None, Some(","))), dec(W2nValue::Int((-1234).into())));
+        assert_eq!(dec(with("-, 1.234", "fr", None, Some("."))), dec(W2nValue::Dec("-1.234".parse().unwrap())));
+        assert!(auto_parse("1.5", "en", &p, None, Some(",")).is_err());
+        // "AR" is ar: its "،" stays the decimal mark.
+        assert_eq!(format!("{:?}", crate::words2num("-، 50", "AR", "cardinal").unwrap()), format!("{:?}", crate::words2num("-، 50", "ar", "cardinal").unwrap()));
     }
 }
