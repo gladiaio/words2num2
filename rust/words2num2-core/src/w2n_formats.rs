@@ -169,7 +169,9 @@ pub static NUMBER_FORMAT_DEFAULTS: &[(&str, NumberFormat)] = &[
     ("fr_BE", nf(" ", ",")),
     ("fr_DZ", nf(" ", ",")),
     // Swiss French uses apostrophe
-    ("fr_CH", nf("'", ".")),
+    // CLDR: Swiss French writes a comma decimal (the point is its currency
+    // mark); de_CH, it_CH and de_LI write a point (#977).
+    ("fr_CH", nf("'", ",")),
     ("de_CH", nf("'", ".")),
     ("it_CH", nf("'", ".")),
     ("de_LI", nf("'", ".")),
@@ -1032,7 +1034,8 @@ mod tests {
         assert_eq!(get_format("fr").thousands, " ");
         assert_eq!(get_format("fr").decimal, ",");
         assert_eq!(get_format("fr_CH").thousands, "'"); // Swiss French
-        assert_eq!(get_format("fr_CH").decimal, ".");
+        assert_eq!(get_format("fr_CH").decimal, ",");
+        assert_eq!(get_format("de_CH").decimal, ".");
         assert_eq!(get_format("en_XX").thousands, ","); // base fallback: en
         assert_eq!(get_format("zz"), get_format("_default"));
         assert_eq!(get_format(""), get_format("_default")); // == get_format(None)
@@ -1318,7 +1321,8 @@ mod tests {
     /// The Swiss typographic apostrophe groups thousands like the ASCII one (#109).
     #[test]
     fn swiss_typographic_apostrophe() {
-        assert_eq!(pl("1\u{2019}234.5", "fr_CH").unwrap(), dec("1234.5"));
+        assert_eq!(pl("1\u{2019}234.5", "de_CH").unwrap(), dec("1234.5"));
+        assert_eq!(pl("1\u{2019}234,5", "fr_CH").unwrap(), dec("1234.5"));
         assert_eq!(pl("1\u{2019}234\u{2019}567", "fr_CH").unwrap(), int(1234567));
         assert_eq!(p("1\u{2019}234.5").unwrap(), dec("1234.5"));
         assert_eq!(p("1\u{02bc}234").unwrap(), int(1234));

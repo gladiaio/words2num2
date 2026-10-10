@@ -2273,11 +2273,11 @@ fn table_decimal(
     crate::w2n_decimal::read(
         converter.n2w_key(),
         text,
-        // A "comma" word writes the region's mark, so the output reads back
-        // as written: es_MX "tres coma uno cuatro uno" is "3.141", which es_MX
-        // reads as 3.141, never 3141 (#951). "punto" keeps the point the
-        // speaker chose; a language with no format row (af) its own comma.
-        &|w| decimal_word(resolved, w).map(|c| if c == ',' { region_sep.unwrap_or(c) } else { c }),
+        // The decimal word writes the region's mark, so the output reads back
+        // as written: es_MX "tres coma uno cuatro uno" is "3.141" and es "tres
+        // punto uno cuatro uno" "3,141", never 3141 (#951). A language with no
+        // format row (af) keeps the word's own mark.
+        &|w| decimal_word(resolved, w).map(|c| region_sep.unwrap_or(c)),
         default_sep,
         &cardinal,
     )
@@ -6278,7 +6278,13 @@ mod region_decimal_word_tests {
             ("x tres coma uno cuatro uno y", "es_MX", "x 3.141 y"),
             ("x drei Komma eins vier eins y", "de_CH", "x 3.141 y"),
             ("x tre virgola uno quattro uno y", "it_CH", "x 3.141 y"),
-            ("x un virgule deux trois quatre y", "fr_CH", "x 1.234 y"),
+            ("x un virgule deux trois quatre y", "fr_CH", "x 1,234 y"),
+            ("x tres punto uno cuatro uno y", "es", "x 3,141 y"),
+            ("x tres punto uno y", "es_MX", "x 3.1 y"),
+            ("x tres coma uno cuatro uno y", "ES-mx", "x 3.141 y"),
+            ("x drei Komma eins vier eins y", "de_LI", "x 3.141 y"),
+            ("x tres coma uno cuatro uno y", "es_419", "x 3.141 y"),
+            ("x três ponto um quatro um y", "pt_BR", "x 3,141 y"),
             ("x drei Komma fünf y", "de", "x 3,5 y"),
         ] {
             let out = s(t, l);

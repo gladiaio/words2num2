@@ -282,7 +282,8 @@ def test_quantity_repr_plain():
         ("1234.567", {}, Decimal("1234.567")),
         ("1234,567", {}, Decimal("1234.567")),
         # Swiss typographic apostrophe (#109).
-        ("1\u2019234.5", {"lang": "fr_CH"}, Decimal("1234.5")),
+        ("1\u2019234.5", {"lang": "de_CH"}, Decimal("1234.5")),
+        ("1\u2019234,5", {"lang": "fr_CH"}, Decimal("1234.5")),
         # Exact (#71).
         ("12345678901234567.89", {}, Decimal("12345678901234567.89")),
     ],
