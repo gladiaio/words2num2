@@ -800,7 +800,9 @@ impl Converter {
             Converter::En => false,
             Converter::Table(lang) => {
                 let norm = crate::normalize(token);
-                crate::w2n_forms::is_number_part(lang, &norm) || crate::w2n_forms::is_bound_form(lang, &norm)
+                crate::w2n_forms::is_number_part(lang, &norm)
+                    || crate::w2n_forms::is_bound_form(lang, &norm)
+                    || crate::w2n_forms::is_glued_morpheme(lang, &norm)
             }
         }
     }
@@ -1171,8 +1173,46 @@ fn despace_ok(lang: &str, norm: &str) -> bool {
             || crate::token_may_be_number(lang, p)
             || crate::w2n_forms::is_number_part(lang, p)
             || crate::w2n_forms::is_bound_form(lang, p)
+            || crate::w2n_forms::is_glued_morpheme(lang, p)
             || apocope_word(lang, p).is_some()
     })
+}
+
+/// `norm` with each tens morpheme glued to the word before it, every other
+/// space kept: et "kaks kümmend kolm" -> "kakskümmend kolm", es "veinti
+/// tres" -> unchanged pairs glued forward. `None` when no piece is one.
+fn morpheme_glued(lang: &str, norm: &str) -> Option<String> {
+    let toks: Vec<&str> = norm.split_whitespace().collect();
+    let mut out: Vec<String> = Vec::new();
+    let mut any = false;
+    let mut k = 0;
+    while k < toks.len() {
+        let t = toks[k];
+        if crate::w2n_forms::is_glued_morpheme(lang, t) {
+            any = true;
+            match out.last_mut() {
+                // A suffix morpheme (fi "kymmentä") joins the unit before it;
+                // a prefix one (es "veinti") the unit after it.
+                Some(prev) if !crate::w2n_forms::is_glued_morpheme(lang, prev) && k > 0 && suffix_like(lang, t) => prev.push_str(t),
+                _ if k + 1 < toks.len() => {
+                    out.push(format!("{t}{}", toks[k + 1]));
+                    k += 1;
+                }
+                _ => out.push(t.to_string()),
+            }
+        } else {
+            out.push(t.to_string());
+        }
+        k += 1;
+    }
+    any.then(|| out.join(" "))
+}
+
+/// Does the morpheme follow its unit in the renderer's words (fi "kolme
+/// kymmentä") rather than lead them (es "veinti tres")?
+fn suffix_like(lang: &str, morpheme: &str) -> bool {
+    crate::with_cardinal_table(lang, |tab| tab.keys().any(|k| !k.contains(' ') && k.len() > morpheme.len() && k.ends_with(morpheme)))
+        .unwrap_or(false)
 }
 
 fn base_convert_as_written(lang: &str, norm: &str, ordinal: bool) -> Result<W2nValue, W2nError> {
@@ -1235,6 +1275,11 @@ fn base_convert_as_written(lang: &str, norm: &str, ordinal: bool) -> Result<W2nV
                 if let Ok(Some(v)) =
                     crate::lookup_norm(lang, &despaced, false, &[])
                 {
+                    return Ok(W2nValue::Int(BigInt::from(v)));
+                }
+                // Only the morpheme glued, the renderer's own spaces kept:
+                // et "kaks kümmend kolm" is "kakskümmend kolm" (#983).
+                if let Some(v) = morpheme_glued(lang, &norm).and_then(|g| crate::lookup_norm(lang, &g, false, &[]).ok().flatten()) {
                     return Ok(W2nValue::Int(BigInt::from(v)));
                 }
                 // Beyond the table: tr writes "üç yüz bin" spaced where
@@ -6352,6 +6397,33 @@ mod region_decimal_word_tests {
             let fig = out.split_whitespace().nth(1).unwrap();
             assert_eq!(format!("{:?}", crate::words2num(fig, l, "cardinal").unwrap()), format!("{:?}", crate::words2num(&t[2..t.len() - 2], l, "cardinal").unwrap()), "{l} {fig}");
         }
+    }
+}
+
+#[cfg(test)]
+mod glued_morpheme_tests {
+    /// #947: a tens morpheme the renderer writes glued may be spoken apart;
+    /// a stray fragment still is no number (#285).
+    #[test]
+    fn spaced_tens_morpheme_issue_947() {
+        let card = |t: &str, l: &str| crate::words2num(t, l, "cardinal").ok().map(|v| format!("{v:?}"));
+        let int = |n: i64| Some(format!("{:?}", crate::w2n_lang_en::W2nValue::Int(n.into())));
+        for (t, l, n) in [("kolme kymmentä", "fi", 30), ("două zeci", "ro", 20), ("kaks kümmend", "et", 20), ("huszon kettő", "hu", 22), ("veinti tres", "es", 23), ("kaks kümmend kolm", "et", 23)] {
+            assert_eq!(card(t, l), int(n), "{l} {t}");
+        }
+        // Nor an ordinary word beside a number (#982).
+        for (t, l) in [("d eux", "fr"), ("ba y", "vi"), ("twee de", "nl"), ("fem ton", "sv"), ("før ti", "nb"), ("sie ben", "de"), ("dici otto", "it"), ("hat van", "hu")] {
+            assert_eq!(card(t, l), None, "{l} {t}");
+        }
+        let s = |t: &str, l: &str| super::words2num_sentence(t, l, "cardinal", false).unwrap();
+        assert_eq!(s("hän on kolme kymmentä viisi vuotta", "fi"), "hän on 35 vuotta");
+        assert_eq!(s("trei zeci de oameni", "ro"), "30 de oameni");
+        assert_eq!(s("x d eux y", "fr"), "x d eux y");
+        assert_eq!(s("kaks kümmend kolm aastat", "et"), "23 aastat");
+        assert_eq!(s("două zeci și trei", "ro"), "23");
+        assert_eq!(s("lastbilen väger fem ton", "sv"), "lastbilen väger 5 ton");
+        assert_eq!(s("kom hjem før ti", "nb"), "kom hjem før 10");
+        assert_eq!(s("perché dici otto volte", "it"), "perché dici 8 volte");
     }
 }
 
