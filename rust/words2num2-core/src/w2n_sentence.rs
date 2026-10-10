@@ -2846,7 +2846,13 @@ fn renderer_vocab(key: &str, norm: &str) -> bool {
                     for k in 1..=9i64 {
                         let Some(v) = k.checked_mul(10i64.pow(e)) else { continue };
                         if let Ok(t) = r.to_cardinal(&BigInt::from(v)) {
-                            set.extend(crate::normalize(&t).split_whitespace().map(str::to_string));
+                            // bm, ff write large values in figures: no word.
+                            set.extend(
+                                crate::normalize(&t)
+                                    .split_whitespace()
+                                    .filter(|w| !w.chars().all(|c| c.is_ascii_digit()))
+                                    .map(str::to_string),
+                            );
                         }
                     }
                 }

@@ -1345,6 +1345,10 @@ fn postfix_rival(lang: &str, v: i64, norm: &str, sc: &Scales) -> Rival {
         return Rival::None;
     }
     let toks: Vec<&str> = norm.split_whitespace().collect();
+    // A "da" after a scale word the renderer drops: compare without it too,
+    // so "miliyan da dubu goma" is as ambiguous as "miliyan dubu goma".
+    let undropped = drop_postfix_connector(norm, sc, connector_words(lang));
+    let rendered = |x: i64| renders_as(lang, x, norm) || renders_as(lang, x, &undropped);
     for i in 0..toks.len().saturating_sub(1) {
         if !sc.postfix.iter().any(|w| w == toks[i]) {
             continue;
@@ -1366,7 +1370,7 @@ fn postfix_rival(lang: &str, v: i64, norm: &str, sc: &Scales) -> Rival {
         // table gives ("dubu goma" is 1 010) and stay ambiguous to the
         // ordinal and sentence guards, as before.
         let mult = unit.checked_mul(m).and_then(|x| h.checked_add(x));
-        if let Some(mult) = mult.filter(|&x| renders_as(lang, x, norm)) {
+        if let Some(mult) = mult.filter(|&x| rendered(x)) {
             if unit >= 1_000_000 {
                 return if mult == v { Rival::None } else { Rival::Prefer(mult) };
             }
@@ -1375,7 +1379,7 @@ fn postfix_rival(lang: &str, v: i64, norm: &str, sc: &Scales) -> Rival {
             }
         }
         let add = h.checked_add(unit).and_then(|x| x.checked_add(m));
-        if add.is_some_and(|x| x != v && renders_as(lang, x, norm)) {
+        if add.is_some_and(|x| x != v && rendered(x)) {
             return Rival::Ambiguous;
         }
     }
@@ -2550,6 +2554,9 @@ mod tests {
         assert_eq!(parse_scaled("ha", "miliyan da biyu"), Some(1_000_002));
         assert_eq!(parse_scaled("ha", "miliyan da talatin"), Some(1_000_030));
         assert_eq!(parse_scaled("ha", "miliyan da ɗari biyar tamanin"), Some(1_000_580));
+        // "da" does not lift the thousands' ambiguity.
+        assert_eq!(parse_scaled("ha", "miliyan da dubu goma"), None);
+        assert_eq!(parse_scaled("ha", "miliyan da dubu ɗari biyar"), None);
         assert_eq!(parse_scaled("ff", "ujunere teemerre"), Some(100_000));
         // km myriad and hundred-thousand glued to their multiplier.
         assert_eq!(parse_scaled("km", "មួយម៉ឺន ពីរពាន់ បីរយ សែសិបប្រាំ"), Some(12_345));
