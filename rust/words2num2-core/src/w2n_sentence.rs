@@ -3743,8 +3743,12 @@ fn words2num_sentence_walk(
         }
 
         // th "สองพันห้า": 2005 as written, 2500 as spoken; no one number, so
-        // the words stay (#875).
-        if best_value.is_some() && !best_ordinal {
+        // the words stay (#875). Not after a year word: "ปีสองพันห้า" is 2005,
+        // no one elides a place in a year.
+        let after_year = ["ปี", "ค.ศ.", "พ.ศ.", "ປີ", "ឆ្នាំ"]
+            .iter()
+            .any(|y| out.trim_end().ends_with(y));
+        if best_value.is_some() && !best_ordinal && !after_year {
             let run = parts[i..=best_end].concat();
             let norm = crate::normalize(rstrip_punct(py_strip(&run)));
             if matches!(crate::elided_place(converter.n2w_key(), &norm), Some((true, _))) {
@@ -5992,6 +5996,19 @@ mod elided_place_tests {
         ] {
             assert_eq!(sent(t, l), want, "{l} {t}");
         }
+        // A year keeps the renderer's reading.
+        for (t, l, want) in [
+            ("ปีสองพันห้า", "th", "ปี2005"),
+            ("ปี สองพันห้า", "th", "ปี 2005"),
+            ("พ.ศ. สองพันห้า", "th", "พ.ศ. 2005"),
+            ("ឆ្នាំ ពីរពាន់ ប្រាំ", "km", "ឆ្នាំ 2005"),
+            ("ປີ ສອງພັນ ຫ້າ", "lo", "ປີ 2005"),
+        ] {
+            assert_eq!(sent(t, l), want, "{l} {t}");
+        }
+        // A decimal's whole part takes the same reading (a bare scale word is
+        // never the renderer's).
+        assert_eq!(format!("{:?}", crate::words2num("หมื่นห้าจุดห้า", "th", "cardinal").unwrap()), format!("{:?}", crate::words2num("15000.5", "en", "cardinal").unwrap()));
         // Not my: "နှစ်ထောင့်ငါး" is 2005.
         assert!(crate::elided_place("my", "နှစ်ထောင့်ငါး").is_none());
     }
