@@ -209,8 +209,12 @@ between matches is preserved.
 'Pay 1 dollar for 1 kilogram.'
 
 >>> auto_parse_sentence("Total: 1.234,56 €.", lang="de")
-'Total: 1234.56 EUR.'
+'Total: 1234,56 EUR.'
 ```
+
+A decimal is written with the mark the same call reads as the decimal
+(`decimal_sep`, else `.` when only `thousands_sep` is given, else the
+locale's), so the output reads back as the same number.
 
 In short form, percent and bare degree are tightly glued
 (`70%`, `20°`); other units are space-separated (`5 kg`).

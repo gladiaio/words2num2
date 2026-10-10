@@ -5050,7 +5050,13 @@ pub fn pluralize(long_form: Option<&str>, value: &W2nValue) -> Option<String> {
 }
 
 /// `converters.auto._format_quantity`
-fn format_quantity(q: &Quantity, expand: bool) -> String {
+fn format_quantity(q: &Quantity, expand: bool, mark: char) -> String {
+    // The locale's decimal mark, so the text reads back as written: de
+    // "3,125 kg" stays "3,125 kg", never "3.125 kg" (3125 in de) (#867).
+    let format_number = |v: &W2nValue| {
+        let s = format_number(v);
+        if mark == '.' { s } else { s.replace('.', &mark.to_string()) }
+    };
     let Some(unit) = q.unit.as_deref() else {
         return format_number(&q.value);
     };
@@ -5131,9 +5137,21 @@ pub fn auto_parse_sentence(
     decimal_sep: Option<&str>,
     expand: bool,
 ) -> Result<String, W2nError> {
-    resolve_lang(lang)?;
+    let resolved = resolve_lang(lang)?;
     crate::w2n_formats::check_separators(thousands_sep, decimal_sep)
         .map_err(|e| W2nError::Words2Num(e.0))?;
+    // The mark this same call reads as the decimal: the caller's, else the
+    // point when only a thousands separator other than it is given (as
+    // `parse_with_explicit` reads), else the locale's.
+    let ts = thousands_sep.filter(|t| !t.is_empty());
+    let mark = decimal_sep
+        .and_then(|d| d.chars().next())
+        .or_else(|| ts.filter(|t| *t != ".").map(|_| '.'))
+        .or_else(|| {
+            crate::w2n_formats::locale_format(&crate::w2n_formats::format_key(lang, &resolved))
+                .and_then(|f| f.decimal.chars().next())
+        })
+        .unwrap_or('.');
     let chars: Vec<char> = text.chars().collect();
     let mut out = String::new();
     let mut i = 0usize;
@@ -5156,7 +5174,7 @@ pub fn auto_parse_sentence(
                     {
                         out.push_str(&raw)
                     }
-                    Ok(q) => out.push_str(&format_quantity(&q, expand)),
+                    Ok(q) => out.push_str(&format_quantity(&q, expand, mark)),
                     Err(W2nError::Words2Num(_)) => out.push_str(&raw),
                     Err(e) => return Err(e),
                 }
@@ -6506,5 +6524,35 @@ mod glued_sign_figure_tests {
         }
         let p = std::collections::HashMap::new();
         assert!(super::auto_parse("-,5", "fr", &p, None, Some(",")).is_err());
+    }
+}
+
+#[cfg(test)]
+mod auto_sentence_mark_tests {
+    /// #867: a decimal is written with the locale's mark, so a second pass
+    /// reads the same number.
+    #[test]
+    fn decimal_mark_round_trips_issue_867() {
+        let p = std::collections::HashMap::new();
+        let a = |t: &str, l: &str| super::auto_parse_sentence(t, l, &p, None, None, false).unwrap();
+        for (t, l, want) in [
+            ("3,125 kg", "de", "3,125 kg"),
+            ("0,125 kg", "de", "0,125 kg"),
+            ("3,125 €", "de", "3,125 EUR"),
+            ("3,125 %", "fr", "3,125%"),
+            ("3.5 kg", "de", "3,5 kg"),
+            ("3.5 kg", "en", "3.5 kg"),
+        ] {
+            let once = a(t, l);
+            assert_eq!(once, want, "{l} {t}");
+            assert_eq!(a(&once, l), once, "{l} {t} twice");
+        }
+        // The caller's decimal mark wins.
+        assert_eq!(super::auto_parse_sentence("3,5 kg", "en", &p, None, Some(","), false).unwrap(), "3,5 kg");
+        // A thousands separator alone makes the point the decimal, as the
+        // parser reads it.
+        let ts = |t: &str| super::auto_parse_sentence(t, "de", &p, Some(","), None, false).unwrap();
+        assert_eq!(ts("3.125 kg"), "3.125 kg");
+        assert_eq!(ts(&ts("3.125 kg")), "3.125 kg");
     }
 }

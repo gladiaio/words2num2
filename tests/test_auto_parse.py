@@ -233,13 +233,14 @@ def test_sentence_expand_mode():
 
 def test_sentence_locale_separators_de():
     out = auto_parse_sentence("Total: 1.234,56 €.", lang="de")
-    assert "1234.56" in out
+    # The locale's decimal mark, so the output reads back as written (#867).
+    assert "1234,56" in out
     assert "EUR" in out
 
 
 def test_sentence_locale_separators_fr():
     out = auto_parse_sentence("Total : 1 234,56 €.", lang="fr")
-    assert "1234.56" in out
+    assert "1234,56" in out
     assert "EUR" in out
 
 
