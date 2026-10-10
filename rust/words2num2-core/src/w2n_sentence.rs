@@ -4600,7 +4600,10 @@ fn not_a_unit(chars: &[char], raw: &str, end: usize, currency: bool) -> bool {
     }
     let degree = raw[..raw.len() - unit.len()].ends_with('\u{b0}');
     // A decade is a whole number: "1.0s" and "0.50s" are seconds.
-    let decade = unit == "s" && glued && raw.trim_end_matches('s').ends_with('0') && !raw.contains(['.', ',']);
+    let num = raw.trim_end_matches('s');
+    // "1,000s" groups thousands; "2,50s" has a decimal comma.
+    let decimal = num.contains('.') || num.rsplit_once(',').is_some_and(|(_, tail)| tail.len() != 3);
+    let decade = unit == "s" && glued && num.ends_with('0') && !decimal;
     // "L" is the litre's own symbol.
     (unit.len() == 1 && unit.chars().all(|c| c.is_ascii_uppercase()) && unit != "L" && !degree)
         || unit.eq_ignore_ascii_case("in")
@@ -5442,6 +5445,8 @@ mod unit_misread_tests {
         assert_eq!(sent("£10K bonus", false), "10000 GBP bonus");
         // Decimals are seconds, never a decade.
         assert_eq!(sent("1.0s", false), "1 s");
+        assert_eq!(sent("1,000s of people", false), "1,000s of people");
+        assert_eq!(sent("2,50s", false), "2.5 s");
         assert_eq!(sent("it is 20 °F", true), "it is 20 degrees fahrenheit");
     }
 
