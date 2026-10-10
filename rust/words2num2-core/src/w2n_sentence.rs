@@ -1731,35 +1731,56 @@ fn connector_join_ok(converter: &Converter, stripped: &str, total: &W2nValue, ha
     (*t == &l + &r && r < l && &l % BigInt::from(10) == zero) || *t == &l * &r
 }
 
-/// The scale a token closes with a comma: "thousand," -> 1000, "million," ->
-/// 1000000, pt "mil," -> 1000. `None` for any other token or punctuation.
-/// Does the renderer write a comma after a scale word inside one number (en
-/// "two thousand, one hundred", pt_BR)? Elsewhere a comma there separates a
-/// list: ru "две тысячи, триста" is 2000 and 300 (#657). Read from the
-/// renderer's own output, once per language.
-fn writes_scale_comma(key: &str) -> bool {
-    static CACHE: std::sync::OnceLock<std::sync::RwLock<HashMap<String, bool>>> = std::sync::OnceLock::new();
+/// The words the renderer writes a comma after inside one number (en
+/// "thousand", it "miliardo" only), normalized and lowercased. Elsewhere a
+/// comma there separates a list: ru "две тысячи, триста" is 2000 and 300
+/// (#657). Read from the renderer's own output, once per language.
+fn scale_comma_words(key: &str) -> std::sync::Arc<Vec<String>> {
+    static CACHE: std::sync::OnceLock<std::sync::RwLock<HashMap<String, std::sync::Arc<Vec<String>>>>> =
+        std::sync::OnceLock::new();
     let cache = CACHE.get_or_init(Default::default);
-    if let Some(b) = cache.read().ok().and_then(|m| m.get(key).copied()) {
-        return b;
+    if let Some(w) = cache.read().ok().and_then(|m| m.get(key).cloned()) {
+        return w;
     }
-    let writes = num2words2_core::get_lang_by_key(key).is_some_and(|r| {
-        [2100i64, 12300, 1_234_567, 2_000_300]
-            .iter()
-            .any(|&n| r.to_cardinal(&BigInt::from(n)).is_ok_and(|t| t.contains(',')))
-    });
+    let mut words: Vec<String> = Vec::new();
+    if let Some(r) = num2words2_core::get_lang_by_key(key) {
+        // Every power, singular and plural multipliers, a remainder after it.
+        let samples = (3..=18u32).flat_map(|e| {
+            let p = 10i64.pow(e);
+            [1i64, 2, 23, 123].into_iter().filter_map(move |k| {
+                k.checked_mul(p)?.checked_add(if e >= 6 { 456 * 10i64.pow(e - 3) } else { 0 } + 101)
+            })
+        });
+        for n in samples {
+            let Ok(text) = r.to_cardinal(&BigInt::from(n)) else { continue };
+            for tok in text.split_whitespace().filter(|t| t.ends_with(',')) {
+                let clean = rstrip_punct(tok).to_lowercase().replace('-', " ");
+                if let Some(last) = py_split_whitespace(&clean).last() {
+                    if !words.iter().any(|w| w == last) {
+                        words.push(last.to_string());
+                    }
+                }
+            }
+        }
+    }
+    let words = std::sync::Arc::new(words);
     if let Ok(mut m) = cache.write() {
-        m.insert(key.to_string(), writes);
+        m.insert(key.to_string(), words.clone());
     }
-    writes
+    words
 }
 
+/// The scale a token closes with a comma: "thousand," -> 1000, "million," ->
+/// 1000000, pt "mil," -> 1000. `None` for any other token or punctuation.
 fn comma_after_scale(converter: &Converter, tok: &str) -> Option<BigInt> {
-    if trailing_punct(tok) != "," || !writes_scale_comma(converter.n2w_key()) {
+    if trailing_punct(tok) != "," {
         return None;
     }
     let clean = rstrip_punct(tok).to_lowercase().replace('-', " ");
     let last = *py_split_whitespace(&clean).last()?;
+    if !scale_comma_words(converter.n2w_key()).iter().any(|w| w == last) {
+        return None;
+    }
     if !is_scale_word(converter, last, 1_000) {
         return None;
     }
@@ -5191,7 +5212,13 @@ mod scale_comma_tests {
         assert_eq!(s("Ceny: dwa tysiące, trzysta i pięćset złotych.", "pl"), "Ceny: 2000, 300 i 500 złotych.");
         assert_eq!(s("Precios: dos mil, trescientos y quinientos euros.", "es"), "Precios: 2000, 300 y 500 euros.");
         assert_eq!(s("две хиляди, триста", "bg"), "2000, 300");
-        // The renderers that write the comma keep reading one number (#67).
+        // The renderers that write the comma keep reading one number (#67),
+        // after the scales they write it after: it only after "miliardo".
         assert_eq!(s("twelve thousand, three hundred and forty-five", "en"), "12345");
+        assert_eq!(
+            s("x un miliardo, duecentotrentaquattro milioni e cinquecentosessantasettemilaottocentonovanta y", "it"),
+            "x 1234567890 y"
+        );
+        assert_eq!(s("q un milione, duecento z", "it"), "q 1000000, 200 z");
     }
 }
