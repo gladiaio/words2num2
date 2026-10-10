@@ -1222,7 +1222,11 @@ fn unit_of_next_morpheme(key: &str, parts: &[String], j: usize, clean: &str) -> 
         return false;
     }
     let Some(next) = parts[j + 1..].iter().find(|p| !py_str_isspace(p)) else { return false };
-    crate::w2n_forms::morpheme_follows_unit(key, &crate::normalize(&rstrip_punct(next).to_lowercase())) == Some(true)
+    let next = crate::normalize(&rstrip_punct(next).to_lowercase());
+    // Only when the two glue into a number: cs "pět desát" is no 50
+    // ("padesát"), fi "sata kymmentä" no number at all (#993).
+    crate::w2n_forms::morpheme_follows_unit(key, &next) == Some(true)
+        && crate::lookup_norm(key, &format!("{norm}{next}"), false, &[]).ok().flatten().is_some()
 }
 
 fn base_convert_as_written(lang: &str, norm: &str, ordinal: bool) -> Result<W2nValue, W2nError> {
@@ -6449,6 +6453,10 @@ mod glued_morpheme_tests {
         assert_eq!(s("viisi kymmentä kuusi kymmentä vuotta", "fi"), "50 60 vuotta");
         assert_eq!(s("viis kümmend kuus kümmend aastat", "et"), "50 60 aastat");
         assert_eq!(s("два ццаць тры ццаць", "be"), "20 30");
+        // #993: only a unit the morpheme glues into a number.
+        assert_eq!(s("pět desát šest desát", "cs"), "5 desát 6 desát");
+        assert_eq!(s("sata kymmentä", "fi"), "100 kymmentä");
+        assert_eq!(s("zece zeci de ani", "ro"), "10 zeci de ani");
     }
 }
 
