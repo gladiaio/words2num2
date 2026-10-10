@@ -3554,10 +3554,22 @@ fn words2num_sentence_walk(
                 Some(_) => failed += 1,
                 None if !candidate => {
                     // bm "ba tan ni sabanan": the span ends in its ordinal word,
-                    // which is no candidate; the whole span stays words.
+                    // which is no candidate; it starts where its cardinal stem
+                    // is ambiguous ("x saba ba tan ni naaninan" reads the 3).
                     if ambiguous {
                         ambiguous_end = Some(j);
-                        ambiguous_from.get_or_insert(i);
+                        ambiguous_from.get_or_insert_with(|| {
+                            (i..=j)
+                                .filter(|&k| !py_str_isspace(&parts[k]))
+                                .find(|&k| {
+                                    let tail = rstrip_punct(py_strip(&parts[k..=j].concat())).to_string();
+                                    cardinal_stem(&converter, &tail, &clean).is_some_and(|c| {
+                                        crate::is_ambiguous_number(converter.n2w_key(), &c)
+                                            && converter.convert(to, &c, has_kwargs).is_err()
+                                    })
+                                })
+                                .unwrap_or(i)
+                        });
                     }
                     break;
                 }
@@ -3646,8 +3658,9 @@ fn words2num_sentence_walk(
             // else may still belong to the number, so the words stay.
             let unit = |w: &str| matches!(converter.to_cardinal(w), Ok(W2nValue::Int(v)) if v >= BigInt::from(1) && v <= BigInt::from(9));
             let mut prev_unit = unit(&rstrip_punct(&parts[end]).to_lowercase());
+            let ends_ordinal = converter.is_ordinal_word(&rstrip_punct(&parts[end]).to_lowercase());
             let mut k = end + 1;
-            while k < n && trailing_punct(&parts[end]).is_empty() {
+            while k < n && trailing_punct(&parts[end]).is_empty() && !ends_ordinal {
                 let part = &parts[k];
                 if py_str_isspace(part) {
                     k += 1;
@@ -3663,6 +3676,10 @@ fn words2num_sentence_walk(
                 prev_unit = unit(&clean);
                 if !is_includable(&clean, includable) {
                     end = k;
+                }
+                // An ordinal word ends its number (bm "… ni kelennan saba").
+                if converter.is_ordinal_word(&clean) {
+                    break;
                 }
                 if !trailing_punct(part).is_empty() {
                     break;
@@ -5738,6 +5755,11 @@ mod ambiguous_span_tests {
         // #798 and #884 M2: the number's ordinal word stays words with it.
         assert_eq!(s("x ba tan ni kelen ni kelennan y", "bm"), "x ba tan ni kelen ni kelennan y");
         assert_eq!(s("x ba tan ni sabanan y", "bm"), "x ba tan ni sabanan y");
+        assert_eq!(s("x saba ba tan ni naaninan y", "bm"), "x 3 ba tan ni naaninan y");
+        assert_eq!(s("x ba tan ni kelennan saba y", "bm"), "x ba tan ni kelennan 3 y");
+        // #882 pins: no fragments after an unreadable scale word.
+        assert_eq!(s("x tiriliyan biliyan goma y", "ha"), "x tiriliyan biliyan goma y");
+        assert_eq!(s("x tiriliyan biyar biliyan goma y", "ha"), "x tiriliyan biyar biliyan goma y");
         // #884 L1: a separate number after the span reads.
         assert_eq!(s("x ba tan ni kelen saba y", "bm"), "x ba tan ni kelen 3 y");
         // #884 L2: a comma before the run lets the split happen.
