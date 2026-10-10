@@ -2831,6 +2831,42 @@ fn renderer_spells(key: &str, v: &W2nValue, ordinal: bool, text: &str) -> bool {
     r.to_cardinal(n).is_ok_and(|w| canon(&w) == t) || (ordinal && r.to_ordinal(n).is_ok_and(|w| canon(&w) == t))
 }
 
+/// Is `norm` a word the renderer writes in some k·10^e (ha "tiriliyan", even
+/// where the reader cannot read it alone)?
+fn renderer_vocab(key: &str, norm: &str) -> bool {
+    static CACHE: std::sync::OnceLock<std::sync::RwLock<HashMap<String, std::sync::Arc<std::collections::HashSet<String>>>>> =
+        std::sync::OnceLock::new();
+    let cache = CACHE.get_or_init(Default::default);
+    let words = match cache.read().ok().and_then(|m| m.get(key).cloned()) {
+        Some(w) => w,
+        None => {
+            let mut set = std::collections::HashSet::new();
+            if let Some(r) = num2words2_core::get_lang_by_key(key) {
+                for e in 0..=18u32 {
+                    for k in 1..=9i64 {
+                        let Some(v) = k.checked_mul(10i64.pow(e)) else { continue };
+                        if let Ok(t) = r.to_cardinal(&BigInt::from(v)) {
+                            // bm, ff write large values in figures: no word.
+                            set.extend(
+                                crate::normalize(&t)
+                                    .split_whitespace()
+                                    .filter(|w| !w.chars().all(|c| c.is_ascii_digit()))
+                                    .map(str::to_string),
+                            );
+                        }
+                    }
+                }
+            }
+            let set = std::sync::Arc::new(set);
+            if let Ok(mut m) = cache.write() {
+                m.insert(key.to_string(), set.clone());
+            }
+            set
+        }
+    };
+    words.contains(norm)
+}
+
 /// Is the word at `i` (as written, `piece`) a homograph of a number word? de
 /// "Acht" capitalised is the noun ("in Acht nehmen", "Acht geben"), the
 /// number is lower case.
@@ -3336,6 +3372,26 @@ fn words2num_sentence_walk(
             continue;
         }
 
+        // In a language that puts the multiplier after its scale, the words
+        // after a scale word the reader cannot read ha "tiriliyan" belong to
+        // that number: no run opens there, so it stays words whole (#882).
+        if postfix_scales
+            && prev_word(&parts, i).is_some_and(|p| {
+                !is_candidate(&converter, &p, includable) && renderer_vocab(converter.n2w_key(), &crate::normalize(&p))
+            })
+            && is_candidate(&converter, &rstrip_punct(piece).to_lowercase(), includable)
+        {
+            let mut k = i;
+            while k < n && (py_str_isspace(&parts[k]) || is_candidate(&converter, &rstrip_punct(&parts[k]).to_lowercase(), includable)) {
+                k += 1;
+                if ends_with_terminal_punct(&parts[k - 1]) {
+                    break;
+                }
+            }
+            out.push_str(&parts[i..k].concat());
+            i = k;
+            continue;
+        }
         // Grow a number run starting at i.
         let mut best_value: Option<W2nValue> = None;
         let mut best_end = i;
@@ -5573,9 +5629,12 @@ mod ambiguous_span_tests {
     fn ambiguous_spans_stay_words() {
         let s = |t: &str, l: &str| words2num_sentence(t, l, "cardinal", false).unwrap();
         assert_eq!(s("na biya miliyan biyu dubu goma jiya", "ha"), "na biya miliyan biyu dubu goma jiya");
+        // #882: an unreadable scale word ("tiriliyan") leaves the rest of its
+        // number in words, no fragments.
+        assert_eq!(s("x tiriliyan biliyan goma y", "ha"), "x tiriliyan biliyan goma y");
+        assert_eq!(s("x tiriliyan biyar biliyan goma y", "ha"), "x tiriliyan biyar biliyan goma y");
         assert_eq!(s("x ba tan ni kelen ni mugan ni wolonfila y", "bm"), "x ba tan ni kelen ni mugan ni wolonfila y");
-        assert_eq!(s("x na miliyan goma y", "ha"), "x na miliyan goma y");
-        assert!(crate::words2num("na miliyan goma", "ha", "ordinal").is_err());
+        assert_eq!(s("Na biya naira miliyan talatin", "ha"), "Na biya naira 30000000");
         // Unambiguous numbers still read.
         assert_eq!(s("ina da miliyan dubu naira", "ha"), "ina da 1001000 naira");
     }
