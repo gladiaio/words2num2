@@ -99,7 +99,7 @@ the forward direction. ``words2num2``:
   user-typed forms that mix words and digits.
 * Handles currency symbols (``$ € £ ¥ ₹ ₽ ₩ ₺``), ISO codes
   (``USD/EUR/...``), scale shortcuts (``$5m`` → 5,000,000), units
-  (length / mass / temperature / time / volume / percent), and
+  (length / mass / temperature / time / area / volume / percent), and
   CLDR-style number formats per locale.
 * Pluralizes long-form units in expand mode (``5 dollars`` /
   ``1 dollar``, ``5 feet`` / ``1 foot``, ``5 yen`` / ``1 yen``).

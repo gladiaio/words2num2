@@ -51,12 +51,7 @@ pub fn words2num(
     }
     // es "1º", pt "1ª", "1.º": a figure with its ordinal indicator is that
     // figure (NFKD would make it "1o", #896).
-    if let Some(figure) = text
-        .trim()
-        .strip_suffix(['\u{00BA}', '\u{00AA}'])
-        .map(|f| f.strip_suffix('.').unwrap_or(f))
-        .filter(|f| !f.is_empty() && f.chars().all(|c| c.is_ascii_digit()))
-    {
+    if let Some(figure) = ordinal_indicator_figure(text) {
         return words2num(figure, lang, to);
     }
     // de "minus 1.234": a sign word before a figure, read with the same
@@ -1299,6 +1294,16 @@ enum Scaled {
 /// numbers (#348).
 pub fn is_ambiguous_number(lang: &str, norm: &str) -> bool {
     matches!(scaled_reading(lang, norm), Scaled::Ambiguous)
+}
+
+/// es "1º", pt "1ª", "1.º", "1.000º": the figure before an ordinal indicator,
+/// in any language and mode, as de "1." is its figure. `None` for anything
+/// else; the degree sign "°" is no indicator.
+pub(crate) fn ordinal_indicator_figure(text: &str) -> Option<&str> {
+    let f = text.trim().strip_suffix(['\u{00BA}', '\u{00AA}'])?;
+    let f = f.strip_suffix('.').unwrap_or(f);
+    let digit_ends = f.starts_with(|c: char| c.is_ascii_digit()) && f.ends_with(|c: char| c.is_ascii_digit());
+    (digit_ends && f.chars().all(|c| c.is_ascii_digit() || ".,'".contains(c))).then_some(f)
 }
 
 /// Whether `lang` puts a multiplier after its scale word (ha, bm, sw, ...),

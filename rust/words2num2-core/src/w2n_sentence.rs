@@ -3894,25 +3894,26 @@ pub static UNITS: &[(&str, UnitInfo)] = &[
     ("in\u{b3}", ui("in\u{b3}", "cubic inch", "volume", 1.0)),
 ];
 
-/// A unit's power suffix after its letters: "²"/"³", "^2"/"^3", or a glued
-/// "2"/"3" at the end ("m2"), as the superscript. `None` when there is none.
-fn eat_unit_power(cur: &mut Cursor) -> Option<char> {
+/// A unit's power suffix after its letters: "²"/"³", "^2"/"^3", or, when
+/// `glued` allows it, a "2"/"3" at the end ("m2"), as the superscript. `None`
+/// when there is none, or when a letter or digit runs on ("m²a").
+fn eat_unit_power(cur: &mut Cursor, glued: bool) -> Option<char> {
     let sup = |c: char| match c {
         '\u{b2}' | '2' => Some('\u{b2}'),
         '\u{b3}' | '3' => Some('\u{b3}'),
         _ => None,
     };
     match cur.peek() {
-        Some(c @ ('\u{b2}' | '\u{b3}')) => {
+        Some(c @ ('\u{b2}' | '\u{b3}')) if !cur.at(1).is_some_and(|c| c.is_alphanumeric()) => {
             cur.i += 1;
             sup(c)
         }
-        Some('^') if cur.at(1).and_then(sup).is_some() && !cur.at(2).is_some_and(|c| c.is_alphanumeric()) => {
+        Some('^') if cur.at(1).is_some_and(|c| matches!(c, '2' | '3')) && !cur.at(2).is_some_and(|c| c.is_alphanumeric()) => {
             let c = cur.at(1);
             cur.i += 2;
             c.and_then(sup)
         }
-        Some(c @ ('2' | '3')) if !cur.at(1).is_some_and(|c| c.is_alphanumeric()) => {
+        Some(c @ ('2' | '3')) if glued && !cur.at(1).is_some_and(|c| c.is_alphanumeric()) => {
             cur.i += 1;
             sup(c)
         }
@@ -4341,7 +4342,8 @@ fn resolve_unit(unit_str: &str, prefer: &HashMap<String, String>) -> Option<(&'s
         Some(info) => (info, false),
         None => {
             let lower = unit_str.to_lowercase();
-            let c: Vec<char> = unit_str.chars().collect();
+            // "Mm²" is no mm²: the prefix rule looks at the base symbol.
+            let c: Vec<char> = unit_str.trim_end_matches(['\u{b2}', '\u{b3}']).chars().collect();
             let si_prefixed = c.len() == 2 && "MGTPEZY".contains(c[0]) && "gmslt".contains(c[1]);
             let info = units_get(&lower)?;
             // The caller may still pick the folded reading: OCR or caps-locked
@@ -4409,8 +4411,11 @@ fn try_digit_unit(
     } else if cur.peek().is_some_and(|c| c.is_ascii_alphabetic()) {
         let mut letters = cur.take_while(|c| c.is_ascii_alphabetic());
         let save = cur.i;
-        if let Some(p) = eat_unit_power(&mut cur) {
-            if units_get(&format!("{letters}{p}")).is_some() {
+        // "in2" is no square inch: a bare "in" is ambiguous (#803), so it
+        // takes only a written power ("in²", "in^2"). "M²" is folded below.
+        let glued = !letters.eq_ignore_ascii_case("in");
+        if let Some(p) = eat_unit_power(&mut cur, glued) {
+            if units_get(&format!("{}{p}", letters.to_lowercase())).is_some() {
                 letters.push(p);
             } else {
                 cur.i = save;
@@ -4592,6 +4597,12 @@ pub fn auto_parse(
     if crate::glued_script_digit(text) {
         return Err(W2nError::Words2Num(format!("could not auto-parse {}", py_repr_str(text))));
     }
+    // es "1º", "1.000º": the figure, as words2num reads it (#896).
+    if let Some(figure) = crate::ordinal_indicator_figure(text) {
+        let mut q = auto_parse(figure, lang, prefer, thousands_sep, decimal_sep)?;
+        q.raw = text.to_string();
+        return Ok(q);
+    }
     // Figures read with the caller's region: es_MX groups with a comma (#423).
     let fmt_key = crate::w2n_formats::format_key(lang, &resolved);
     let fmt_lang = fmt_key.as_str();
@@ -4756,9 +4767,10 @@ fn match_quantity_at(chars: &[char], pos: usize) -> Option<usize> {
                 .is_some_and(|c| c.is_ascii_alphabetic() || c == '\u{b5}')
             {
                 let letters = cur.take_while(|c| c.is_ascii_alphabetic() || c == '\u{b5}');
-                // "5 m²", "5 m2": the power belongs to the unit (#896).
+                // "5 m²", "5 m^2": the power belongs to the unit (#896). Not
+                // a glued digit in running text: "5 m2 slots" is a product code.
                 let save = cur.i;
-                match eat_unit_power(&mut cur) {
+                match eat_unit_power(&mut cur, false) {
                     Some(p) if units_get(&format!("{letters}{p}")).is_some() => {}
                     _ => cur.i = save,
                 }
@@ -4810,6 +4822,8 @@ fn format_number(value: &W2nValue) -> String {
 fn irregular_plural(long_form: &str) -> Option<&'static str> {
     Some(match long_form {
         "foot" => "feet",
+        "square foot" => "square feet",
+        "cubic foot" => "cubic feet",
         "inch" => "inches",
         "pound sterling" => "pounds sterling",
         "degree celsius" => "degrees celsius",
@@ -5181,6 +5195,8 @@ mod tests {
         assert_eq!(pluralize(Some("dollar"), &int(5)).as_deref(), Some("dollars"));
         assert_eq!(pluralize(Some("dollar"), &int(1)).as_deref(), Some("dollar"));
         assert_eq!(pluralize(Some("foot"), &int(5)).as_deref(), Some("feet"));
+        assert_eq!(pluralize(Some("square foot"), &int(5)).as_deref(), Some("square feet"));
+        assert_eq!(pluralize(Some("cubic foot"), &int(2)).as_deref(), Some("cubic feet"));
         assert_eq!(pluralize(Some("yen"), &int(5)).as_deref(), Some("yen"));
     }
 }
@@ -5978,5 +5994,24 @@ mod area_and_indicator_tests {
             let n: i64 = if t.starts_with("21") { 21 } else { 1 };
             assert_eq!(v, crate::w2n_lang_en::W2nValue::Int(n.into()), "{l} {t}");
         }
+        // auto_parse reads the indicator too, with the locale's grouping.
+        for (t, n) in [("1º", 1), ("1.000º", 1000), ("1ª", 1)] {
+            assert_eq!(auto_parse(t, "es", &p, None, None).unwrap().value, super::W2nValue::Int(n.into()), "{t}");
+        }
+        // Expand mode pluralizes the foot forms.
+        let ex = |t: &str| auto_parse_sentence(t, "en", &p, None, None, true).unwrap();
+        assert_eq!(ex("x 2.5 ft² y"), "x 2.5 square feet y");
+        assert_eq!(ex("5 ft^3 box"), "5 cubic feet box");
+        // A glued digit in running text is a product code; "in2" no unit at all;
+        // a power running into a letter or digit is no power.
+        for t in ["5 m2 slots", "1 in2 adults", "5 m²a", "5 mm²²"] {
+            assert_eq!(auto_parse_sentence(t, "en", &p, None, None, false).unwrap(), t, "{t}");
+        }
+        for t in ["5 in2", "5 m²a", "5 m^²", "5 Mm²"] {
+            assert!(auto_parse(t, "en", &p, None, None).is_err(), "{t}");
+        }
+        // A folded powered unit is no certain reading.
+        let q = auto_parse("5 KM²", "en", &p, None, None).unwrap();
+        assert_eq!((q.unit.as_deref(), q.confidence), (Some("km²"), 0.8));
     }
 }
