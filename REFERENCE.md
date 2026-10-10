@@ -386,7 +386,9 @@ Superscript, subscript, circled and parenthesized digits (`"²"`, `"₂"`,
 symbols, not numbers: any character of Unicode category `Nl` or `No` that
 NFKD rewrites. A script's own digits (`"５"`, `"٥"`, `"५"`, category `Nd`)
 and the CJK compatibility ideographs (`"零"` at U+F9B2, category `Lo`) are
-not symbols. By default every parsing
+not symbols. The digit table follows Unicode 13: digits a later version
+adds, such as the outlined digits U+1CCF0–U+1CCF9 (`"𜳵"`), count as
+symbols for now. By default every parsing
 entry point leaves them alone: `words2num` and `auto_parse` raise on them,
 alone or glued to a figure, and the sentence functions keep them as written
 (`"the ⑤ million"` stays as is). `normalize()` keeps them too
