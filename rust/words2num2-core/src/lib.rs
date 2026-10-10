@@ -316,6 +316,28 @@ pub fn is_clause_punctuation(c: char) -> bool {
     )
 }
 
+/// [`normalize`] as the public `normalize()` gives it: numerical symbols
+/// ([`is_compat_digit`]: "①", "²", "½", "㊀") stay as written, unless the
+/// caller asks for them to fold like the rest (#958, #972). The lookup
+/// tables keep the folding [`normalize`].
+pub fn normalize_public(s: &str, convert_numerical_symbols: bool) -> String {
+    if convert_numerical_symbols || !s.chars().any(is_compat_digit) {
+        return normalize(s);
+    }
+    // Each symbol rides through as a private-use placeholder the input does
+    // not hold, then comes back in order.
+    let Some(mark) = ('\u{E000}'..='\u{F8FF}').find(|m| !s.contains(*m)) else {
+        return normalize(s);
+    };
+    let symbols: Vec<char> = s.chars().filter(|&c| is_compat_digit(c)).collect();
+    let masked: String = s.chars().map(|c| if is_compat_digit(c) { mark } else { c }).collect();
+    let mut kept = symbols.into_iter();
+    normalize(&masked)
+        .chars()
+        .map(|c| if c == mark { kept.next().unwrap_or(c) } else { c })
+        .collect()
+}
+
 /// Pure-Rust port of `Words2Num_Base._normalize`.
 ///
 /// ```python

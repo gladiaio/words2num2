@@ -193,3 +193,17 @@ def test_convert_numerical_symbols_scope_per_function(capsys):
     assert main(["①"]) == 1
     assert main(["--convert-numerical-symbols", "①"]) == 0
     assert capsys.readouterr().out.strip() == "1"
+
+
+@pytest.mark.parametrize(
+    "text", ["x ① y", "note ³ here", "⒈", "㊀", "x Ⅻ y", "½", "5 m²"]
+)
+def test_normalize_keeps_numerical_symbols(text):
+    # #972: the public normalize() converts no symbol unless asked.
+    assert words2num2.normalize(text) == text
+
+
+def test_normalize_folds_symbols_on_request():
+    assert words2num2.normalize("x ① y", convert_numerical_symbols=True) == "x 1 y"
+    assert words2num2.normalize("Forty-Two ①") == "forty two ①"
+    assert words2num2.normalize("x  ① y") == "x  ① y"
