@@ -182,13 +182,17 @@ fn mark_words(text: &str, mark: &str) -> Vec<String> {
         .iter()
         .enumerate()
         .map(|(k, &c)| {
+            if c != ',' {
+                return c.to_string();
+            }
             let letter = |d: Option<&char>| d.is_some_and(|c| c.is_alphabetic());
             let before = chars[..k].iter().rev().find(|c| !c.is_whitespace());
             let after = chars[k + 1..].iter().find(|c| !c.is_whitespace());
-            // A sign alone before it is no word: "-, خمسون" is minus ", خمسون" (#959).
-            let lead: Vec<&char> = chars[..k].iter().filter(|c| !c.is_whitespace()).collect();
-            let sign_only = matches!(lead.as_slice(), [s] if matches!(s, '-' | '+' | '\u{2212}'));
-            if c == ',' && (letter(before) || before.is_none() || sign_only) && letter(after) {
+            // A sign alone before it is no word: "-, خمسون" is minus ", خمسون"
+            // (#959). Two characters looked at, no more (#964).
+            let mut lead = chars[..k].iter().filter(|c| !c.is_whitespace());
+            let sign_only = matches!((lead.next(), lead.next()), (Some('-' | '+' | '\u{2212}'), None));
+            if (letter(before) || before.is_none() || sign_only) && letter(after) {
                 mark.to_string()
             } else {
                 c.to_string()
