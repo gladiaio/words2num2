@@ -6097,6 +6097,23 @@ mod sign_and_script_tests {
             }
             assert_eq!(super::words2num_sentence("the ⑤ million y", "en", "cardinal", false).unwrap(), "the 5000000 y");
         });
+        // CJK numerical symbols too (#965).
+        for (t, l) in [("㊀", "zh"), ("㈩", "zh"), ("㆒", "ja"), ("〸", "zh"), ("㊄十", "zh")] {
+            assert!(crate::words2num(t, l, "cardinal").is_err(), "{l} {t}");
+        }
+        for l in ["zh", "ja"] {
+            assert_eq!(super::words2num_sentence("x ㈢ y", l, "cardinal", false).unwrap(), "x ㈢ y");
+        }
+        assert_eq!(crate::words2num("五十", "zh", "cardinal").unwrap(), crate::w2n_lang_en::W2nValue::Int(50.into()));
+        // The public normalize keeps them, the lookup one folds (#972).
+        assert_eq!(crate::normalize_public("x ① y", false), "x ① y");
+        assert_eq!(crate::normalize_public("Forty-Two ½", false), "forty two ½");
+        assert_eq!(crate::normalize_public("x ① y", true), "x 1 y");
+        assert_eq!(crate::normalize("x ① y"), "x 1 y");
+        // A compatibility ideograph is `Lo`, its ideograph, no symbol.
+        for c in ['\u{F9B2}', '\u{F9D1}', '\u{F973}'] {
+            assert!(!crate::is_compat_digit(c), "{c}");
+        }
         // And the default is back after the call.
         assert!(crate::words2num("①", "en", "cardinal").is_err());
         assert!(crate::words2num("10", "en", "cardinal").is_ok());

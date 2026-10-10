@@ -128,10 +128,12 @@ fn quantity_to_py(py: Python<'_>, q: w2n_sentence::Quantity) -> PyResult<Py<PyAn
 // #[pyfunction] surface — identical names/signatures to the historic shim
 // ---------------------------------------------------------------------------
 
-/// `_rust.normalize(text)` — `Words2Num_Base._normalize`.
+/// `_rust.normalize(text)` — `Words2Num_Base._normalize`; numerical symbols
+/// stay as written unless `convert_numerical_symbols` (#972).
 #[pyfunction]
-fn normalize(text: &str) -> String {
-    words2num2_core::normalize(text)
+#[pyo3(signature = (text, convert_numerical_symbols=false))]
+fn normalize(text: &str, convert_numerical_symbols: bool) -> String {
+    words2num2_core::normalize_public(text, convert_numerical_symbols)
 }
 
 /// `_rust.lookup(lang, text, ordinal, negative_words)`.
