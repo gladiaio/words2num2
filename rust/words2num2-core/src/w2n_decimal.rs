@@ -359,7 +359,7 @@ pub fn read(
     // integer keeps it (#364). One sign, no recursion: "moins moins …" is
     // no decimal, and a long run of signs is refused in one step.
     if let Some(rest) = split_sign(lang, text) {
-        if rest.is_empty() || split_sign(lang, &rest).is_some() {
+        if rest.is_empty() || split_sign(lang, &rest).is_some() || rest.starts_with('+') {
             return None;
         }
         let (int, sep, frac) = read_unsigned(lang, &rest, hand_sep, default_sep, cardinal)?;
@@ -741,6 +741,11 @@ mod tests {
         assert_eq!(crate::words2num("ألفان، وثلاثمائة، وخمسة وأربعون", "ar", "cardinal").unwrap(), W2nValue::Int(2345.into()));
         assert_eq!(card("سالب ٣،٥", "ar"), "-3.5");
         assert_eq!(card("سالب 3،5", "ar"), "-3.5");
+        assert!(crate::words2num("-+3،5", "ar", "cardinal").is_err());
+        assert!(crate::words2num("سالب +3،5", "ar", "cardinal").is_err());
+        // A mark glued to the sign is no bare sign: "-، 50" is -0.50.
+        assert_eq!(card("-، 50", "ar"), "-0.50");
+        assert!(crate::words2num("سالب، 50", "ar", "cardinal").is_err()); // never -50
         // #807: a comma before the conjunction is inside the number.
         for t in ["ألف، وخمسمائة", "ألف, وخمسمائة"] {
             assert_eq!(crate::words2num(t, "ar", "cardinal").unwrap(), W2nValue::Int(1500.into()), "{t}");
