@@ -134,9 +134,37 @@ fn mark_forms(lang: &str) -> &'static MarkForms {
 /// not 150).
 pub fn has_written_mark(lang: &str, text: &str) -> bool {
     let Some(m) = hundredths_mark(lang) else { return false };
-    let words: Vec<&str> = text.split_whitespace().collect();
-    // A trailing mark is punctuation: "ثلاثة ،" stays 3.
-    words.iter().position(|t| *t == m).is_some_and(|pos| words.get(pos + 1).is_some_and(|w| *w != m))
+    mark_words(text, m).iter().any(|w| w == m)
+}
+
+/// The words of `text` with the mark as a word of its own however it is
+/// typed — glued ("مائة، خمسون", "مائة،خمسون") or, as classic num2words wrote
+/// it, an ASCII comma standing alone ("مائة , خمسون"; #616, #658) — and
+/// trailing marks dropped, as punctuation ("ثلاثة ،" is 3).
+fn mark_words(text: &str, mark: &str) -> Vec<String> {
+    // An ASCII comma between two letters is the mark too ("مائة,خمسون");
+    // between digits it groups ("1,000"), and stays.
+    let chars: Vec<char> = text.chars().collect();
+    let ascii: String = chars
+        .iter()
+        .enumerate()
+        .map(|(k, &c)| {
+            let letter = |d: Option<&char>| d.is_some_and(|c| c.is_alphabetic());
+            let before = chars[..k].iter().rev().find(|c| !c.is_whitespace());
+            let after = chars[k + 1..].iter().find(|c| !c.is_whitespace());
+            if c == ',' && (letter(before) || before.is_none()) && letter(after) {
+                mark.to_string()
+            } else {
+                c.to_string()
+            }
+        })
+        .collect();
+    let spaced = ascii.replace(mark, &format!(" {mark} "));
+    let mut words: Vec<String> = spaced.split_whitespace().map(str::to_string).collect();
+    while words.last().is_some_and(|w| w == mark) {
+        words.pop();
+    }
+    words
 }
 
 /// The derived forms of renderer key `lang`, built once and cached.
@@ -302,15 +330,51 @@ pub fn read(
     let f = forms(lang);
     // 0. ar "<int> ، <hundredths>": the fraction is a count of hundredths.
     if let Some(mark) = hundredths_mark(lang).filter(|_| has_written_mark(lang, text)) {
-        let mut words: Vec<&str> = text.split_whitespace().collect();
-        // "سالب ، خمسون" is -0.50: the sign is read apart, so a zero integer
-        // keeps it.
-        let first = crate::normalize(words[0]);
-        let negative = crate::strip_sign(lang, &format!("{first} x")) == Some(("x", false));
-        if negative {
-            words.remove(0);
+        // Figures with the mark as their decimal point: "٣،٥" is 3.5, as
+        // "3,5" is, never 3.05 (the renderer writes no figures).
+        let t = text.trim();
+        let (sign, body) = match t.strip_prefix(['-', '\u{2212}']) {
+            Some(b) => ("-", b),
+            None => ("", t),
+        };
+        if let Some((a, b)) = body.split_once(mark) {
+            let digits = |s: &str| -> Option<String> {
+                (!s.is_empty())
+                    .then(|| s.chars().map(|c| crate::w2n_sentence::digit_value(c).map(|d| char::from(b'0' + d as u8))).collect())
+                    .flatten()
+            };
+            if let (Some(a), Some(b)) = (digits(a), digits(b)) {
+                let int = a.trim_start_matches('0');
+                let int = if int.is_empty() { "0" } else { int };
+                return Some((format!("{sign}{int}"), default_sep, b));
+            }
         }
-        let pos = words.iter().position(|t| *t == mark)?;
+        let mut words = mark_words(text, mark);
+        // Two marks are no decimal, whichever comma each is: "مائة ، , خمسون".
+        if words.iter().any(|w| w == ",") {
+            return None;
+        }
+        // Two marks are no decimal: "مائة ، ، خمسون" (#616).
+        if words.iter().filter(|w| *w == mark).count() > 1 {
+            return None;
+        }
+        // "سالب ، خمسون" is -0.50: the sign is read apart, so a zero integer
+        // keeps it. Glued too: "-ثلاثة ، خمسون" (#619).
+        let first = crate::normalize(&words[0]);
+        let mut negative = false;
+        if let Some((rest, glued)) = crate::strip_sign(lang, &format!("{first} x")) {
+            if !glued && rest == "x" {
+                negative = true;
+                words.remove(0);
+            }
+        }
+        if !negative {
+            if let Some(rest) = words[0].strip_prefix(['-', '\u{2212}']).filter(|r| !r.is_empty()) {
+                negative = true;
+                words[0] = rest.to_string();
+            }
+        }
+        let pos = words.iter().position(|t| t == mark)?;
         let forms = mark_forms(lang);
         let int = if pos == 0 {
             BigInt::from(0)
@@ -321,13 +385,16 @@ pub fn read(
                 None => cardinal(&head).filter(|i| *i >= BigInt::from(0))?,
             }
         };
+        // Only the hundredths the renderer writes after the mark: "ثلاثة ،
+        // أربعة" is a list, not 3.04 (#617).
         let rest = words[pos + 1..].join(" ");
-        let n = forms
-            .hundredths
-            .get(&crate::normalize(&rest))
-            .map(|&n| BigInt::from(n))
-            .or_else(|| cardinal(&rest))
-            .filter(|n| *n >= BigInt::from(0) && *n < BigInt::from(100))?;
+        // A figure is no masculine word: "ثلاثة ، 50" is 3.50.
+        let figure = || {
+            let digits: Option<String> =
+                rest.chars().map(|c| crate::w2n_sentence::digit_value(c).map(|d| char::from(b'0' + d as u8))).collect();
+            digits.filter(|d| (1..=2).contains(&d.len())).and_then(|d| d.parse::<u32>().ok())
+        };
+        let n = forms.hundredths.get(&crate::normalize(&rest)).copied().or_else(figure)?;
         let sign = if negative { "-" } else { "" };
         return Some((format!("{sign}{int}"), default_sep, format!("{:0>2}", n)));
     }
@@ -526,5 +593,47 @@ mod tests {
         assert_eq!(crate::words2num("ثلاثة ،", "ar", "cardinal").unwrap(), W2nValue::Int(3.into()));
         assert_eq!(crate::words2num("مائة ،", "ar", "cardinal").unwrap(), W2nValue::Int(100.into()));
         assert_eq!(crate::words2num("ثلاثة ، ،", "ar", "cardinal").unwrap(), W2nValue::Int(3.into()));
+        // #617: only the renderer's hundredths follow the mark; a list stays one.
+        for list in ["ثلاثة ، أربعة", "، ثلاثة", "ثلاثة ، ثلاثة", "ثلاثة ، خمسة"] {
+            assert!(crate::words2num(list, "ar", "cardinal").is_err(), "{list}");
+        }
+        // #616: a glued mark; a doubled one is no decimal.
+        assert_eq!(card("مائة، خمسون", "ar"), "100.50");
+        assert_eq!(card("مائة ،خمسون", "ar"), "100.50");
+        assert_eq!(card("مائة،خمسون", "ar"), "100.50");
+        assert!(crate::words2num("مائة ، ، خمسون", "ar", "cardinal").is_err());
+        assert!(crate::words2num("، ، خمسون", "ar", "cardinal").is_err());
+        // #658: classic num2words' free-standing ASCII comma.
+        assert_eq!(card("مائة , خمسون", "ar"), "100.50");
+        assert_eq!(card(", خمسون", "ar"), "0.50");
+        assert_eq!(card("سالب , خمسون", "ar"), "-0.50");
+        // A glued ASCII comma between words; a figure after the mark.
+        assert_eq!(card("مائة, خمسون", "ar"), "100.50");
+        assert_eq!(card("مائة,خمسون", "ar"), "100.50");
+        assert_eq!(card("مائة ,خمسون", "ar"), "100.50");
+        assert_eq!(card("ثلاثة ، 50", "ar"), "3.50");
+        assert_eq!(card("3 ، 50", "ar"), "3.50");
+        // Figures glued to the mark: its decimal point, as "3,5" is.
+        assert_eq!(card("٣،٥", "ar"), "3.5");
+        assert_eq!(card("3،5", "ar"), "3.5");
+        assert_eq!(card("12،5", "ar"), "12.5");
+        assert_eq!(card("٣،٥٠", "ar"), "3.50");
+        assert_eq!(card("3،05", "ar"), "3.05");
+        assert!(crate::words2num("مائة ، , خمسون", "ar", "cardinal").is_err());
+        assert!(crate::words2num("مائة , ، خمسون", "ar", "cardinal").is_err());
+        assert!(crate::words2num("ثلاثة , أربعة", "ar", "cardinal").is_err());
+        // to="digits" keeps the commas of a dictated string.
+        for (t, v) in [("خمسة ، ستة ، سبعة", 567), ("خمسة، ستة، سبعة", 567), ("خمسة , ستة", 56)] {
+            assert_eq!(crate::words2num(t, "ar", "digits").unwrap(), W2nValue::Int(v.into()), "{t}");
+        }
+        // #619: a glued minus.
+        assert_eq!(card("-ثلاثة ، خمسون", "ar"), "-3.50");
+        // #620: other modes never drop the mark.
+        assert_eq!(
+            format!("{:?}", crate::words2num("مائة ، خمسون", "ar", "currency").unwrap()),
+            format!("{:?}", crate::words2num("مائة ، خمسون", "ar", "cardinal").unwrap())
+        );
+        assert!(crate::words2num("مائة ، خمسون", "ar", "year").is_err());
+        assert!(crate::words2num("مائة ، خمسون", "ar", "ordinal").is_err());
     }
 }
