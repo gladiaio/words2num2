@@ -6273,6 +6273,10 @@ mod region_decimal_word_tests {
     /// figure reads back as the same number in that region.
     #[test]
     fn spoken_decimal_takes_the_region_mark_issue_951() {
+        assert_eq!(super::words2num_sentence("x menos tres coma uno cuatro uno y", "es_MX", "cardinal", false).unwrap(), "x menos 3.141 y");
+        // fr_CH reads a single separator before three digits the CLDR way.
+        let p = std::collections::HashMap::new();
+        assert_eq!(super::auto_parse("1.234", "fr_CH", &p, None, None).unwrap().value, super::W2nValue::Int(1234.into()));
         let s = |t: &str, l: &str| super::words2num_sentence(t, l, "cardinal", false).unwrap();
         for (t, l, want) in [
             ("x tres coma uno cuatro uno y", "es_MX", "x 3.141 y"),
@@ -6285,6 +6289,7 @@ mod region_decimal_word_tests {
             ("x drei Komma eins vier eins y", "de_LI", "x 3.141 y"),
             ("x tres coma uno cuatro uno y", "es_419", "x 3.141 y"),
             ("x três ponto um quatro um y", "pt_BR", "x 3,141 y"),
+            ("x tre punto uno quattro uno y", "it", "x 3,141 y"),
             ("x drei Komma fünf y", "de", "x 3,5 y"),
         ] {
             let out = s(t, l);
