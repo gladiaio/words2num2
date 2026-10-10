@@ -1539,9 +1539,15 @@ fn call_words2num(text: &str, lang: &str, fmt: &FigureFormat) -> Result<W2nValue
     let figure_char =
         |c: char| is_unicode_digit(c) || ".,'_ +-".contains(c) || crate::w2n_formats::is_minus(c) || caller_sep(c);
     if figure.chars().any(is_unicode_digit) && figure.chars().all(figure_char) {
-        return crate::w2n_formats::parse_number_string(figure, fmt.thousands_sep, fmt.decimal_sep, Some(fmt_key))
+        let parsed = crate::w2n_formats::parse_number_string(figure, fmt.thousands_sep, fmt.decimal_sep, Some(fmt_key))
             .map(to_value)
             .map_err(|e| W2nError::Words2Num(e.0));
+        // With no separators of the caller's, a shape the figure parser
+        // declines ("2024.", ".5") reads as words2num reads it (#979).
+        let explicit = fmt.thousands_sep.is_some_and(|t| !t.is_empty()) || fmt.decimal_sep.is_some_and(|d| !d.is_empty());
+        if parsed.is_ok() || explicit {
+            return parsed;
+        }
     }
     let converter = converter_for(&resolved);
     if crate::w2n_decimal::has_written_mark(converter.n2w_key(), text) {
@@ -6286,6 +6292,11 @@ mod auto_parse_sign_tests {
         }
         assert_eq!(with("\u{2212}1.234 km", "de", Some("."), Some(",")), W2nValue::Int((-1234).into()));
         assert_eq!(v("\u{2212}1.234 kg", "de"), v("\u{2212}1.234", "de"));
+        // #979: what the figure parser declines still reads without separators.
+        assert_eq!(v("2024.", "en"), W2nValue::Int(2024.into()));
+        assert_eq!(v("-1.", "en"), W2nValue::Int((-1).into()));
+        assert_eq!(dec(v(".5", "de")), dec(W2nValue::Dec("0.5".parse().unwrap())));
+        assert_eq!(auto_parse("12. km", "en", &p, None, None).unwrap().value, W2nValue::Int(12.into()));
         // The caller's own separator characters (ar "٫", de_CH "’").
         assert_eq!(dec(auto_parse("٣٫٥ km", "ar", &p, None, Some("٫")).unwrap().value), dec(W2nValue::Dec("3.5".parse().unwrap())));
         assert_eq!(auto_parse("1٬234 km", "ar", &p, Some("٬"), Some("٫")).unwrap().value, W2nValue::Int(1234.into()));
