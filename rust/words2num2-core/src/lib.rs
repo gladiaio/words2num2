@@ -1285,10 +1285,28 @@ fn scaled_reading(lang: &str, norm: &str) -> Scaled {
     // eu), a spelling can split several ways and num2words2 sometimes renders
     // two values alike. Only a reading the renderer spells this way is kept:
     // a raise beats a wrong number.
-    if (!sc.postfix.is_empty() || !sc.one_after.is_empty()) && !renders_as(lang, v, norm) {
+    if (!sc.postfix.is_empty() || !sc.one_after.is_empty())
+        && !renders_as(lang, v, norm)
+        && !renders_as(lang, v, &drop_postfix_connector(norm, &sc, connector_words(lang)))
+    {
         return Scaled::None;
     }
     Scaled::Value(v)
+}
+
+/// ha "miliyan da talatin": the sum written with the "da" the renderer drops
+/// before a 10-999 remainder ("miliyan talatin" reads as the product, #882),
+/// as the renderer would write it without.
+fn drop_postfix_connector(norm: &str, sc: &Scales, conns: &[&str]) -> String {
+    let toks: Vec<&str> = norm.split_whitespace().collect();
+    let mut out: Vec<&str> = Vec::new();
+    for (k, t) in toks.iter().enumerate() {
+        let after_scale = k > 0 && sc.postfix.iter().any(|w| w == toks[k - 1]);
+        if !(after_scale && conns.contains(t)) {
+            out.push(t);
+        }
+    }
+    out.join(" ")
 }
 
 fn scaled_value(lang: &str, norm: &str) -> Option<i64> {
@@ -1344,9 +1362,17 @@ fn postfix_rival(lang: &str, v: i64, norm: &str, sc: &Scales) -> Rival {
         // The renderer writes "miliyan talatin" for 30·10^6 and for 10^6 + 30
         // alike: it drops the "da" a sum takes. A reader takes the multiplier
         // after the scale word, so that reading wins (#882).
+        // Only for a million and above: the thousands keep the reading the
+        // table gives ("dubu goma" is 1 010) and stay ambiguous to the
+        // ordinal and sentence guards, as before.
         let mult = unit.checked_mul(m).and_then(|x| h.checked_add(x));
         if let Some(mult) = mult.filter(|&x| renders_as(lang, x, norm)) {
-            return if mult == v { Rival::None } else { Rival::Prefer(mult) };
+            if unit >= 1_000_000 {
+                return if mult == v { Rival::None } else { Rival::Prefer(mult) };
+            }
+            if mult != v {
+                return Rival::Ambiguous;
+            }
         }
         let add = h.checked_add(unit).and_then(|x| x.checked_add(m));
         if add.is_some_and(|x| x != v && renders_as(lang, x, norm)) {
@@ -1797,7 +1823,10 @@ fn parse_scaled_inner(lang: &str, text: &str, sc: &Scales, conns: &[&str]) -> Op
             // when the renderer says so: tet "miliaun rihun atus sia rihun ida" is
             // no 1 × 10^6 + 901001.
             let postfix_one = left_trim.is_empty() && sc.postfix.iter().any(|w| w == word);
-            if let Some(v) = v.filter(|&v| !(postfix_one || stacked) || renders_as(lang, v, text)) {
+            let rendered = |v: i64| {
+                renders_as(lang, v, text) || renders_as(lang, v, &drop_postfix_connector(text, sc, conns))
+            };
+            if let Some(v) = v.filter(|&v| !(postfix_one || stacked) || rendered(v)) {
                 return Some(v);
             }
             if postfix_one && v.is_some() {
@@ -2514,10 +2543,13 @@ mod tests {
         assert_eq!(parse_scaled("ha", "miliyan talatin"), Some(30_000_000));
         assert_eq!(parse_scaled("ha", "miliyan sha biyu"), Some(12_000_000));
         assert_eq!(parse_scaled("ha", "miliyan ɗari biyar"), Some(500_000_000));
-        assert_eq!(parse_scaled("ha", "miliyan dubu ɗari"), Some(1_100_000));
-        assert_eq!(parse_scaled("ha", "miliyan biyu dubu ɗari uku sha biyar"), Some(2_315_000));
+        // The thousands stay ambiguous, as before (1 001 100 and 1 100 000).
+        assert_eq!(parse_scaled("ha", "miliyan dubu ɗari"), None);
+        assert_eq!(parse_scaled("ha", "miliyan biyu dubu ɗari uku sha biyar"), None);
         // The sum is written with "da".
         assert_eq!(parse_scaled("ha", "miliyan da biyu"), Some(1_000_002));
+        assert_eq!(parse_scaled("ha", "miliyan da talatin"), Some(1_000_030));
+        assert_eq!(parse_scaled("ha", "miliyan da ɗari biyar tamanin"), Some(1_000_580));
         assert_eq!(parse_scaled("ff", "ujunere teemerre"), Some(100_000));
         // km myriad and hundred-thousand glued to their multiplier.
         assert_eq!(parse_scaled("km", "មួយម៉ឺន ពីរពាន់ បីរយ សែសិបប្រាំ"), Some(12_345));
