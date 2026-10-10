@@ -5851,6 +5851,8 @@ mod sign_and_script_tests {
             assert!(crate::words2num(t, l, "cardinal").is_err(), "{l} {t}");
         }
         assert!(crate::words2num("moins -5", "fr", "year").is_err());
+        // A double negative in figures is refused too.
+        assert!(crate::words2num("-(-5)", "en", "cardinal").is_err());
     }
 
     /// #697: digits mode never drops a leading minus.
@@ -5865,9 +5867,11 @@ mod sign_and_script_tests {
     /// #869: a superscript or subscript digit is no part of the figure.
     #[test]
     fn script_digits_are_no_digits_issue_869() {
-        for (t, l) in [("10²", "en"), ("2³", "en"), ("10⁶", "en"), ("12²", "de"), ("10₂", "en"), ("５²", "ja")] {
+        for (t, l) in [("10²", "en"), ("2³", "en"), ("10⁶", "en"), ("12²", "de"), ("10₂", "en"), ("５²", "ja"), ("²5", "en"), ("10.²", "en")] {
             assert!(crate::words2num(t, l, "cardinal").is_err(), "{l} {t}");
         }
+        // A run of script digits alone reads as its digits.
+        assert!(crate::words2num("¹⁰", "en", "cardinal").is_ok());
         assert!(crate::words2num("10", "en", "cardinal").is_ok());
         let p = std::collections::HashMap::new();
         assert!(super::auto_parse("10²", "en", &p, None, None).is_err());

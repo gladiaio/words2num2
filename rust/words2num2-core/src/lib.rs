@@ -80,12 +80,17 @@ pub fn words2num(
     w2n_sentence::words2num(text, lang, to)
 }
 
-/// Does `text` hold a superscript or subscript digit right after a digit
-/// ("10²", "2³", "10₂")? NFKD would fold it into the figure.
+/// Does `text` hold a superscript or subscript digit next to a digit or a
+/// figure separator ("10²", "2³", "10₂", "²5", "10.²")? NFKD would fold it
+/// into the figure. A run of script digits alone ("²", "¹⁰") reads as its
+/// digits.
 pub(crate) fn glued_script_digit(text: &str) -> bool {
-    let script = |c: char| matches!(c, '\u{00B2}' | '\u{00B3}' | '\u{00B9}' | '\u{2070}'..='\u{2079}' | '\u{2080}'..='\u{2089}');
+    let script = |c: char| {
+        matches!(c, '\u{00B2}' | '\u{00B3}' | '\u{00B9}' | '\u{2070}' | '\u{2074}'..='\u{2079}' | '\u{2080}'..='\u{2089}')
+    };
+    let figure = |c: char| (c.is_numeric() && !script(c)) || matches!(c, '.' | ',');
     let chars: Vec<char> = text.chars().collect();
-    chars.windows(2).any(|w| script(w[1]) && (w[0].is_numeric() || script(w[0])))
+    chars.windows(2).any(|w| (script(w[1]) && figure(w[0])) || (script(w[0]) && figure(w[1])))
 }
 
 /// Is `text` a number in figures and nothing else: an optional sign, then
