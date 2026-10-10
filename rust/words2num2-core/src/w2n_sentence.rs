@@ -2767,6 +2767,17 @@ fn homograph_words(resolved: &str) -> &'static str {
     }
 }
 
+/// Does num2words2 write `v` (its ordinal, if `ordinal`) exactly as `text`,
+/// hyphens read as spaces? The #285 glue readings never are: 7 is "bảy",
+/// not "ba y".
+fn renderer_spells(key: &str, v: &W2nValue, ordinal: bool, text: &str) -> bool {
+    let W2nValue::Int(n) = v else { return false };
+    let Some(r) = num2words2_core::get_lang_by_key(key) else { return false };
+    let canon = |s: &str| crate::normalize(s).replace('-', " ").split_whitespace().collect::<Vec<_>>().join(" ");
+    let t = canon(text);
+    r.to_cardinal(n).is_ok_and(|w| canon(&w) == t) || (ordinal && r.to_ordinal(n).is_ok_and(|w| canon(&w) == t))
+}
+
 /// Is the word at `i` (as written, `piece`) a homograph of a number word? de
 /// "Acht" capitalised is the noun ("in Acht nehmen", "Acht geben"), the
 /// number is lower case.
@@ -2789,9 +2800,17 @@ fn is_homograph(resolved: &str, parts: &[String], i: usize, piece: &str) -> bool
     let norm = crate::normalize(word);
     // ru "с семью друзьями": after "с"/"со" семью is the instrumental of 7;
     // "family" there is "семьёй".
-    if base == "ru" && norm == crate::normalize("семью") {
-        let prev = prev_word(parts, i).map(|p| p.to_lowercase());
-        if prev.is_some_and(|p| p == "с" || p == "со") {
+    let prev = prev_word(parts, i).map(|p| p.to_lowercase());
+    if base == "ru" && norm == crate::normalize("семью") && prev.as_deref().is_some_and(|p| p == "с" || p == "со") {
+        return false;
+    }
+    // "около сорока человек": after a quantity word or preposition сорока is
+    // the oblique case of 40, not the magpie.
+    if matches!(base, "ru" | "uk") && norm == crate::normalize("сорока") {
+        const RU: &[&str] = &["около", "более", "менее", "свыше", "до", "из", "от", "в", "на", "о", "по", "при", "к", "с", "со", "порядка", "больше", "меньше"];
+        const UK: &[&str] = &["близько", "понад", "до", "з", "із", "від", "у", "в", "на", "о", "по", "при"];
+        let words = if base == "ru" { RU } else { UK };
+        if prev.as_deref().is_some_and(|p| words.contains(&p)) {
             return false;
         }
     }
@@ -3366,11 +3385,14 @@ fn words2num_sentence_walk(
             // decimal's denominator ("три целых четырнадцать сотых"). A short
             // fragment never glues onto a number: nl "twee de" is no "tweede",
             // de "zwei te" no "zweite", vi "ba y" no "bảy" (#285).
+            // The renderer's own spelling always reads: eu "hiru milioi", gu
+            // "વીસ છમો" (its scale and ordinal pieces are no candidates).
             let hit = hit.filter(|(v, ordinal)| {
                 candidate
                     || matches!(v, W2nValue::Dec(_))
                     || converter.is_ordinal_word(&clean)
                     || (*ordinal && rstrip_punct(&clean).chars().count() >= 4)
+                    || renderer_spells(converter.n2w_key(), v, *ordinal, &stripped)
             });
             // ha "na miliyan goma": the ordinal of 10^7 and of 1 000 010 alike
             // (#348). Declined, and the span stays words.
@@ -5297,8 +5319,13 @@ mod false_number_tests {
         assert_eq!(s("X šest Y.", "cs"), "X 6 Y.");
         assert_eq!(s("X jedenásť Y.", "sk"), "X 11 Y.");
         assert_eq!(s("X pięćdziesiąt Y.", "pl"), "X 50 Y.");
-        // Still read: a compound ordinal glued by the renderer.
+        // Still read: a compound ordinal glued by the renderer, and the
+        // renderer's own spellings whose pieces are no candidates.
         assert_eq!(s("venti quattresimo", "it"), "24º");
+        assert_eq!(s("hiru milioi", "eu"), "3000000");
+        assert_eq!(s("tati miliyon", "ff"), "3000000");
+        assert_eq!(s("bhiriyoni mbiri", "sn"), "2000000000");
+        assert_eq!(s("વીસ છમો", "gu"), "26મો");
     }
 
     /// #288: digits of any script are literals, never part of a word run.
@@ -5325,6 +5352,9 @@ mod false_number_tests {
         assert_eq!(s("Сорока украла кольцо", "ru"), "Сорока украла кольцо");
         assert_eq!(s("Сорока украла кольцо", "uk"), "Сорока украла кольцо");
         assert_eq!(s("с семью друзьями", "ru"), "с 7 друзьями");
+        assert_eq!(s("около сорока человек", "ru"), "около 40 человек");
+        assert_eq!(s("в сорока километрах", "ru"), "в 40 километрах");
+        assert_eq!(s("близько сорока людей", "uk"), "близько 40 людей");
     }
 }
 
