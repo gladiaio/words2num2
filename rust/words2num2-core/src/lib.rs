@@ -44,7 +44,9 @@ pub fn words2num(
     // de "minus 1.234": a sign word before a figure, read with the same
     // separators as "-1.234" (#309).
     if matches!(to, "cardinal" | "currency") {
-        if let Some((head, figure)) = text.trim().split_once(char::is_whitespace) {
+        // A comma or mark glued to the sign ("-، 50") is no bare sign word.
+        let split = text.trim().split_once(char::is_whitespace).filter(|(h, _)| !h.contains([',', '\u{060C}']));
+        if let Some((head, figure)) = split {
             let resolved = w2n_sentence::resolve_lang(lang)?;
             let word = normalize(head);
             let is_sign = ["minus", "negative"].contains(&word.as_str())
