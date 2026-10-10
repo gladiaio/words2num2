@@ -1535,7 +1535,9 @@ fn call_words2num(text: &str, lang: &str, fmt: &FigureFormat) -> Result<W2nValue
     // "−1.234 kg" is -1234 kg as "−1.234" is. Any script's digits and any
     // minus the library reads (#976).
     let figure = text.trim();
-    let figure_char = |c: char| is_unicode_digit(c) || ".,'_ +-".contains(c) || crate::w2n_formats::is_minus(c);
+    let caller_sep = |c: char| [fmt.thousands_sep, fmt.decimal_sep].iter().flatten().any(|s| s.contains(c));
+    let figure_char =
+        |c: char| is_unicode_digit(c) || ".,'_ +-".contains(c) || crate::w2n_formats::is_minus(c) || caller_sep(c);
     if figure.chars().any(is_unicode_digit) && figure.chars().all(figure_char) {
         return crate::w2n_formats::parse_number_string(figure, fmt.thousands_sep, fmt.decimal_sep, Some(fmt_key))
             .map(to_value)
@@ -6284,6 +6286,9 @@ mod auto_parse_sign_tests {
         }
         assert_eq!(with("\u{2212}1.234 km", "de", Some("."), Some(",")), W2nValue::Int((-1234).into()));
         assert_eq!(v("\u{2212}1.234 kg", "de"), v("\u{2212}1.234", "de"));
+        // The caller's own separator characters (ar "٫", de_CH "’").
+        assert_eq!(dec(auto_parse("٣٫٥ km", "ar", &p, None, Some("٫")).unwrap().value), dec(W2nValue::Dec("3.5".parse().unwrap())));
+        assert_eq!(auto_parse("1٬234 km", "ar", &p, Some("٬"), Some("٫")).unwrap().value, W2nValue::Int(1234.into()));
         // "AR" is ar: its "،" stays the decimal mark.
         assert_eq!(format!("{:?}", crate::words2num("-، 50", "AR", "cardinal").unwrap()), format!("{:?}", crate::words2num("-، 50", "ar", "cardinal").unwrap()));
     }
