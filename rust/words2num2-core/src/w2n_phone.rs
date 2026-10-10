@@ -122,6 +122,9 @@ fn written(run: &Run, candidates: &[Id]) -> Option<String> {
         // Dialled exactly so in that country: the trunk prefix too.
         (phonenumber::is_valid(&n) && only_digits(&national) == run.digits).then_some(national)
     })
+    // A plan with no grouping for it ("061234567890"): the groups as spoken
+    // beat one long run of digits.
+    .filter(|w| w.contains(|c: char| !c.is_ascii_digit()))
 }
 
 /// Rewrite every phone number of `text` (the walk's output) as its country
