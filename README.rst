@@ -530,7 +530,7 @@ Function / class                   Purpose
 ``auto_parse(text, ...)``          Parse a single quantity (number + unit).
 ``auto_parse_sentence(text, ...)`` Replace every quantity in running text.
 ``parse_number_string(text, ...)`` Digit-form parser with separators.
-``normalize(text)``                The text normalization applied before lookup.
+``normalize(text, ...)``           Lookup-style text normalization (keeps ①, ², ½).
 ``supported_langs()``              The accepted language keys.
 ``CONVERTER_TYPES``                The accepted ``to=`` values.
 ``Quantity``                       Dataclass returned by ``auto_parse``.

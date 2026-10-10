@@ -217,11 +217,16 @@ def parse_number_string(s, thousands_sep=None, decimal_sep=None, lang=None):
     return _RUST.parse_number_string(s, thousands_sep, decimal_sep, lang)
 
 
-def normalize(text):
+def normalize(text, convert_numerical_symbols=False):
     """Normalize ``text`` the way the core does before a reverse lookup
     (NFKD, lowercase, strip diacritics, hyphens between words become spaces,
-    collapse whitespace): ``normalize("Forty-Two")`` -> ``"forty two"``."""
-    return _RUST.normalize(text)
+    collapse whitespace): ``normalize("Forty-Two")`` -> ``"forty two"``.
+
+    Numerical symbols (``"①"``, ``"²"``, ``"½"``, ``"㊀"``) stay as written;
+    ``convert_numerical_symbols=True`` folds them like the rest
+    (``"①"`` -> ``"1"``).
+    """
+    return _RUST.normalize(text, convert_numerical_symbols=convert_numerical_symbols)
 
 
 def supported_langs():

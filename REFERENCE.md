@@ -288,11 +288,13 @@ Decimal('-12345.67')
 
 ### `normalize`
 
-`normalize(text)`
+`normalize(text, convert_numerical_symbols=False)`
 
 Normalize `text` the way the core does before a lookup: NFKD, lowercase,
 strip diacritics, hyphens between words become spaces, collapse
-whitespace. Returns `str`.
+whitespace. Returns `str`. Numerical symbols stay as written
+(`normalize("x ① y")` is `"x ① y"`); `convert_numerical_symbols=True`
+folds them like the rest (`"x 1 y"`). See [Numerical symbols](#numerical-symbols).
 
 ```python
 >>> normalize("Forty-Two")
@@ -379,10 +381,19 @@ or ISO code (`USD`, `EUR`, `GBP`, …). Ambiguous tokens (`m`, `g`, `t`,
 ## Numerical symbols
 
 Superscript, subscript, circled and parenthesized digits (`"²"`, `"₂"`,
-`"①"`, `"⑩"`, `"⒈"`) and vulgar fractions (`"½"`) are symbols, not
-numbers. By default every entry point leaves them alone: `words2num` and
-`auto_parse` raise on them, alone or glued to a figure, and the sentence
-functions keep them as written (`"the ⑤ million"` stays as is).
+`"①"`, `"⑩"`, `"⒈"`), circled and parenthesized ideographs (`"㊀"`,
+`"㈩"`, `"〸"`), Roman numerals (`"Ⅻ"`) and vulgar fractions (`"½"`) are
+symbols, not numbers: any character of Unicode category `Nl` or `No` that
+NFKD rewrites. A script's own digits (`"５"`, `"٥"`, `"५"`, category `Nd`)
+and the CJK compatibility ideographs (`"零"` at U+F9B2, category `Lo`) are
+not symbols. The digit table follows Unicode 13, so digits added later are not
+read as digits: the outlined digits U+1CCF0–U+1CCF9 (`"𜳵"`) count as
+symbols, and the others (Kawi, Tangsa, Nag Mundari, …) are left as written. By default every parsing
+entry point leaves them alone: `words2num` and `auto_parse` raise on them,
+alone or glued to a figure, and the sentence functions keep them as written
+(`"the ⑤ million"` stays as is). `normalize()` keeps them too
+(`normalize("x ① y")` is `"x ① y"`); only the lookup tables' internal
+normalization folds them.
 
 `convert_numerical_symbols=True` brings back the reading these symbols had
 before, no more:
@@ -392,6 +403,7 @@ before, no more:
 | `words2num`, `auto_parse` | A run of symbols alone reads as its digits: `"①"` → 1, `"¹⁰"` → 10. |
 | `words2num_sentence` | The English walker (`en`, `en_GB`, `en_US`, …) reads them as digits: `"the ⑤ million"` → `"the 5000000"`. Other languages leave them as written either way. |
 | `auto_parse_sentence` | No effect: its quantity scanner never read them. The keyword is accepted for symmetry. |
+| `normalize` | Folds them like any other character: `"①"` → `"1"`, `"½"` → `"1⁄2"`. |
 | CLI | `--convert-numerical-symbols`. |
 
 A symbol glued to a figure raises in either mode (`"10²"`, `"1①"`: folding it
