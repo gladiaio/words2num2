@@ -598,7 +598,7 @@ mod tests {
     #[test]
     fn native_separator_spellings() {
         assert_eq!(sent("tres coma un catro", "gl"), "3,14");
-        assert_eq!(sent("три запирка еден четири", "mk"), "3.14");
+        assert_eq!(sent("три запирка еден четири", "mk"), "3,14"); // mk writes a decimal comma (#424)
         assert_eq!(sent("tre komma ein fire", "nn"), "3,14");
     }
 

@@ -1491,6 +1491,8 @@ pub fn words2num(
 ) -> Result<crate::w2n_lang_en::W2nValue, W2nError> {
     let resolved = resolve_lang(lang)?;
     let converter = converter_for(&resolved);
+    // The caller's region, for the decimal mark a spoken decimal writes.
+    let fmt_key = crate::w2n_formats::format_key(lang, &resolved);
 
     check_converter_type(to)?;
 
@@ -1539,7 +1541,7 @@ pub fn words2num(
                 // ar "مائة ، خمسون": the mark normalizing drops makes it a
                 // decimal, never the cardinal 150 — in every mode (#371, #620).
                 "cardinal" | "currency" if crate::w2n_decimal::has_written_mark(converter.n2w_key(), text) => {
-                    table_decimal(&converter, &resolved, text)
+                    table_decimal(&converter, &resolved, &fmt_key, text)
                         .and_then(|(int, _, frac)| BigDecimal::from_str(&format!("{}.{}", int, frac)).ok())
                         .map(W2nValue::Dec)
                         .ok_or_else(|| W2nError::Words2Num(unparseable_msg(text)))
@@ -1550,7 +1552,7 @@ pub fn words2num(
                     Err(W2nError::Words2Num(unparseable_msg(text)))
                 }
                 "cardinal" => base_convert(lang, text, false).or_else(|e| {
-                    table_decimal(&converter, &resolved, text)
+                    table_decimal(&converter, &resolved, &fmt_key, text)
                         .and_then(|(int, _, frac)| BigDecimal::from_str(&format!("{}.{}", int, frac)).ok())
                         .map(W2nValue::Dec)
                         .ok_or(e)
@@ -1744,6 +1746,46 @@ fn connector_join_ok(converter: &Converter, stripped: &str, total: &W2nValue, ha
     (*t == &l + &r && r < l && &l % BigInt::from(10) == zero) || *t == &l * &r
 }
 
+/// The words the renderer writes a comma after inside one number (en
+/// "thousand" and every larger scale, it "miliardo" and the scales above
+/// it), normalized and lowercased. Elsewhere a
+/// comma there separates a list: ru "две тысячи, триста" is 2000 and 300
+/// (#657). Read from the renderer's own output, once per language.
+fn scale_comma_words(key: &str) -> std::sync::Arc<Vec<String>> {
+    static CACHE: std::sync::OnceLock<std::sync::RwLock<HashMap<String, std::sync::Arc<Vec<String>>>>> =
+        std::sync::OnceLock::new();
+    let cache = CACHE.get_or_init(Default::default);
+    if let Some(w) = cache.read().ok().and_then(|m| m.get(key).cloned()) {
+        return w;
+    }
+    let mut words: Vec<String> = Vec::new();
+    if let Some(r) = num2words2_core::get_lang_by_key(key) {
+        // Every power, singular and plural multipliers, a remainder after it.
+        let samples = (3..=18u32).flat_map(|e| {
+            let p = 10i64.pow(e);
+            [1i64, 2, 23, 123].into_iter().filter_map(move |k| {
+                k.checked_mul(p)?.checked_add(if e >= 6 { 456 * 10i64.pow(e - 3) } else { 0 } + 101)
+            })
+        });
+        for n in samples {
+            let Ok(text) = r.to_cardinal(&BigInt::from(n)) else { continue };
+            for tok in text.split_whitespace().filter(|t| t.ends_with(',')) {
+                let clean = rstrip_punct(tok).to_lowercase().replace('-', " ");
+                if let Some(last) = py_split_whitespace(&clean).last() {
+                    if !words.iter().any(|w| w == last) {
+                        words.push(last.to_string());
+                    }
+                }
+            }
+        }
+    }
+    let words = std::sync::Arc::new(words);
+    if let Ok(mut m) = cache.write() {
+        m.insert(key.to_string(), words.clone());
+    }
+    words
+}
+
 /// The scale a token closes with a comma: "thousand," -> 1000, "million," ->
 /// 1000000, pt "mil," -> 1000. `None` for any other token or punctuation.
 fn comma_after_scale(converter: &Converter, tok: &str) -> Option<BigInt> {
@@ -1752,6 +1794,9 @@ fn comma_after_scale(converter: &Converter, tok: &str) -> Option<BigInt> {
     }
     let clean = rstrip_punct(tok).to_lowercase().replace('-', " ");
     let last = *py_split_whitespace(&clean).last()?;
+    if !scale_comma_words(converter.n2w_key()).iter().any(|w| w == last) {
+        return None;
+    }
     if !is_scale_word(converter, last, 1_000) {
         return None;
     }
@@ -2117,9 +2162,10 @@ fn decimal_word(resolved: &str, word: &str) -> Option<char> {
 fn table_decimal(
     converter: &Converter,
     resolved: &str,
+    fmt_key: &str,
     text: &str,
 ) -> Option<(String, char, String)> {
-    let default_sep = crate::w2n_formats::locale_format(resolved)
+    let default_sep = crate::w2n_formats::locale_format(fmt_key)
         .and_then(|f| f.decimal.chars().next())
         .unwrap_or('.');
     let cardinal = |words: &str| match converter.to_cardinal(words).ok()? {
@@ -3035,6 +3081,7 @@ fn words2num_sentence_walk(
     has_kwargs: bool,
 ) -> Result<String, W2nError> {
     let resolved = resolve_lang(lang)?;
+    let fmt_key = crate::w2n_formats::format_key(lang, &resolved);
     let converter = converter_for(&resolved);
     let postfix_scales = matches!(converter, Converter::Table(l) if crate::has_postfix_scales(l));
     // Regional English reads with the English grammar where its table
@@ -3298,7 +3345,7 @@ fn words2num_sentence_walk(
                     let list_comma = converter.n2w_key().starts_with("ar")
                         && (stripped.contains(',')
                             || stripped.split_whitespace().any(|w| w != "\u{060C}" && w.contains('\u{060C}')));
-                    let dec = (!list_comma).then(|| table_decimal(&converter, &resolved, &stripped)).flatten().and_then(
+                    let dec = (!list_comma).then(|| table_decimal(&converter, &resolved, &fmt_key, &stripped)).flatten().and_then(
                         |(int, sep, frac)| {
                             BigDecimal::from_str(&format!("{}.{}", int, frac))
                                 .ok()
@@ -4215,6 +4262,9 @@ pub fn auto_parse(
     let resolved = resolve_lang(lang)?;
     crate::w2n_formats::check_separators(thousands_sep, decimal_sep)
         .map_err(|e| W2nError::Words2Num(e.0))?;
+    // Figures read with the caller's region: es_MX groups with a comma (#423).
+    let fmt_key = crate::w2n_formats::format_key(lang, &resolved);
+    let fmt_lang = fmt_key.as_str();
     let lang = resolved.as_str();
     let raw = text;
     let text = py_strip(text);
@@ -4228,7 +4278,7 @@ pub fn auto_parse(
         // NB: only Words2NumError is swallowed here. A KeyError out of
         // _apply_scale ("$5kn") escapes auto_parse entirely.
         match (|| -> Result<Quantity, W2nError> {
-            let mut value = parse_number_string(&num_str, thousands_sep, decimal_sep, Some(lang))?;
+            let mut value = parse_number_string(&num_str, thousands_sep, decimal_sep, Some(fmt_lang))?;
             if let Some(s) = scale.as_deref().filter(|s| !s.is_empty()) {
                 value = apply_scale(value, s)?;
             }
@@ -4242,7 +4292,7 @@ pub fn auto_parse(
 
     // 2. Currency-suffix form: 12.50 € / 45 USD
     if let Some((sym, num_str)) = try_currency_suffix(&chars) {
-        match parse_number_string(&num_str, thousands_sep, decimal_sep, Some(lang)) {
+        match parse_number_string(&num_str, thousands_sep, decimal_sep, Some(fmt_lang)) {
             Ok(value) => return Ok(quantity_currency(value, &sym, raw)),
             Err(W2nError::Words2Num(_)) => {}
             Err(e) => return Err(e),
@@ -4250,7 +4300,7 @@ pub fn auto_parse(
     }
 
     // 3. Number + unit suffix (digit form): "5cm", "20°C", "42%", "3.5 km"
-    if let Some(mut res) = try_digit_unit(&chars, prefer, thousands_sep, decimal_sep, lang)? {
+    if let Some(mut res) = try_digit_unit(&chars, prefer, thousands_sep, decimal_sep, fmt_lang)? {
         res.raw = raw.to_string();
         return Ok(res);
     }
@@ -4262,8 +4312,16 @@ pub fn auto_parse(
     }
 
     // 5. Pure number — digit form, then word form.
-    match parse_number_string(text, thousands_sep, decimal_sep, Some(lang)) {
+    match parse_number_string(text, thousands_sep, decimal_sep, Some(fmt_lang)) {
         Ok(value) => return Ok(Quantity::bare(value, raw)),
+        // Figures the caller gave separators for are no words: "1.5" with
+        // decimal_sep="," raises, it is no float 1.5.
+        Err(e @ W2nError::Words2Num(_))
+            if (thousands_sep.is_some_and(|t| !t.is_empty()) || decimal_sep.is_some_and(|d| !d.is_empty()))
+                && text.chars().all(|c| c.is_ascii_digit() || ".,'_ +-".contains(c)) =>
+        {
+            return Err(W2nError::Words2Num(format!("could not auto-parse {}: {}", py_repr_str(raw), e.message())));
+        }
         Err(W2nError::Words2Num(_)) => {}
         Err(e) => return Err(e),
     }
@@ -5213,6 +5271,30 @@ mod audit_tests {
             super::auto_parse_sentence("0.0000001 kg", "en", &prefer, None, None, false).unwrap(),
             "0.0000001 kg"
         );
+    }
+}
+
+#[cfg(test)]
+mod scale_comma_tests {
+    use super::words2num_sentence;
+
+    /// #657: a comma after a scale word is crossed only where the renderer
+    /// writes one inside a number.
+    #[test]
+    fn comma_after_scale_only_where_rendered_issue_657() {
+        let s = |t: &str, l: &str| words2num_sentence(t, l, "cardinal", false).unwrap();
+        assert_eq!(s("в две тысячи, сто человек", "ru"), "в 2000, 100 человек");
+        assert_eq!(s("Ceny: dwa tysiące, trzysta i pięćset złotych.", "pl"), "Ceny: 2000, 300 i 500 złotych.");
+        assert_eq!(s("Precios: dos mil, trescientos y quinientos euros.", "es"), "Precios: 2000, 300 y 500 euros.");
+        assert_eq!(s("две хиляди, триста", "bg"), "2000, 300");
+        // The renderers that write the comma keep reading one number (#67),
+        // after the scales they write it after: it only after "miliardo".
+        assert_eq!(s("twelve thousand, three hundred and forty-five", "en"), "12345");
+        assert_eq!(
+            s("x un miliardo, duecentotrentaquattro milioni e cinquecentosessantasettemilaottocentonovanta y", "it"),
+            "x 1234567890 y"
+        );
+        assert_eq!(s("q un milione, duecento z", "it"), "q 1000000, 200 z");
     }
 }
 
