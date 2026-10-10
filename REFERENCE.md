@@ -30,7 +30,7 @@ overview, see [README.rst](README.rst).
 
 ### `words2num`
 
-`words2num(text, lang="en", to="cardinal")`
+`words2num(text, lang="en", to="cardinal", convert_numerical_symbols=False)`
 
 Parse `text` (a number written in words) into a numeric value.
 
@@ -41,6 +41,7 @@ Parse `text` (a number written in words) into a numeric value.
 | `text` | `str` | — | The words to parse (e.g. `"forty-two"`). |
 | `lang` | `str` | `"en"` | Locale code, case-insensitive; see [Language codes](#language-codes). |
 | `to` | `str` | `"cardinal"` | One of [`CONVERTER_TYPES`](#converter_types): `"cardinal"`, `"ordinal"`, `"ordinal_num"`, `"year"`, `"currency"`, `"digits"`. See [Conversion types](#conversion-types). |
+| `convert_numerical_symbols` | `bool` | `False` | Read numerical symbols as their digits. See [Numerical symbols](#numerical-symbols). |
 
 There are no other keyword arguments: an unknown one is a `TypeError`
 naming it.
@@ -80,7 +81,7 @@ Decimal('3.14')
 
 ### `words2num_sentence`
 
-`words2num_sentence(sentence, lang="en", to="cardinal", currency=False)`
+`words2num_sentence(sentence, lang="en", to="cardinal", currency=False, convert_numerical_symbols=False)`
 
 Walk a sentence and replace every word-number with its numeric form.
 Non-number tokens pass through unchanged. Punctuation is preserved.
@@ -112,7 +113,7 @@ number + currency word (+ subunit) the way the language writes it
 
 ### `auto_parse`
 
-`auto_parse(text, lang="en", prefer=None, thousands_sep=None, decimal_sep=None)`
+`auto_parse(text, lang="en", prefer=None, thousands_sep=None, decimal_sep=None, convert_numerical_symbols=False)`
 
 Parse a single quantity expression — a number plus an optional unit
 or currency — and return a structured [`Quantity`](#quantity).
@@ -175,7 +176,7 @@ Decimal('12.50')
 
 ### `auto_parse_sentence`
 
-`auto_parse_sentence(text, lang="en", prefer=None, thousands_sep=None, decimal_sep=None, expand=False)`
+`auto_parse_sentence(text, lang="en", prefer=None, thousands_sep=None, decimal_sep=None, expand=False, convert_numerical_symbols=False)`
 
 Walk free text and replace every quantity in place. Punctuation
 between matches is preserved.
@@ -329,7 +330,7 @@ Returned by `auto_parse` and used by `auto_parse_sentence` internally.
 | `value` | `int \| float \| Decimal` | Numeric value. |
 | `unit` | `Optional[str]` | Canonical short unit (`"kg"`, `"USD"`, `"%"`, `"°C"`, …). |
 | `unit_long` | `Optional[str]` | Canonical long unit (`"kilogram"`, `"dollar"`, `"percent"`, …). |
-| `kind` | `Optional[str]` | One of `"currency"`, `"length"`, `"mass"`, `"temperature"`, `"time"`, `"volume"`, `"percent"`, or `None`. |
+| `kind` | `Optional[str]` | One of `"currency"`, `"length"`, `"mass"`, `"temperature"`, `"time"`, `"area"`, `"volume"`, `"percent"`, or `None`. |
 | `confidence` | `float` | In `[0, 1]`. Drops below 1.0 for ambiguous unit tokens (`m`, `g`, `t`, `K`, `s`, `h`, `d`). |
 | `raw` | `str` | The original input. |
 
@@ -365,11 +366,42 @@ when none is given. The table lives in the core
 
 Units recognized by `auto_parse` (also internal): length (`mm` `cm` `m`
 `km` `in` `ft` `yd` `mi` …), mass (`mg` `g` `kg` `t` `lb` `oz`),
-temperature (`°C` `°F` `K`), time (`ms` `s` `min` `h` `d`), volume (`ml`
-`l` `gal`), and `%`; currencies by symbol (`$` `€` `£` `¥` `₹` `₽` `₩` `₺`)
+temperature (`°C` `°F` `K`), time (`ms` `s` `min` `h` `d`), area (`mm²`
+`cm²` `m²` `km²` `ft²` `in²`), volume (`ml` `l` `gal` `mm³` `cm³` `m³` `km³`
+`ft³` `in³`), and `%`. The power may be written `²`, `^2` or, in
+`auto_parse` only, as a glued `2` (`5 m2`; not `in2`); currencies by symbol (`$` `€` `£` `¥` `₹` `₽` `₩` `₺`)
 or ISO code (`USD`, `EUR`, `GBP`, …). Ambiguous tokens (`m`, `g`, `t`,
 `K`, `s`, `h`, `d`, `in`) get a `confidence` below 1.0; override them with
 `prefer={...}`.
+
+---
+
+## Numerical symbols
+
+Superscript, subscript, circled and parenthesized digits (`"²"`, `"₂"`,
+`"①"`, `"⑩"`, `"⒈"`) and vulgar fractions (`"½"`) are symbols, not
+numbers. By default every entry point leaves them alone: `words2num` and
+`auto_parse` raise on them, alone or glued to a figure, and the sentence
+functions keep them as written (`"the ⑤ million"` stays as is).
+
+`convert_numerical_symbols=True` brings back the reading these symbols had
+before, no more:
+
+| Function | With `convert_numerical_symbols=True` |
+|---|---|
+| `words2num`, `auto_parse` | A run of symbols alone reads as its digits: `"①"` → 1, `"¹⁰"` → 10. |
+| `words2num_sentence` | The English walker (`en`, `en_GB`, `en_US`, …) reads them as digits: `"the ⑤ million"` → `"the 5000000"`. Other languages leave them as written either way. |
+| `auto_parse_sentence` | No effect: its quantity scanner never read them. The keyword is accepted for symmetry. |
+| CLI | `--convert-numerical-symbols`. |
+
+A symbol glued to a figure raises in either mode (`"10²"`, `"1①"`: folding it
+in would give 102 and 11), and vulgar fractions are never read. The keyword is
+spelled `convert_numerical_symbols`; the issues that asked for it (#949, #955,
+#958) wrote `convert_numeric_symbols`, which is not accepted.
+
+This check never refuses a power after a unit's letters (`"5 m²"`) or an
+ordinal indicator after a figure (es `"1º"`); whether those read is up to the
+unit and ordinal readers.
 
 ---
 

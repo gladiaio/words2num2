@@ -41,13 +41,25 @@ pub fn words2num(
     lang: &str,
     to: &str,
 ) -> Result<w2n_lang_en::W2nValue, w2n_sentence::W2nError> {
-    // "10²" is no 102: a superscript or subscript digit glued to a figure
-    // would fold into it (#869).
-    if glued_script_digit(text) {
+    // "10²" is no 102, "①" no 1: a compatibility digit is no number (#869,
+    // #955).
+    if holds_compat_digit(text) {
         return Err(w2n_sentence::W2nError::Words2Num(format!(
             "cannot parse {} as a number",
             w2n_sentence::py_repr_str(text)
         )));
+    }
+    // es "1º", pt "1ª", "1.º": a figure with its ordinal indicator is that
+    // figure (NFKD would make it "1o", #896).
+    // Only a whole number takes one: "1,5º" is no number (#899).
+    if let Some(figure) = ordinal_indicator_figure(text) {
+        return match words2num(figure, lang, to)? {
+            v @ w2n_lang_en::W2nValue::Int(_) => Ok(v),
+            _ => Err(w2n_sentence::W2nError::Words2Num(format!(
+                "cannot parse {} as a number",
+                w2n_sentence::py_repr_str(text)
+            ))),
+        };
     }
     // de "minus 1.234": a sign word before a figure, read with the same
     // separators as "-1.234" (#309).
@@ -71,17 +83,54 @@ pub fn words2num(
     w2n_sentence::words2num(text, lang, to)
 }
 
-/// Does `text` hold a superscript or subscript digit next to a digit or a
-/// figure separator ("10²", "2³", "10₂", "²5", "10.²")? NFKD would fold it
-/// into the figure. A run of script digits alone ("²", "¹⁰") reads as its
-/// digits.
-pub(crate) fn glued_script_digit(text: &str) -> bool {
-    let script = |c: char| {
-        matches!(c, '\u{00B2}' | '\u{00B3}' | '\u{00B9}' | '\u{2070}' | '\u{2074}'..='\u{2079}' | '\u{2080}'..='\u{2089}')
-    };
-    let figure = |c: char| (c.is_numeric() && !script(c)) || matches!(c, '.' | ',');
+/// A digit that is no digit of a figure: a superscript or subscript ("²",
+/// "₂"), a circled or parenthesized one ("①", "⑩", "⒈"), a vulgar fraction
+/// ("½") — any non-`Nd` character NFKD folds to digits.
+pub fn is_compat_digit(c: char) -> bool {
+    use unicode_normalization::UnicodeNormalization;
+    !c.is_ascii() && c.is_numeric() && !w2n_sentence::is_unicode_digit(c) && std::iter::once(c).nfkd().any(|d| d.is_ascii_digit())
+}
+
+thread_local! {
+    static NUMERICAL_SYMBOLS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Run `f` with numerical symbols ("①", "²") read as their digits, or not
+/// (the default). The binder sets this per call from the caller's
+/// `convert_numerical_symbols`; it is restored on return, panic included.
+/// The setting is per thread: work `f` spawns on other threads does not see
+/// it.
+pub fn with_numerical_symbols<R>(on: bool, f: impl FnOnce() -> R) -> R {
+    struct Restore(bool);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            NUMERICAL_SYMBOLS.with(|c| c.set(self.0));
+        }
+    }
+    let _restore = Restore(NUMERICAL_SYMBOLS.with(|c| c.replace(on)));
+    f()
+}
+
+/// Are numerical symbols read as their digits in this call?
+pub(crate) fn numerical_symbols() -> bool {
+    NUMERICAL_SYMBOLS.with(|c| c.get())
+}
+
+/// Does `text` hold a compatibility digit ([`is_compat_digit`]) that keeps it
+/// from being a number? By default any does: "²", "①", "½", "10²", "1①" stay
+/// symbols (#869, #955). With numerical symbols on, a run of them alone reads
+/// as its digits ("①" is 1), but one glued to a figure still does not: NFKD
+/// would fold "10²" into 102. A power after a unit's letters ("m²", "km³") is
+/// the unit's.
+pub(crate) fn holds_compat_digit(text: &str) -> bool {
+    let unit_power = |prev: Option<char>, c: char| matches!(c, '\u{00B2}' | '\u{00B3}') && prev.is_some_and(|p| p.is_alphabetic());
     let chars: Vec<char> = text.chars().collect();
-    chars.windows(2).any(|w| (script(w[1]) && figure(w[0])) || (script(w[0]) && figure(w[1])))
+    let symbol = |k: usize| is_compat_digit(chars[k]) && !unit_power(k.checked_sub(1).map(|j| chars[j]), chars[k]);
+    if !numerical_symbols() {
+        return (0..chars.len()).any(symbol);
+    }
+    let figure = |k: usize| (chars[k].is_numeric() && !is_compat_digit(chars[k])) || matches!(chars[k], '.' | ',');
+    (1..chars.len()).any(|k| (symbol(k) && figure(k - 1)) || (symbol(k - 1) && figure(k)))
 }
 
 /// `text` as "-<figure>" when it is a sign (word or dash) before a number in
@@ -1332,6 +1381,16 @@ pub fn elided_place(lang: &str, norm: &str) -> Option<(bool, i64)> {
             Some((!head.is_empty(), mag + (d as i64 + 1) * mag / 10))
         })
     })
+}
+
+/// es "1º", pt "1ª", "1.º", "1.000º": the figure before an ordinal indicator,
+/// in any language and mode, as de "1." is its figure. `None` for anything
+/// else; the degree sign "°" is no indicator.
+pub(crate) fn ordinal_indicator_figure(text: &str) -> Option<&str> {
+    let f = text.trim().strip_suffix(['\u{00BA}', '\u{00AA}'])?;
+    let f = f.strip_suffix('.').unwrap_or(f);
+    let digit_ends = f.starts_with(|c: char| c.is_ascii_digit()) && f.ends_with(|c: char| c.is_ascii_digit());
+    (digit_ends && f.chars().all(|c| c.is_ascii_digit() || ".,'".contains(c))).then_some(f)
 }
 
 /// Whether `lang` puts a multiplier after its scale word (ha, bm, sw, ...),
