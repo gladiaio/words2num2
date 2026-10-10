@@ -83,12 +83,20 @@ pub fn words2num(
     w2n_sentence::words2num(text, lang, to)
 }
 
-/// A digit that is no digit of a figure: a superscript or subscript ("²",
-/// "₂"), a circled or parenthesized one ("①", "⑩", "⒈"), a vulgar fraction
-/// ("½") — any non-`Nd` character NFKD folds to digits.
+/// A numerical symbol, no digit of a figure: a superscript or subscript
+/// ("²", "₂"), a circled or parenthesized digit ("①", "⑩", "⒈"), a vulgar
+/// fraction ("½"), a circled or parenthesized ideograph ("㊀", "㈩", "〸",
+/// #965), a Roman numeral ("Ⅻ") — any numeric non-`Nd` character that only
+/// a compatibility mapping rewrites. A CJK compatibility ideograph ("零" at
+/// U+F9B2) maps canonically to its ideograph: a numeral, no symbol.
 pub fn is_compat_digit(c: char) -> bool {
     use unicode_normalization::UnicodeNormalization;
-    !c.is_ascii() && c.is_numeric() && !w2n_sentence::is_unicode_digit(c) && std::iter::once(c).nfkd().any(|d| d.is_ascii_digit())
+    let one = || std::iter::once(c);
+    !c.is_ascii()
+        && c.is_numeric()
+        && !w2n_sentence::is_unicode_digit(c)
+        && one().nfd().eq(one())
+        && !one().nfkd().eq(one())
 }
 
 thread_local! {
