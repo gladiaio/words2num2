@@ -5841,6 +5841,30 @@ mod unit_misread_tests {
 }
 
 #[cfg(test)]
+mod sign_comma_tests {
+    use crate::w2n_lang_en::W2nValue;
+
+    /// #896: a comma after a sign word before a figure is punctuation.
+    #[test]
+    fn comma_after_sign_word_issue_896() {
+        assert_eq!(crate::words2num("moins, 1.234", "fr", "cardinal").unwrap(), W2nValue::Int((-1234).into()));
+        assert_eq!(crate::words2num("minus, 1.234", "de", "cardinal").unwrap(), W2nValue::Int((-1234).into()));
+        let dec = |t: &str, l: &str| match crate::words2num(t, l, "cardinal").unwrap() {
+            W2nValue::Dec(d) => d.to_string(),
+            other => format!("{other:?}"),
+        };
+        // A dash takes the comma too, and so does "،" where it is no decimal mark.
+        assert_eq!(crate::words2num("-, 1.234", "de", "cardinal").unwrap(), W2nValue::Int((-1234).into()));
+        assert_eq!(crate::words2num("-, 5", "en", "cardinal").unwrap(), W2nValue::Int((-5).into()));
+        assert_eq!(dec("منفی، 1,234.5", "fa"), "-1234.5");
+        // ar: "،" after the sign is the decimal mark.
+        assert_eq!(dec("-، 50", "ar"), "-0.50");
+        assert_eq!(dec("-، 05", "ar"), "-0.05");
+        assert!(crate::words2num("سالب، 50", "ar", "cardinal").is_err());
+    }
+}
+
+#[cfg(test)]
 mod sign_and_script_tests {
     use super::words2num;
 

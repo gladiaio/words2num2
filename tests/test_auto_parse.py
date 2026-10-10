@@ -389,3 +389,10 @@ def test_explicit_separators_never_fall_back_to_a_float():
 def test_lowercase_region_in_parse_number_string():
     assert parse_number_string("1,234", lang="es-mx") == 1234
     assert parse_number_string("12,34,567", lang="en-in") == 1234567
+
+
+def test_comma_after_sign_word_is_punctuation():
+    from words2num2 import words2num
+
+    assert words2num("moins, 1.234", lang="fr") == -1234
+    assert words2num("minus, 1.234", lang="de") == -1234
