@@ -134,22 +134,24 @@ fn mark_forms(lang: &str) -> &'static MarkForms {
 /// not 150).
 pub fn has_written_mark(lang: &str, text: &str) -> bool {
     let Some(m) = hundredths_mark(lang) else { return false };
-    if conjunction_comma(lang, text, m) {
+    // Every comma must be the conjunction kind for the text to be no decimal:
+    // "ألف، وخمسمائة ، خمسون" still holds a mark (#862).
+    let commas: Vec<usize> = text.match_indices([',', m.chars().next().unwrap_or(',')]).map(|(k, _)| k).collect();
+    if !commas.is_empty() && commas.iter().all(|&at| conjunction_comma(lang, text, at)) {
         return false;
     }
     mark_words(text, m).iter().any(|w| w == m)
 }
 
-/// "ألف، وخمسمائة" (1500): a comma typed glued to a number word, or an ASCII
-/// one, before the conjunction "و" and a number word is punctuation inside
-/// the number (#807). Not the renderer's spaced " ، ", nor "واحد" ("one",
-/// whose و is a root letter): "مائة ، واحد" stays a decimal.
-fn conjunction_comma(lang: &str, text: &str, mark: &str) -> bool {
+/// "ألف، وخمسمائة" (1500): the comma at byte `at`, typed glued to the word
+/// before it or an ASCII one, before the conjunction "و" and a number word,
+/// is punctuation inside the number (#807). Not the renderer's spaced " ، ",
+/// nor before "واحد" ("one", whose و is a root letter): "مائة ، واحد" stays a
+/// decimal.
+fn conjunction_comma(lang: &str, text: &str, at: usize) -> bool {
     let waw = '\u{0648}';
     let wahid = crate::normalize("\u{0648}\u{0627}\u{062D}\u{062F}"); // واحد
-    let t = text.trim();
-    let Some(at) = t.find([',', mark.chars().next().unwrap_or(',')]) else { return false };
-    let (before, after) = (&t[..at], &t[at..]);
+    let (before, after) = (&text[..at], &text[at..]);
     let comma = after.chars().next().unwrap_or(',');
     let after = after[comma.len_utf8()..].trim_start();
     let glued = before.chars().last().is_some_and(|c| c.is_alphabetic());
@@ -668,8 +670,14 @@ mod tests {
         // #807, not for "واحد" (one) nor the renderer's spaced mark.
         for t in ["مائة ، واحد وعشرون", "مائة ، واحد", "ألف ، واحد", "، واحد", "سالب ، واحد", "، وخمسون", "ثلاثة ، وخمسون", "مائة ، وثلاثة", "ألف ، وخمسمائة"] {
             let r = crate::words2num(t, "ar", "cardinal");
-            assert!(!matches!(r, Ok(W2nValue::Int(_))), "{t}: {r:?}");
+            assert!(r.is_err(), "{t}: {r:?}");
         }
+        // A conjunction comma does not hide a later mark (#862).
+        for t in ["ألف، وخمسمائة ، خمسون", "ألف، وخمسمائة ، ثلاثة", "ألف، وخمسمائة ، ، خمسون", "سالب ألف، وخمسمائة ، خمسون", "ألف, وخمسمائة ، خمسون", "ألف، وخمسمائة، خمسون"] {
+            let r = crate::words2num(t, "ar", "cardinal");
+            assert!(r.is_err(), "{t}: {r:?}");
+        }
+        assert_eq!(crate::words2num("ألفان، وثلاثمائة، وخمسة وأربعون", "ar", "cardinal").unwrap(), W2nValue::Int(2345.into()));
         assert_eq!(card("سالب ٣،٥", "ar"), "-3.5");
         assert_eq!(card("سالب 3،5", "ar"), "-3.5");
         // #807: a comma before the conjunction is inside the number.
