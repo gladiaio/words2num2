@@ -330,7 +330,7 @@ Returned by `auto_parse` and used by `auto_parse_sentence` internally.
 | `value` | `int \| float \| Decimal` | Numeric value. |
 | `unit` | `Optional[str]` | Canonical short unit (`"kg"`, `"USD"`, `"%"`, `"°C"`, …). |
 | `unit_long` | `Optional[str]` | Canonical long unit (`"kilogram"`, `"dollar"`, `"percent"`, …). |
-| `kind` | `Optional[str]` | One of `"currency"`, `"length"`, `"mass"`, `"temperature"`, `"time"`, `"volume"`, `"percent"`, or `None`. |
+| `kind` | `Optional[str]` | One of `"currency"`, `"length"`, `"mass"`, `"temperature"`, `"time"`, `"area"`, `"volume"`, `"percent"`, or `None`. |
 | `confidence` | `float` | In `[0, 1]`. Drops below 1.0 for ambiguous unit tokens (`m`, `g`, `t`, `K`, `s`, `h`, `d`). |
 | `raw` | `str` | The original input. |
 
@@ -366,8 +366,10 @@ when none is given. The table lives in the core
 
 Units recognized by `auto_parse` (also internal): length (`mm` `cm` `m`
 `km` `in` `ft` `yd` `mi` …), mass (`mg` `g` `kg` `t` `lb` `oz`),
-temperature (`°C` `°F` `K`), time (`ms` `s` `min` `h` `d`), volume (`ml`
-`l` `gal`), and `%`; currencies by symbol (`$` `€` `£` `¥` `₹` `₽` `₩` `₺`)
+temperature (`°C` `°F` `K`), time (`ms` `s` `min` `h` `d`), area (`mm²`
+`cm²` `m²` `km²` `ft²` `in²`), volume (`ml` `l` `gal` `mm³` `cm³` `m³` `km³`
+`ft³` `in³`), and `%`. The power may be written `²`, `^2` or, in
+`auto_parse` only, as a glued `2` (`5 m2`; not `in2`); currencies by symbol (`$` `€` `£` `¥` `₹` `₽` `₩` `₺`)
 or ISO code (`USD`, `EUR`, `GBP`, …). Ambiguous tokens (`m`, `g`, `t`,
 `K`, `s`, `h`, `d`, `in`) get a `confidence` below 1.0; override them with
 `prefer={...}`.
