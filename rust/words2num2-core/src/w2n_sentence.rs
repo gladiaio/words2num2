@@ -939,6 +939,12 @@ impl Converter {
             if english && word.to_lowercase() == "o" {
                 return Some('0');
             }
+            // "-oh", "minus zero": a signed zero is no digit, its sign would
+            // be dropped (#956).
+            let norm = crate::normalize(word);
+            if word.trim_start().starts_with(['-', '+', '\u{2212}']) || crate::strip_sign(self.n2w_key(), &norm).is_some() {
+                return None;
+            }
             match self.to_cardinal(word) {
                 // A single decimal digit stringifies to exactly one ASCII digit
                 // (0-9); anything else (negatives, 10+, floats) declines.
@@ -1929,7 +1935,16 @@ fn en_number_words(parts: &[String], i: usize) -> Vec<EnWord> {
             j += 1;
             continue;
         }
-        let clean = rstrip_punct(tok).to_lowercase().replace('-', " ");
+        // A dash at either end is a sign or punctuation, no hyphen between two
+        // words: "-four five six" is no 456. A trailing one ends the run and
+        // stays after the figure: "five five five- one" is "555- 1" (#956).
+        let core = rstrip_punct(tok);
+        if core.starts_with('-') {
+            break;
+        }
+        let cut = core.trim_end_matches(crate::w2n_formats::is_minus);
+        let ends_dash = cut.len() < core.len();
+        let clean = cut.to_lowercase().replace('-', " ");
         let subs = py_split_whitespace(&clean);
         if subs.is_empty()
             || !subs.iter().all(|w| {
@@ -1948,12 +1963,19 @@ fn en_number_words(parts: &[String], i: usize) -> Vec<EnWord> {
                 last: k + 1 == n,
             });
         }
-        if ends_with_terminal_punct(tok) {
+        if ends_with_terminal_punct(tok) || ends_dash {
             break;
         }
         j += 1;
     }
     words
+}
+
+/// What follows the words of a dictation run's last part: its dash, then its
+/// punctuation ("three-," gives "-,").
+fn run_tail(s: &str) -> &str {
+    let core = rstrip_punct(s).trim_end_matches(crate::w2n_formats::is_minus);
+    &s[core.len()..]
 }
 
 /// A digit string read one digit at a time — an account number, ZIP code or
@@ -3426,7 +3448,7 @@ fn words2num_sentence_walk(
             let run = parts[i..=end].concat();
             out.push_str(sep_before(i));
             out.push_str(&digits);
-            out.push_str(trailing_punct(&run));
+            out.push_str(if en_digits { run_tail(&run) } else { trailing_punct(&run) });
             out.push_str(sep_after(end));
             i = end + 1;
             continue;
@@ -6012,6 +6034,32 @@ mod sign_and_script_tests {
             assert!(words2num(t, l, "digits").is_err(), "{l} {t}");
         }
         assert!(words2num("seven-two", "en", "digits").is_ok());
+        // Nor a signed zero (#956).
+        for t in ["-oh three", "-zero three", "minus oh three", "-oh"] {
+            assert!(words2num(t, "en", "digits").is_err(), "{t}");
+        }
+    }
+
+    /// #956: an English dictation run stops at a dash on either edge of a
+    /// part; only a hyphen between two words joins them.
+    #[test]
+    fn dictation_run_keeps_edge_dashes_issue_956() {
+        let s = |t: &str, to: &str| super::words2num_sentence(t, "en", to, false).unwrap();
+        assert_eq!(s("it was -four five six degrees", "cardinal"), "it was -4 5 6 degrees");
+        assert_eq!(s("call one two three -four", "cardinal"), "call 123 -4");
+        assert_eq!(s("call one two three-", "cardinal"), "call 123-");
+        assert_eq!(s("my number is five five five- one two one two", "cardinal"), "my number is 555- 1212");
+        assert_eq!(s("zip nine four five oh four-", "digits"), "zip 94504-");
+        assert_eq!(s("call one two three-, four", "cardinal"), "call 123-, 4");
+        assert_eq!(s("call one two three-. Then", "cardinal"), "call 123-. Then");
+        // Any glued dash the library reads as a minus.
+        assert_eq!(s("five five five\u{2212} one two one two", "cardinal"), "555\u{2212} 1212");
+        assert_eq!(s("call one two three\u{FF0D}", "digits"), "call 123\u{FF0D}");
+        assert_eq!(s("code -one two three", "digits"), "code -one 2 3");
+        assert_eq!(s("x -oh three y", "digits"), "x -oh 3 y");
+        // An inner hyphen still joins: "one two-three four" is 1234.
+        assert_eq!(s("call one two-three four", "cardinal"), "call 1234");
+        assert_eq!(s("call four five six seven", "cardinal"), "call 4567");
     }
 
     /// #869: a superscript or subscript digit is no part of the figure.
