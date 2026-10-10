@@ -49,12 +49,6 @@
 //!   Harmless; the second is dead. Kept in the comment, folded in the code.
 
 mod lexicon;
-
-/// [`lexicon::alias_rewrite`] for the rest of the crate: declined forms and
-/// spelling variants rewritten to the renderer's (ar "خمسين" -> "خمسون").
-pub(crate) fn alias_rewrite(lang: &str, norm: &str) -> Option<String> {
-    lexicon::alias_rewrite(lang, norm)
-}
 mod tokens;
 
 use bigdecimal::num_traits::FromPrimitive;
@@ -62,6 +56,12 @@ use bigdecimal::BigDecimal;
 use num_bigint::BigInt;
 use std::collections::HashMap;
 use std::str::FromStr;
+
+/// [`lexicon::alias_rewrite`] for the rest of the crate: declined forms and
+/// spelling variants rewritten to the renderer's (ar "خمسين" -> "خمسون").
+pub(crate) fn alias_rewrite(lang: &str, norm: &str) -> Option<String> {
+    lexicon::alias_rewrite(lang, norm)
+}
 
 // ===========================================================================
 // Errors

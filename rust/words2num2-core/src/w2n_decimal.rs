@@ -465,8 +465,10 @@ fn read_unsigned(
                 rest.chars().map(|c| crate::w2n_sentence::digit_value(c).map(|d| char::from(b'0' + d as u8))).collect();
             digits.filter(|d| d.len() == 2).and_then(|d| d.parse::<u32>().ok())
         };
-        // The oblique tens ("خمسين") are the renderer's "خمسون": tens have no
-        // gender, so #617's list ambiguity does not reach them (#881).
+        // The oblique forms of the renderer's hundredths ("خمسين", "خمس
+        // وخمسين", "اثنتين"); a masculine unit (the #617 list) is not one of
+        // them (#881). A list of tens reads as a decimal, as the nominative
+        // "عشرون ، ثلاثون" already did.
         let norm_rest = crate::normalize(&rest);
         let oblique = || {
             crate::w2n_sentence::alias_rewrite(lang, &norm_rest).and_then(|r| forms.hundredths.get(&r).copied())
@@ -728,7 +730,11 @@ mod tests {
         for (t, v) in [("ثلاثة ، خمسين", "3.50"), ("مائة ، خمسين", "100.50"), ("ثلاثة ، عشرين", "3.20"), ("ثلاثة ، تسعين", "3.90")] {
             assert_eq!(card(t, "ar"), v, "{t}");
         }
+        for (t, v) in [("ثلاثة ، خمس وخمسين", "3.55"), ("ثلاثة ، اثنتين", "3.02"), ("ثلاثة ، اثنتي عشرة", "3.12")] {
+            assert_eq!(card(t, "ar"), v, "{t}");
+        }
         assert!(crate::words2num("ثلاثة ، أربعة", "ar", "cardinal").is_err());
+        assert!(crate::words2num("ثلاثة ، اثني عشر", "ar", "cardinal").is_err());
         // #804: three digits after the mark group, they are no decimal.
         for t in ["12،500", "١٢،٥٠٠", "1،000", "1،000،000"] {
             assert!(crate::words2num(t, "ar", "cardinal").is_err(), "{t}");
