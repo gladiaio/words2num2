@@ -39,6 +39,7 @@ def words2num_sentence(
     date: bool = False,
     region: Optional[str] = None,
     date_format: str = "written",
+    phone: bool = False,
 ) -> str: ...
 def pluralize(long_form: Optional[str], value: Number) -> Optional[str]: ...
 def auto_parse(

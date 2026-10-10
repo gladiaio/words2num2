@@ -80,7 +80,7 @@ Decimal('3.14')
 
 ### `words2num_sentence`
 
-`words2num_sentence(sentence, lang="en", to="cardinal", currency=False, date=False, region=None, date_format="written")`
+`words2num_sentence(sentence, lang="en", to="cardinal", currency=False, date=False, region=None, date_format="written", phone=False)`
 
 Walk a sentence and replace every word-number with its numeric form.
 Non-number tokens pass through unchanged. Punctuation is preserved.
@@ -104,7 +104,15 @@ four-digit year, a real calendar date) is written in figures in the region's
 order: en `"3/12/2026"`, en_GB / fr / es / it / pt `"12/03/2026"`, de
 `"12.03.2026"`, nl `"12-03-2026"`. `region` (`"US"`, `"GB"`...) overrides
 the region of `lang`; `date_format="iso"` writes every date that has a year
-as `"2026-03-12"` (`"written"`, the default, otherwise).
+as `"2026-03-12"` (`"written"`, the default, otherwise). `phone=True`
+writes each phone number the way its country writes it, from Google
+libphonenumber's numbering plans: fr `"06 12 34 56 78"`, en `"(212)
+456-7890"`, en_GB `"07400 123456"`, de `"030 123456"`, and `"+33 6 12 34 56
+78"` when a country code is spoken ("plus thirty three..."). Without one,
+`region`, the region of `lang`, or the regions where the language is spoken
+(main one first) decide: the first where the number is valid and dialled
+exactly so (trunk prefix included). A run of fewer than eight digits, or one
+no plan knows, stays as digits.
 
 **Returns** — `str`.
 

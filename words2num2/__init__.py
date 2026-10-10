@@ -103,6 +103,7 @@ def words2num_sentence(
     date=False,
     region=None,
     date_format="written",
+    phone=False,
 ):
     """Convert every word-number in ``sentence`` to numeric form.
 
@@ -127,11 +128,20 @@ def words2num_sentence(
     region of ``lang``; ``date_format="iso"`` writes every date with a year
     as ``"2026-03-12"``.
 
+    With ``phone=True`` each phone number is written the way its country
+    writes it: ``"zéro six douze trente-quatre cinquante-six soixante-dix-
+    huit"`` -> ``"06 12 34 56 78"`` (fr), ``"five five five two three four
+    five six seven eight"`` -> ``"(555) 234-5678"`` (en), ``"plus thirty three
+    six twelve..."`` -> ``"+33 6 12 34 56 78"``. A spoken country code
+    decides the country; otherwise ``region``, the region of ``lang``, or the
+    regions where the language is spoken, as long as they agree on the
+    format. A number no numbering plan knows stays as digits.
+
     ``lang`` and ``to`` are validated before the walk and raise
     ``NotImplementedError`` like :func:`words2num`.
     """
     return _RUST.words2num_sentence(
-        sentence, lang, to, None, currency, date, region, date_format
+        sentence, lang, to, None, currency, date, region, date_format, phone
     )
 
 
