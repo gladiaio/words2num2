@@ -5829,3 +5829,16 @@ mod unit_misread_tests {
         assert!(auto_parse("5 KG", "en", &kg, None, None).unwrap().confidence >= 0.9);
     }
 }
+
+#[cfg(test)]
+mod sign_comma_tests {
+    use crate::w2n_lang_en::W2nValue;
+
+    /// #896: a comma after a sign word before a figure is punctuation.
+    #[test]
+    fn comma_after_sign_word_issue_896() {
+        assert_eq!(crate::words2num("moins, 1.234", "fr", "cardinal").unwrap(), W2nValue::Int((-1234).into()));
+        assert_eq!(crate::words2num("minus, 1.234", "de", "cardinal").unwrap(), W2nValue::Int((-1234).into()));
+        assert!(crate::words2num("-، 50", "ar", "cardinal").map_or(true, |v| v != W2nValue::Int((-50).into())));
+    }
+}

@@ -44,8 +44,16 @@ pub fn words2num(
     // de "minus 1.234": a sign word before a figure, read with the same
     // separators as "-1.234" (#309).
     if matches!(to, "cardinal" | "currency") {
-        // A comma or mark glued to the sign ("-، 50") is no bare sign word.
-        let split = text.trim().split_once(char::is_whitespace).filter(|(h, _)| !h.contains([',', '\u{060C}']));
+        // A comma or mark glued to the sign ("-، 50") is no bare sign word,
+        // but a comma after a sign word is punctuation: fr "moins, 1.234"
+        // reads as "moins 1.234" (#896).
+        let split = text.trim().split_once(char::is_whitespace).and_then(|(h, f)| {
+            let word = h.strip_suffix(',').filter(|w| !w.is_empty() && w.chars().all(char::is_alphabetic));
+            match word {
+                Some(w) => Some((w, f)),
+                None => (!h.contains([',', '\u{060C}'])).then_some((h, f)),
+            }
+        });
         if let Some((head, figure)) = split {
             let resolved = w2n_sentence::resolve_lang(lang)?;
             let word = normalize(head);
