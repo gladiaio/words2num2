@@ -4803,8 +4803,9 @@ fn match_quantity_at(chars: &[char], pos: usize) -> Option<usize> {
                 // "5 m²", "5 m^2": the power belongs to the unit (#896). Not
                 // a glued digit in running text: "5 m2 slots" is a product code.
                 let save = cur.i;
+                // "5 KM²" folds as "5 KM" does (#953).
                 match eat_unit_power(&mut cur, false) {
-                    Some(p) if units_get(&format!("{letters}{p}")).is_some() => {}
+                    Some(p) if units_get(&format!("{}{p}", letters.to_lowercase())).is_some() => {}
                     _ => cur.i = save,
                 }
                 true
@@ -6043,6 +6044,11 @@ mod area_and_indicator_tests {
         for t in ["5 in2", "5 m²a", "5 m^²", "5 Mm²"] {
             assert!(auto_parse(t, "en", &p, None, None).is_err(), "{t}");
         }
+        // Running text folds a powered unit as auto_parse does (#953).
+        assert_eq!(ex("5 KM² area"), "5 square kilometers area");
+        assert_eq!(ex("5 FT³ box"), "5 cubic feet box");
+        assert_eq!(auto_parse_sentence("5 Km^2 area", "en", &p, None, None, false).unwrap(), "5 km² area");
+        assert_eq!(ex("5 Mm² area"), "5 Mm² area");
         // A folded powered unit is no certain reading.
         let q = auto_parse("5 KM²", "en", &p, None, None).unwrap();
         assert_eq!((q.unit.as_deref(), q.confidence), (Some("km²"), 0.8));
