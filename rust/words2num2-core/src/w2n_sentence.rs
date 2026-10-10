@@ -1530,11 +1530,13 @@ fn call_words2num(text: &str, lang: &str, fmt: &FigureFormat) -> Result<W2nValue
             .map(to_value)
             .map_err(|e| W2nError::Words2Num(e.0));
     }
-    // A figure the caller gave separators for reads with them or not at all:
-    // "1.5 km" with decimal_sep="," is no float 1.5 (#952).
-    let explicit = fmt.thousands_sep.is_some_and(|t| !t.is_empty()) || fmt.decimal_sep.is_some_and(|d| !d.is_empty());
+    // A figure reads as a bare one does, with the caller's separators or not
+    // at all: "1.5 km" with decimal_sep="," is no float 1.5 (#952), de
+    // "−1.234 kg" is -1234 kg as "−1.234" is. Any script's digits and any
+    // minus the library reads (#976).
     let figure = text.trim();
-    if explicit && !figure.is_empty() && figure.chars().all(|c| c.is_ascii_digit() || ".,'_ +-".contains(c)) {
+    let figure_char = |c: char| is_unicode_digit(c) || ".,'_ +-".contains(c) || crate::w2n_formats::is_minus(c);
+    if figure.chars().any(is_unicode_digit) && figure.chars().all(figure_char) {
         return crate::w2n_formats::parse_number_string(figure, fmt.thousands_sep, fmt.decimal_sep, Some(fmt_key))
             .map(to_value)
             .map_err(|e| W2nError::Words2Num(e.0));
@@ -6276,6 +6278,12 @@ mod auto_parse_sign_tests {
         assert_eq!(dec(with("1,5 km", "en", None, Some(","))), dec(W2nValue::Dec("1.5".parse().unwrap())));
         assert_eq!(with("12.500 km", "de", Some("."), Some(",")), W2nValue::Int(12500.into()));
         assert_eq!(with("five km", "en", None, Some(",")), W2nValue::Int(5.into()));
+        // #976: a typographic minus or fullwidth digits too, with or without separators.
+        for (t, l, ts, ds) in [("\u{2212}2.5 kg", "en", None, Some(",")), ("\u{2013}3.75 m", "fr", Some(" "), Some(",")), ("\u{FF11}.\u{FF15} km", "en", None, Some(",")), ("\u{FF11}\u{FF12}.\u{FF15} km", "de", Some("."), Some(","))] {
+            assert!(auto_parse(t, l, &p, ts, ds).is_err(), "{l} {t}");
+        }
+        assert_eq!(with("\u{2212}1.234 km", "de", Some("."), Some(",")), W2nValue::Int((-1234).into()));
+        assert_eq!(v("\u{2212}1.234 kg", "de"), v("\u{2212}1.234", "de"));
         // "AR" is ar: its "،" stays the decimal mark.
         assert_eq!(format!("{:?}", crate::words2num("-، 50", "AR", "cardinal").unwrap()), format!("{:?}", crate::words2num("-، 50", "ar", "cardinal").unwrap()));
     }
