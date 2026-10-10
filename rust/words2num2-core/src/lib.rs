@@ -52,26 +52,8 @@ pub fn words2num(
     // de "minus 1.234": a sign word before a figure, read with the same
     // separators as "-1.234" (#309).
     if matches!(to, "cardinal" | "currency") {
-        // A comma or mark glued to the sign ("-، 50") is no bare sign word,
-        // but a comma after a sign word is punctuation: fr "moins, 1.234"
-        // reads as "moins 1.234" (#896).
-        let mark_is_decimal = w2n_decimal::has_hundredths_mark(lang);
-        let split = text.trim().split_once(char::is_whitespace).and_then(|(h, f)| {
-            // One trailing comma after the sign (word or dash) is punctuation;
-            // a "،" is not where it is the decimal mark (ar "-، 50" is -0.50).
-            let stripped = h.strip_suffix(',').or_else(|| h.strip_suffix('\u{060C}').filter(|_| !mark_is_decimal));
-            let head = stripped.unwrap_or(h);
-            (!head.is_empty() && !head.contains([',', '\u{060C}'])).then_some((head, f))
-        });
-        if let Some((head, figure)) = split {
-            let resolved = w2n_sentence::resolve_lang(lang)?;
-            let word = normalize(head);
-            let is_sign = ["minus", "negative"].contains(&word.as_str())
-                || strip_sign(&resolved, &format!("{word} x")).is_some_and(|(r, glued)| r == "x" && !glued);
-            let unsigned = figure.trim_start().chars().next().is_some_and(|c| c != '+' && !w2n_formats::is_minus(c));
-            if is_sign && unsigned && is_digit_literal(figure) {
-                return words2num(&format!("-{}", figure.trim_start()), lang, to);
-            }
+        if let Some(signed) = signed_figure_in(text, lang) {
+            return words2num(&signed, lang, to);
         }
     }
     if matches!(to, "cardinal" | "ordinal" | "year" | "currency") && is_digit_literal(text) {
@@ -100,6 +82,34 @@ pub(crate) fn glued_script_digit(text: &str) -> bool {
     let figure = |c: char| (c.is_numeric() && !script(c)) || matches!(c, '.' | ',');
     let chars: Vec<char> = text.chars().collect();
     chars.windows(2).any(|w| (script(w[1]) && figure(w[0])) || (script(w[0]) && figure(w[1])))
+}
+
+/// `text` as "-<figure>" when it is a sign (word or dash) before a number in
+/// figures: de "minus 1.234", fr "moins, 1.234", "moins , 1.234". A comma
+/// between them is punctuation, except a "،" where it is the decimal mark
+/// (ar "-، 50" is -0.50). The caller reads the result with the locale's
+/// separators (#309, #896).
+pub(crate) fn signed_figure_in(text: &str, lang: &str) -> Option<String> {
+    let resolved = w2n_sentence::resolve_lang(lang).ok()?;
+    let mark_is_decimal = w2n_decimal::has_hundredths_mark(&resolved);
+    let (h, f) = text.trim().split_once(char::is_whitespace)?;
+    let comma = |c: char| c == ',' || (c == '\u{060C}' && !mark_is_decimal);
+    let head = h.strip_suffix(comma).unwrap_or(h);
+    if head.is_empty() || head.contains([',', '\u{060C}']) {
+        return None;
+    }
+    let mut figure = f.trim_start();
+    if !h.ends_with(comma) {
+        // "moins , 1.234", "moins ,1.234": the comma split from the word.
+        if let Some(rest) = figure.strip_prefix(comma) {
+            figure = rest.trim_start();
+        }
+    }
+    let word = normalize(head);
+    let is_sign = ["minus", "negative"].contains(&word.as_str())
+        || strip_sign(&resolved, &format!("{word} x")).is_some_and(|(r, glued)| r == "x" && !glued);
+    let unsigned = figure.chars().next().is_some_and(|c| c != '+' && !w2n_formats::is_minus(c));
+    (is_sign && unsigned && is_digit_literal(figure)).then(|| format!("-{figure}"))
 }
 
 /// Is `text` a number in figures and nothing else: an optional sign, then
