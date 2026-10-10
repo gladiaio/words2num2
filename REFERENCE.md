@@ -508,8 +508,9 @@ same words for the digit as units (2005), so:
 
 - `words2num` returns the renderer's reading (2005) and gives no sign that
   the speaker may have meant 2500: "พันห้า" is 1500, "หนึ่งพันห้า" 1005;
-- the sentence functions leave such a span as words, except after a year
-  word (ปี, ค.ศ., พ.ศ., lo ປີ, km ឆ្នាំ), where it is the year as written.
+- the sentence functions leave such a span as words, a year included
+  ("ปีสองพันห้า"): unspaced text gives no sure year label ("ต่อปี" is
+  "per year"), so none is guessed.
 
 ---
 

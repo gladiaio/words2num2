@@ -3745,12 +3745,9 @@ fn words2num_sentence_walk(
         }
 
         // th "สองพันห้า": 2005 as written, 2500 as spoken; no one number, so
-        // the words stay (#875). Not after a year word: "ปีสองพันห้า" is 2005,
-        // no one elides a place in a year.
-        let after_year = ["ปี", "ค.ศ.", "พ.ศ.", "ປີ", "ឆ្នាំ"]
-            .iter()
-            .any(|y| out.trim_end().ends_with(y));
-        if best_value.is_some() && !best_ordinal && !after_year {
+        // the words stay (#875). A year too: unspaced text gives no sure year
+        // label ("ต่อปี" is "per year"), so none is guessed (#967, #968).
+        if best_value.is_some() && !best_ordinal {
             let run = parts[i..=best_end].concat();
             let norm = crate::normalize(rstrip_punct(py_strip(&run)));
             if matches!(crate::elided_place(converter.n2w_key(), &norm), Some((true, _))) {
@@ -6092,15 +6089,16 @@ mod elided_place_tests {
         ] {
             assert_eq!(sent(t, l), want, "{l} {t}");
         }
-        // A year keeps the renderer's reading.
-        for (t, l, want) in [
-            ("ปีสองพันห้า", "th", "ปี2005"),
-            ("ปี สองพันห้า", "th", "ปี 2005"),
-            ("พ.ศ. สองพันห้า", "th", "พ.ศ. 2005"),
-            ("ឆ្នាំ ពីរពាន់ ប្រាំ", "km", "ឆ្នាំ 2005"),
-            ("ປີ ສອງພັນ ຫ້າ", "lo", "ປີ 2005"),
+        // No year label is guessed: "per year" amounts and year ranges stay
+        // words alike (#967, #968).
+        for (t, l) in [
+            ("ปีสองพันห้า", "th"),
+            ("ค่าธรรมเนียมต่อปีสองพันห้าบาท", "th"),
+            ("ปีสองพันห้าถึงสองพันหก", "th"),
+            ("ຄ່າທຳນຽມຕໍ່ປີ ສອງພັນ ຫ້າ ກີບ", "lo"),
+            ("ថ្លៃប្រចាំឆ្នាំ ពីរពាន់ ប្រាំ រៀល", "km"),
         ] {
-            assert_eq!(sent(t, l), want, "{l} {t}");
+            assert_eq!(sent(t, l), t, "{l} {t}");
         }
         // A decimal's whole part takes the same reading (a bare scale word is
         // never the renderer's).
