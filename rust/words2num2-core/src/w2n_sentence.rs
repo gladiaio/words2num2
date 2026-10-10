@@ -57,6 +57,12 @@ use num_bigint::BigInt;
 use std::collections::HashMap;
 use std::str::FromStr;
 
+/// [`lexicon::alias_rewrite`] for the rest of the crate: declined forms and
+/// spelling variants rewritten to the renderer's (ar "خمسين" -> "خمسون").
+pub(crate) fn alias_rewrite(lang: &str, norm: &str) -> Option<String> {
+    lexicon::alias_rewrite(lang, norm)
+}
+
 // ===========================================================================
 // Errors
 // ===========================================================================
