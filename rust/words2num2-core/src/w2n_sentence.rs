@@ -4506,13 +4506,6 @@ fn format_quantity(q: &Quantity, expand: bool) -> String {
     format!("{} {}", format_number(&q.value), unit)
 }
 
-/// Port of `converters.auto.auto_parse_sentence`.
-///
-/// Walks free text and rewrites every quantity expression in place. A match
-/// that `auto_parse` rejects with `Words2NumError` is left verbatim. The
-/// language and the separator overrides are checked once, up front, so an
-/// unsupported `lang` or `thousands_sep == decimal_sep` raises instead of
-/// leaving every span untouched (#188, #204).
 /// Is the digit at `i` glued to a Latin word ("MP3", "B12", "COVID19")? An
 /// "x" between digits is a multiplier ("2x500 g").
 fn glued_to_word(chars: &[char], i: usize) -> bool {
@@ -4537,20 +4530,32 @@ fn unit_token(raw: &str) -> &str {
 /// "Room 5 C"), "in" ("1 in 3"), an
 /// "s" glued to a decade ("1990s"), or the verb "won" before a number
 /// ("Score 2 won 3"; "5000 won." stays the currency) (#392).
-fn not_a_unit(chars: &[char], raw: &str, end: usize) -> bool {
+fn not_a_unit(chars: &[char], raw: &str, end: usize, currency: bool) -> bool {
     let unit = unit_token(raw);
     let glued = !raw.contains(char::is_whitespace);
     let number_follows = || {
         chars[end..].iter().skip_while(|c| c.is_whitespace()).next().is_some_and(|c| c.is_ascii_digit())
     };
+    // A currency's letters are its scale ("$5M", "€3K"): only "won" there.
+    if currency {
+        return unit.eq_ignore_ascii_case("won") && number_follows();
+    }
     let degree = raw[..raw.len() - unit.len()].ends_with('\u{b0}');
+    // A decade is a whole number: "1.0s" and "0.50s" are seconds.
+    let decade = unit == "s" && glued && raw.trim_end_matches('s').ends_with('0') && !raw.contains(['.', ',']);
     // "L" is the litre's own symbol.
     (unit.len() == 1 && unit.chars().all(|c| c.is_ascii_uppercase()) && unit != "L" && !degree)
         || unit.eq_ignore_ascii_case("in")
-        || (unit == "s" && glued && raw.trim_end_matches('s').ends_with('0'))
-        || (unit.eq_ignore_ascii_case("won") && number_follows())
+        || decade
 }
 
+/// Port of `converters.auto.auto_parse_sentence`.
+///
+/// Walks free text and rewrites every quantity expression in place. A match
+/// that `auto_parse` rejects with `Words2NumError` is left verbatim. The
+/// language and the separator overrides are checked once, up front, so an
+/// unsupported `lang` or `thousands_sep == decimal_sep` raises instead of
+/// leaving every span untouched (#188, #204).
 pub fn auto_parse_sentence(
     text: &str,
     lang: &str,
@@ -4578,7 +4583,10 @@ pub fn auto_parse_sentence(
                     // In running text a unit shaped like something else is left
                     // as written: "the 1990s", "a 5G network", "1 in 3", "Room
                     // 5 C", "Score 2 won 3" (#392).
-                    Ok(q) if q.unit.is_some() && !prefer.contains_key(unit_token(&raw)) && not_a_unit(&chars, &raw, end) => {
+                    Ok(q) if q.unit.is_some()
+                        && !prefer.contains_key(unit_token(&raw))
+                        && not_a_unit(&chars, &raw, end, q.kind.as_deref() == Some("currency")) =>
+                    {
                         out.push_str(&raw)
                     }
                     Ok(q) => out.push_str(&format_quantity(&q, expand)),
@@ -5346,6 +5354,12 @@ mod unit_misread_tests {
         assert_eq!(sent("vitamin B12 5 mg", true), "vitamin B12 5 milligrams");
         assert_eq!(sent("it is 20°C", false), "it is 20 °C");
         assert_eq!(sent("a 2L bottle", true), "a 2 liters bottle");
+        // A currency's capital letter is its scale.
+        assert_eq!(sent("raised $5M today", false), "raised 5000000 USD today");
+        assert_eq!(sent("€3K", false), "3000 EUR");
+        assert_eq!(sent("£10K bonus", false), "10000 GBP bonus");
+        // Decimals are seconds, never a decade.
+        assert_eq!(sent("1.0s", false), "1 s");
         assert_eq!(sent("it is 20 °F", true), "it is 20 degrees fahrenheit");
     }
 
