@@ -209,6 +209,14 @@ def test_comma_before_the_subunit(lang, text, expected):
         ("en", "one yen", "¥1"),
         ("fr", "un rouble", "1 ₽"),
         ("pt", "um iene", "1 ¥"),
+        # An article or a homograph counts when a subunit makes it money.
+        ("en", "a dollar and twenty cents", "$1.20"),
+        ("en", "it costs an euro and fifty cents", "it costs €1.50"),
+        ("en", "a pound and fifty pence", "£1.50"),
+        ("fr", "une livre et vingt pence", "1,20 £"),
+        ("en", "a dollar", "a dollar"),
+        ("en", "a dollar and two friends", "a dollar and 2 friends"),
+        ("fr", "une livre et deux kilos", "une livre et 2 kilos"),
         # Names num2words writes (#104).
         ("en", "twelve rupees, thirty-four paise", "₹12.34"),
         ("es", "doce rublos con treinta y cuatro kopeykas", "12,34 ₽"),

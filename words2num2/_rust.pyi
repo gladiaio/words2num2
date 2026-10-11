@@ -9,7 +9,7 @@ Number = Union[int, float, Decimal]
 
 CONVERTER_TYPES: List[str]
 
-def normalize(text: str) -> str: ...
+def normalize(text: str, convert_numerical_symbols: bool = False) -> str: ...
 def lookup(
     lang: str, text: str, ordinal: bool, negative_words: Sequence[str]
 ) -> Optional[int]: ...
@@ -29,6 +29,7 @@ def words2num(
     lang: str = "en",
     to: str = "cardinal",
     kwargs: Optional[Dict[str, object]] = None,
+    convert_numerical_symbols: bool = False,
 ) -> Number: ...
 def words2num_sentence(
     sentence: str,
@@ -36,6 +37,7 @@ def words2num_sentence(
     to: str = "cardinal",
     kwargs: Optional[Dict[str, object]] = None,
     currency: bool = False,
+    convert_numerical_symbols: bool = False,
     date: bool = False,
     region: Optional[str] = None,
     date_format: str = "written",
@@ -48,6 +50,7 @@ def auto_parse(
     prefer: Optional[Dict[str, str]] = None,
     thousands_sep: Optional[str] = None,
     decimal_sep: Optional[str] = None,
+    convert_numerical_symbols: bool = False,
 ) -> Quantity: ...
 def auto_parse_sentence(
     text: str,
@@ -56,4 +59,5 @@ def auto_parse_sentence(
     thousands_sep: Optional[str] = None,
     decimal_sep: Optional[str] = None,
     expand: bool = False,
+    convert_numerical_symbols: bool = False,
 ) -> str: ...

@@ -244,3 +244,26 @@ def test_words2num_spoken_decimals(lang, text, expected):
     got = words2num(text, lang=lang)
     assert got == expected
     assert isinstance(got, Decimal)
+
+
+@pytest.mark.parametrize(
+    "lang,text,expected",
+    [
+        # A digit after a bare scale word is the next place down (#875).
+        ("th", "เงินเดือนประมาณหมื่นห้า", "เงินเดือนประมาณ15000"),
+        ("th", "บ้านหลังนี้ราคาล้านสอง", "บ้านหลังนี้ราคา1200000"),
+        ("km", "ម៉ឺនប្រាំ រៀល", "15000 រៀល"),
+        # 2005 as written, 2500 as spoken: no one number, so words stay.
+        ("th", "ราคาสองพันห้า", "ราคาสองพันห้า"),
+        ("lo", "ລາຄາ ສອງພັນ ຫ້າ ກີບ", "ລາຄາ ສອງພັນ ຫ້າ ກີບ"),
+        ("th", "ราคาสองพันห้าร้อยบาท", "ราคา2500บาท"),
+    ],
+)
+def test_elided_place_after_scale_word(lang, text, expected):
+    assert words2num_sentence(text, lang=lang) == expected
+
+
+def test_elided_place_cardinal_keeps_renderer_spelling():
+    assert words2num("หมื่นห้า", lang="th") == 15000
+    assert words2num("ໝື່ນຫ້າ", lang="lo") == 15000
+    assert words2num("สองพันห้า", lang="th") == 2005
