@@ -207,3 +207,15 @@ def test_normalize_folds_symbols_on_request():
     assert words2num2.normalize("x ① y", convert_numerical_symbols=True) == "x 1 y"
     assert words2num2.normalize("Forty-Two ①") == "forty two ①"
     assert words2num2.normalize("x  ① y") == "x  ① y"
+
+
+@pytest.mark.parametrize(
+    "text, lang, expected",
+    [
+        ("x five​ y", "en", "x 5​ y"),
+        ("five­ apples", "en", "5­ apples"),
+        ("x fünf⁠ y", "de", "x 5⁠ y"),
+    ],
+)
+def test_bare_format_char_after_number_is_kept_issue_1005(text, lang, expected):
+    assert words2num2.words2num_sentence(text, lang=lang) == expected
