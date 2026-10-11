@@ -207,3 +207,27 @@ def test_normalize_folds_symbols_on_request():
     assert words2num2.normalize("x ① y", convert_numerical_symbols=True) == "x 1 y"
     assert words2num2.normalize("Forty-Two ①") == "forty two ①"
     assert words2num2.normalize("x  ① y") == "x  ① y"
+
+
+@pytest.mark.parametrize(
+    "text, lang, expected",
+    [
+        ("x five​ y", "en", "x 5​ y"),
+        ("five­ apples", "en", "5­ apples"),
+        ("x fünf⁠ y", "de", "x 5⁠ y"),
+    ],
+)
+def test_bare_format_char_after_number_is_kept_issue_1005(text, lang, expected):
+    assert words2num2.words2num_sentence(text, lang=lang) == expected
+
+
+@pytest.mark.parametrize(
+    "text, kwargs, expected",
+    [
+        ("it costs twelve\u200b dollars", {"currency": True}, "it costs $12\u200b"),
+        ("x 20\u200b dollars", {"currency": True}, "x $20\u200b"),
+        ("on the fifth\u200b of march", {"date": True}, "on March 5"),
+    ],
+)
+def test_folds_still_read_a_format_char_value_issue_1021(text, kwargs, expected):
+    assert words2num2.words2num_sentence(text, **kwargs) == expected
