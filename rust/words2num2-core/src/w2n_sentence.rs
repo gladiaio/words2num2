@@ -7169,6 +7169,16 @@ mod script_mark_tests {
         assert_eq!(s("\u{767E}\u{FF0C}\u{5341}\u{4E8C}", "ja"), "100\u{FF0C}12");
         assert_eq!(s("\u{5343}\u{FF1A}\u{5341}\u{4E8C}", "ja"), "1000\u{FF1A}12");
         assert_eq!(s("ร้อย\u{FF0C}สิบสอง", "th"), "100\u{FF0C}12");
+        // A lone numeral after a glued mark is its own number (#1028).
+        assert_eq!(s("二十，五", "zh"), "20，5");
+        assert_eq!(s("一千，五", "zh"), "1000，5");
+        assert_eq!(s("二千，五", "ja"), "2000，5");
+        assert_eq!(s("ยี่สิบ，ห้า", "th"), "20，5");
+        assert_eq!(s("x 二十,五 y", "zh"), "x 20,5 y");
+        // A word that opens with a numeral stays a word.
+        assert_eq!(s("二十，一样", "zh"), "20，一样");
+        assert_eq!(s("好，一样", "zh"), "好，一样");
+        assert_eq!(s("我们，一起去", "zh"), "我们，一起去");
         // Unchanged without the mark.
         assert_eq!(s("တစ်ရာ ငါး", "my"), "105");
     }
