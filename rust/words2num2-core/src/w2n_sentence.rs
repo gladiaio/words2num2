@@ -526,8 +526,10 @@ fn has_trailing_mark(s: &str) -> bool {
 /// An invisible format character (ZWSP, ZWNJ, ZWJ, word joiner, BOM, soft
 /// hyphen): it rides with the punctuation around it, so "twenty,\u{200b} one"
 /// still ends its number at the comma and keeps the ZWSP (#870).
+/// The bidi marks LRM, RLM and ALM, common after punctuation in ar / fa /
+/// he text, count as such too (#1000).
 pub(crate) fn is_format_char(c: char) -> bool {
-    matches!(c, '\u{200B}'..='\u{200D}' | '\u{2060}' | '\u{FEFF}' | '\u{00AD}')
+    matches!(c, '\u{200B}'..='\u{200F}' | '\u{2060}' | '\u{FEFF}' | '\u{00AD}' | '\u{061C}')
 }
 
 /// The piece opens with a bracket, quote or other mark `normalize` drops
@@ -7072,6 +7074,10 @@ mod format_char_punct_tests {
         assert_eq!(s("five\u{00AD} apples", "en"), "5\u{00AD} apples");
         assert_eq!(s("x f\u{FC}nf\u{200B} y", "de"), "x 5\u{200B} y");
         assert_eq!(s("x twenty\u{200B} one", "en"), "x 21");
+        // A leading format character and the bidi marks are kept (#1000).
+        assert_eq!(s("x \u{200B}five y", "en"), "x \u{200B}5 y");
+        assert_eq!(s("twenty.\u{200E} One", "en"), "20.\u{200E} One");
+        assert_eq!(s("\u{0639}\u{0634}\u{0631}\u{0648}\u{0646}\u{060C}\u{200F} \u{0648}\u{0627}\u{062D}\u{062F}", "ar"), "20\u{060C}\u{200F} 1");
         // currency=True folds the amount, the character after it (#1021); a
         // date or phone pass folds as before, without it (#1020).
         let c = |t: &str, l: &str| super::words2num_sentence_opts(t, l, "cardinal", false, true).unwrap();

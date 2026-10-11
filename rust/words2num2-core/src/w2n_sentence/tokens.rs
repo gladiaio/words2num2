@@ -81,7 +81,9 @@ fn split_punct(tok: &str) -> Vec<&str> {
 fn split_punct_with(tok: &str, clause_lead: bool) -> Vec<&str> {
     let lead_end = tok
         .char_indices()
-        .find(|&(_, c)| !(is_leading_punct(c) || (clause_lead && is_leading_clause_mark(c))))
+        // Format characters before a word ride before it: "x \u{200b}five" keeps
+        // its ZWSP (#1000).
+        .find(|&(_, c)| !(is_leading_punct(c) || is_format(c) || (clause_lead && is_leading_clause_mark(c))))
         .map_or(tok.len(), |(k, _)| k);
     if lead_end == tok.len() {
         return vec![tok];
@@ -137,7 +139,7 @@ pub(super) fn is_punct_part(part: &str) -> bool {
 /// An invisible format character (ZWSP, ZWNJ, ZWJ, word joiner, BOM, soft
 /// hyphen); see `super::is_format_char`.
 fn is_format(c: char) -> bool {
-    matches!(c, '\u{200B}'..='\u{200D}' | '\u{2060}' | '\u{FEFF}' | '\u{00AD}')
+    super::is_format_char(c)
 }
 
 /// [`super::tokenize`], then each word cut at its punctuation, and for the

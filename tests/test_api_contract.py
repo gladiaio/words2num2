@@ -239,3 +239,14 @@ def test_folds_still_read_a_format_char_value_issue_1021(text, kwargs, expected)
 )
 def test_sign_word_mark_space_figure_issue_1032(text, lang, expected):
     assert words2num(text, lang=lang) == expected
+
+
+@pytest.mark.parametrize(
+    "text, lang, expected",
+    [
+        ("x \u200bfive y", "en", "x \u200b5 y"),
+        ("twenty.\u200e One", "en", "20.\u200e One"),
+    ],
+)
+def test_leading_format_char_and_bidi_marks_issue_1000(text, lang, expected):
+    assert words2num2.words2num_sentence(text, lang=lang) == expected
