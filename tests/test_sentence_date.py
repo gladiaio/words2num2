@@ -95,6 +95,21 @@ def test_date_and_currency_together():
         ("en", "thirteen twelve twenty twenty six", "13 12 2026"),
         ("en", "two twenty nine twenty twenty five", "2 29 2025"),
         ("en", "three twelve", "3 12"),
+        # Three bare numbers inside a sentence, no date cue: quantities (#1031).
+        ("en", "we need three twelve two thousand people", "we need 3 12 2000 people"),
+        ("en", "we sold three twelve two thousand and six", "we sold 3 12 2006"),
+        ("es", "tres de doce dos mil personas", "3 de 12 2000 personas"),
+        (
+            "de",
+            "wir brauchen drei zwölf zweitausend leute",
+            "wir brauchen 3 12 2000 leute",
+        ),
+        (
+            "fr",
+            "il faut trois douze deux mille personnes",
+            "il faut 3 12 2000 personnes",
+        ),
+        ("en", "on three twelve twenty twenty six", "on 3/12/2026"),
     ],
 )
 def test_numeric_date(lang, text, expected):

@@ -235,6 +235,20 @@ fn open(trail: &str) -> bool {
     trail.is_empty()
 }
 
+/// A word that announces a date: "on", "born", "le", "am", "el" ...
+fn date_cue(st: Style, w: &str) -> bool {
+    let cues: &[&str] = match st {
+        Style::EnUs | Style::EnGb => &["on", "born", "dated", "date", "since", "until", "till", "from", "by", "before", "after"],
+        Style::Fr => &["le", "du", "au", "depuis", "jusqu'au", "né", "née", "daté", "datée", "date"],
+        Style::De => &["am", "vom", "bis", "seit", "ab", "datum", "geboren"],
+        Style::Es => &["el", "desde", "hasta", "fecha", "nació", "nacido", "nacida"],
+        Style::Pt => &["em", "no", "dia", "desde", "até", "data", "nasceu", "nascido", "nascida"],
+        Style::It => &["il", "dal", "al", "nato", "nata", "data", "fino"],
+        Style::Nl => &["op", "van", "tot", "sinds", "datum", "geboren"],
+    };
+    cues.contains(&w)
+}
+
 /// A date spoken all in numbers at token `i`: N1 [sep] N2 [sep] YEAR, with
 /// sep "slash" or "/" (both or none), de "12. 3. 2026", es / pt "12 del 3
 /// de 2026". N1 is the month in en (US), the day elsewhere.
@@ -259,16 +273,34 @@ fn numeric_at(st: Style, toks: &[&str], i: usize) -> Option<Span> {
         return None;
     }
     let s2 = sep(i + 2 + s1);
-    if (s1 == 0) != (s2 == 0) && !es {
-        return None; // "3 slash 12 2026": half a date
+    if (s1 == 0) != (s2 == 0) {
+        return None; // "3 slash 12 2026", "tres de doce 2000": half a date
     }
     let (y, trail) = at(i + 2 + s1 + s2).and_then(year)?;
+    // With no separator, three numbers are a date only after a date cue ("on
+    // 3 12 2026", "le 12 3 2026") or as the whole text: "we need 3 12 2000
+    // people" is three quantities (#1031).
+    let len = 3 + s1 + s2;
+    if s1 == 0 {
+        let cued = i > 0 && {
+            let (prev, prev_trail) = split_trail(toks[i - 1]);
+            prev_trail.is_empty() && date_cue(st, &prev.to_lowercase())
+        };
+        // Nothing but punctuation after it: "three twelve twenty twenty six ."
+        let whole = i == 0
+            && toks[(i + len).min(toks.len())..]
+                .iter()
+                .all(|t| t.chars().all(|c| !c.is_alphanumeric()));
+        if !cued && !whole {
+            return None;
+        }
+    }
     let (d, m) = if st == Style::EnUs { (b, a) } else { (a, b) };
     let yn: u32 = y.parse().ok()?;
     if !(1..=12).contains(&m) || d == 0 || d > days_in(m, yn) {
         return None;
     }
-    Some(Span { day: Some(d), month: String::new(), month_no: Some(m), year: Some(y), trail, len: 3 + s1 + s2 })
+    Some(Span { day: Some(d), month: String::new(), month_no: Some(m), year: Some(y), trail, len })
 }
 
 /// The date span starting at token `i`, if any.
