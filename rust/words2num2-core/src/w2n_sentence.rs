@@ -3472,7 +3472,22 @@ fn words2num_sentence_folded(
         }
         return Ok(crate::w2n_currency::fold_currency(&out, &resolved));
     }
-    words2num_sentence_walk(sentence, lang, to, has_kwargs)
+    // The plain walk cuts the same subunit off: fr "douze dollars et
+    // cinquante cents" is "12 dollars et 50 cents", not "… 5000" (#868).
+    let resolved = resolve_lang(lang)?;
+    let pieces = crate::w2n_currency::subunit_pieces(sentence, &resolved);
+    if pieces.len() == 1 {
+        return words2num_sentence_walk(sentence, lang, to, has_kwargs);
+    }
+    let mut out = String::new();
+    for (piece, walk) in pieces {
+        if walk {
+            out.push_str(&words2num_sentence_walk(&piece, lang, to, has_kwargs)?);
+        } else {
+            out.push_str(&piece);
+        }
+    }
+    Ok(out)
 }
 
 fn words2num_sentence_walk(
@@ -6786,5 +6801,19 @@ mod auto_sentence_mark_tests {
         let ts = |t: &str| super::auto_parse_sentence(t, "de", &p, Some(","), None, false).unwrap();
         assert_eq!(ts("3.125 kg"), "3.125 kg");
         assert_eq!(ts(&ts("3.125 kg")), "3.125 kg");
+    }
+}
+
+#[cfg(test)]
+mod plain_walk_subunit_tests {
+    /// #868: the plain walk reads a fr US-cent subunit as cents, not hundreds.
+    #[test]
+    fn subunit_after_unit_issue_868() {
+        let s = |t: &str, l: &str, to: &str| super::words2num_sentence(t, l, to, false).unwrap();
+        assert_eq!(s("douze dollars et cinquante cents", "fr", "cardinal"), "12 dollars et 50 cents");
+        assert_eq!(s("zéro dollar et nonante-neuf cents", "fr_CH", "cardinal"), "0 dollar et 99 cents");
+        assert_eq!(s("douze dollars et cinquante cents", "fr_DZ", "currency"), "12 dollars et 50 cents");
+        // A real hundreds multiple stays one.
+        assert_eq!(s("mille euros et deux cents personnes", "fr", "cardinal"), "1000 euros et 200 personnes");
     }
 }

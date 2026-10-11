@@ -1245,6 +1245,17 @@ fn article_one(lang: &str, word: &str) -> bool {
 ///   unit says it is money: "a dollar and twenty cents", "une livre et vingt
 ///   pence" ([`subunit_follows`]).
 pub fn pieces_for_walk(sentence: &str, lang: &str) -> Vec<(String, bool)> {
+    pieces_for_walk_with(sentence, lang, false)
+}
+
+/// [`pieces_for_walk`] with only the subunit cut, no currency rewrites: the
+/// plain walk keeps fr "dollars et cinquante cents" as 50 cents, not 5000
+/// (#868).
+pub fn subunit_pieces(sentence: &str, lang: &str) -> Vec<(String, bool)> {
+    pieces_for_walk_with(sentence, lang, true)
+}
+
+fn pieces_for_walk_with(sentence: &str, lang: &str, subunits_only: bool) -> Vec<(String, bool)> {
     let base = lang.split(&['_', '-'][..]).next().unwrap_or(lang);
     if hand_lexicon(base).is_empty() {
         return vec![(sentence.to_string(), true)];
@@ -1324,7 +1335,7 @@ pub fn pieces_for_walk(sentence: &str, lang: &str) -> Vec<(String, bool)> {
             }
         }
     }
-    for (j, text) in renames {
+    for (j, text) in renames.into_iter().filter(|_| !subunits_only) {
         parts[j].text = text;
     }
     let mut pieces = Vec::new();
