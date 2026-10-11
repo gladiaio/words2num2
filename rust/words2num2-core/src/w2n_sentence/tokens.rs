@@ -93,6 +93,19 @@ fn split_punct(tok: &str) -> Vec<&str> {
     out
 }
 
+/// Does `part` hold clause punctuation inside it ("twenty,two", "zwanzig!drei",
+/// "_twenty_")? Two words written together, never one number (#283).
+/// Apostrophes, hyphens, dashes, dots and the Catalan middle dot belong to
+/// words.
+pub(crate) fn has_interior_punct(part: &str) -> bool {
+    let edge = |c: char| is_leading_punct(c) || is_trailing_punct(c);
+    let core = part.trim_matches(edge);
+    core.chars().any(|c| {
+        (c == '_' || is_leading_punct(c) || is_trailing_punct(c))
+            && !matches!(c, '\'' | '\u{2019}' | '\u{2018}' | '\u{02BC}' | '\u{02BB}' | '`' | '-' | '\u{2010}'..='\u{2015}' | '.' | '\u{00B7}')
+    })
+}
+
 /// Is `part` punctuation split off a word (or a token made only of
 /// punctuation)? It never belongs to a number run.
 pub(super) fn is_punct_part(part: &str) -> bool {

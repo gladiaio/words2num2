@@ -233,13 +233,14 @@ def test_sentence_expand_mode():
 
 def test_sentence_locale_separators_de():
     out = auto_parse_sentence("Total: 1.234,56 €.", lang="de")
-    assert "1234.56" in out
+    # The locale's decimal mark, so the output reads back as written (#867).
+    assert "1234,56" in out
     assert "EUR" in out
 
 
 def test_sentence_locale_separators_fr():
     out = auto_parse_sentence("Total : 1 234,56 €.", lang="fr")
-    assert "1234.56" in out
+    assert "1234,56" in out
     assert "EUR" in out
 
 
@@ -282,7 +283,8 @@ def test_quantity_repr_plain():
         ("1234.567", {}, Decimal("1234.567")),
         ("1234,567", {}, Decimal("1234.567")),
         # Swiss typographic apostrophe (#109).
-        ("1\u2019234.5", {"lang": "fr_CH"}, Decimal("1234.5")),
+        ("1\u2019234.5", {"lang": "de_CH"}, Decimal("1234.5")),
+        ("1\u2019234,5", {"lang": "fr_CH"}, Decimal("1234.5")),
         # Exact (#71).
         ("12345678901234567.89", {}, Decimal("12345678901234567.89")),
     ],
@@ -353,3 +355,55 @@ def test_unknown_lang_raises_not_implemented(call):
     # #204
     with pytest.raises(NotImplementedError):
         call()
+
+
+# ---------------------------------------------------------------------------
+# Regional separators reach every entry point (#423)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "lang,text,expected",
+    [
+        ("es_MX", "1,234", 1234),
+        ("es-MX", "1,234", 1234),
+        ("es_US", "1,234", 1234),
+        ("es_419", "1,234", 1234),
+        ("de_CH", "1.234", Decimal("1.234")),
+        ("de_CH", "1'234", 1234),
+        ("es", "1.234", 1234),
+        ("km", "1,234", 1234),
+        ("hi", "12,34,567.5", Decimal("1234567.5")),
+    ],
+)
+def test_regional_separators_in_words2num_and_auto_parse(lang, text, expected):
+    from words2num2 import words2num
+
+    assert words2num(text, lang=lang) == expected
+    assert auto_parse(text, lang=lang).value == expected
+
+
+def test_explicit_separators_never_fall_back_to_a_float():
+    with pytest.raises(Words2NumError):
+        auto_parse("1.5", lang="en", decimal_sep=",")
+
+
+def test_lowercase_region_in_parse_number_string():
+    assert parse_number_string("1,234", lang="es-mx") == 1234
+    assert parse_number_string("12,34,567", lang="en-in") == 1234567
+
+
+def test_comma_after_sign_word_is_punctuation():
+    from words2num2 import words2num
+
+    assert words2num("moins, 1.234", lang="fr") == -1234
+    assert words2num("minus, 1.234", lang="de") == -1234
+
+
+def test_auto_parse_sign_word_keeps_separators_and_region():
+    assert auto_parse("moins 1.234", lang="fr").value == -1234
+    assert auto_parse("moins 1.234", lang="fr", decimal_sep=".").value == Decimal(
+        "-1.234"
+    )
+    assert auto_parse("menos 1.234", lang="es_MX").value == Decimal("-1.234")
+    assert auto_parse("menos 1,234", lang="es_MX").value == -1234

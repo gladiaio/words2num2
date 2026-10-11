@@ -30,7 +30,7 @@ overview, see [README.rst](README.rst).
 
 ### `words2num`
 
-`words2num(text, lang="en", to="cardinal")`
+`words2num(text, lang="en", to="cardinal", convert_numerical_symbols=False)`
 
 Parse `text` (a number written in words) into a numeric value.
 
@@ -41,6 +41,7 @@ Parse `text` (a number written in words) into a numeric value.
 | `text` | `str` | — | The words to parse (e.g. `"forty-two"`). |
 | `lang` | `str` | `"en"` | Locale code, case-insensitive; see [Language codes](#language-codes). |
 | `to` | `str` | `"cardinal"` | One of [`CONVERTER_TYPES`](#converter_types): `"cardinal"`, `"ordinal"`, `"ordinal_num"`, `"year"`, `"currency"`, `"digits"`. See [Conversion types](#conversion-types). |
+| `convert_numerical_symbols` | `bool` | `False` | Read numerical symbols as their digits. See [Numerical symbols](#numerical-symbols). |
 
 There are no other keyword arguments: an unknown one is a `TypeError`
 naming it.
@@ -80,7 +81,7 @@ Decimal('3.14')
 
 ### `words2num_sentence`
 
-`words2num_sentence(sentence, lang="en", to="cardinal", currency=False, date=False)`
+`words2num_sentence(sentence, lang="en", to="cardinal", currency=False, convert_numerical_symbols=False, date=False)`
 
 Walk a sentence and replace every word-number with its numeric form.
 Non-number tokens pass through unchanged. Punctuation is preserved.
@@ -122,7 +123,7 @@ stays as it is.
 
 ### `auto_parse`
 
-`auto_parse(text, lang="en", prefer=None, thousands_sep=None, decimal_sep=None)`
+`auto_parse(text, lang="en", prefer=None, thousands_sep=None, decimal_sep=None, convert_numerical_symbols=False)`
 
 Parse a single quantity expression — a number plus an optional unit
 or currency — and return a structured [`Quantity`](#quantity).
@@ -185,7 +186,7 @@ Decimal('12.50')
 
 ### `auto_parse_sentence`
 
-`auto_parse_sentence(text, lang="en", prefer=None, thousands_sep=None, decimal_sep=None, expand=False)`
+`auto_parse_sentence(text, lang="en", prefer=None, thousands_sep=None, decimal_sep=None, expand=False, convert_numerical_symbols=False)`
 
 Walk free text and replace every quantity in place. Punctuation
 between matches is preserved.
@@ -218,8 +219,12 @@ between matches is preserved.
 'Pay 1 dollar for 1 kilogram.'
 
 >>> auto_parse_sentence("Total: 1.234,56 €.", lang="de")
-'Total: 1234.56 EUR.'
+'Total: 1234,56 EUR.'
 ```
+
+A decimal is written with the mark the same call reads as the decimal
+(`decimal_sep`, else `.` when only `thousands_sep` is given, else the
+locale's), so the output reads back as the same number.
 
 In short form, percent and bare degree are tightly glued
 (`70%`, `20°`); other units are space-separated (`5 kg`).
@@ -297,11 +302,13 @@ Decimal('-12345.67')
 
 ### `normalize`
 
-`normalize(text)`
+`normalize(text, convert_numerical_symbols=False)`
 
 Normalize `text` the way the core does before a lookup: NFKD, lowercase,
 strip diacritics, hyphens between words become spaces, collapse
-whitespace. Returns `str`.
+whitespace. Returns `str`. Numerical symbols stay as written
+(`normalize("x ① y")` is `"x ① y"`); `convert_numerical_symbols=True`
+folds them like the rest (`"x 1 y"`). See [Numerical symbols](#numerical-symbols).
 
 ```python
 >>> normalize("Forty-Two")
@@ -339,7 +346,7 @@ Returned by `auto_parse` and used by `auto_parse_sentence` internally.
 | `value` | `int \| float \| Decimal` | Numeric value. |
 | `unit` | `Optional[str]` | Canonical short unit (`"kg"`, `"USD"`, `"%"`, `"°C"`, …). |
 | `unit_long` | `Optional[str]` | Canonical long unit (`"kilogram"`, `"dollar"`, `"percent"`, …). |
-| `kind` | `Optional[str]` | One of `"currency"`, `"length"`, `"mass"`, `"temperature"`, `"time"`, `"volume"`, `"percent"`, or `None`. |
+| `kind` | `Optional[str]` | One of `"currency"`, `"length"`, `"mass"`, `"temperature"`, `"time"`, `"area"`, `"volume"`, `"percent"`, or `None`. |
 | `confidence` | `float` | In `[0, 1]`. Drops below 1.0 for ambiguous unit tokens (`m`, `g`, `t`, `K`, `s`, `h`, `d`). |
 | `raw` | `str` | The original input. |
 
@@ -368,18 +375,59 @@ when none is given. The table lives in the core
 |---|---|---|---|
 | `en`, `en_GB`, `en_IN`, `zh*`, `ja`, `ko`, `th` | `,` | `.` | |
 | `fr`, `fr_BE`, `fr_DZ` | ` ` (NBSP) | `,` | |
-| `fr_CH` | `'` | `.` | Swiss apostrophe |
+| `fr_CH` | `'` | `,` | Swiss apostrophe, comma decimal (CLDR) |
 | `de`, `es*`, `it`, `pt*`, `nl`, `ro`, `hr`, `sl`, `sr`, `tr`, `el`, `da`, `is`, `fo` | `.` | `,` | |
 | `ru`, `uk`, `be`, `bg`, `pl`, `cs`, `sk`, `hu`, `sv`, `no`, `nn`, `fi`, `et`, `lt`, `lv` | ` ` | `,` | |
 | anything else | `,` | `.` | Fallback. |
 
 Units recognized by `auto_parse` (also internal): length (`mm` `cm` `m`
 `km` `in` `ft` `yd` `mi` …), mass (`mg` `g` `kg` `t` `lb` `oz`),
-temperature (`°C` `°F` `K`), time (`ms` `s` `min` `h` `d`), volume (`ml`
-`l` `gal`), and `%`; currencies by symbol (`$` `€` `£` `¥` `₹` `₽` `₩` `₺`)
+temperature (`°C` `°F` `K`), time (`ms` `s` `min` `h` `d`), area (`mm²`
+`cm²` `m²` `km²` `ft²` `in²`), volume (`ml` `l` `gal` `mm³` `cm³` `m³` `km³`
+`ft³` `in³`), and `%`. The power may be written `²`, `^2` or, in
+`auto_parse` only, as a glued `2` (`5 m2`; not `in2`); currencies by symbol (`$` `€` `£` `¥` `₹` `₽` `₩` `₺`)
 or ISO code (`USD`, `EUR`, `GBP`, …). Ambiguous tokens (`m`, `g`, `t`,
 `K`, `s`, `h`, `d`, `in`) get a `confidence` below 1.0; override them with
 `prefer={...}`.
+
+---
+
+## Numerical symbols
+
+Superscript, subscript, circled and parenthesized digits (`"²"`, `"₂"`,
+`"①"`, `"⑩"`, `"⒈"`), circled and parenthesized ideographs (`"㊀"`,
+`"㈩"`, `"〸"`), Roman numerals (`"Ⅻ"`) and vulgar fractions (`"½"`) are
+symbols, not numbers: any character of Unicode category `Nl` or `No` that
+NFKD rewrites. A script's own digits (`"５"`, `"٥"`, `"५"`, category `Nd`)
+and the CJK compatibility ideographs (`"零"` at U+F9B2, category `Lo`) are
+not symbols. The digit table follows Unicode 13, so digits added later are not
+read as digits: the outlined digits U+1CCF0–U+1CCF9 (`"𜳵"`) count as
+symbols, and the others (Kawi, Tangsa, Nag Mundari, …) are left as written. By default every parsing
+entry point leaves them alone: `words2num` and `auto_parse` raise on them,
+alone or glued to a figure, and the sentence functions keep them as written
+(`"the ⑤ million"` stays as is). `normalize()` keeps them too
+(`normalize("x ① y")` is `"x ① y"`); only the lookup tables' internal
+normalization folds them.
+
+`convert_numerical_symbols=True` brings back the reading these symbols had
+before, no more:
+
+| Function | With `convert_numerical_symbols=True` |
+|---|---|
+| `words2num`, `auto_parse` | A run of symbols alone reads as its digits: `"①"` → 1, `"¹⁰"` → 10. |
+| `words2num_sentence` | The English walker (`en`, `en_GB`, `en_US`, …) reads them as digits: `"the ⑤ million"` → `"the 5000000"`. Other languages leave them as written either way. |
+| `auto_parse_sentence` | No effect: its quantity scanner never read them. The keyword is accepted for symmetry. |
+| `normalize` | Folds them like any other character: `"①"` → `"1"`, `"½"` → `"1⁄2"`. |
+| CLI | `--convert-numerical-symbols`. |
+
+A symbol glued to a figure raises in either mode (`"10²"`, `"1①"`: folding it
+in would give 102 and 11), and vulgar fractions are never read. The keyword is
+spelled `convert_numerical_symbols`; the issues that asked for it (#949, #955,
+#958) wrote `convert_numeric_symbols`, which is not accepted.
+
+This check never refuses a power after a unit's letters (`"5 m²"`) or an
+ordinal indicator after a figure (es `"1º"`); whether those read is up to the
+unit and ordinal readers.
 
 ---
 
@@ -473,6 +521,22 @@ plural rules to a long-form unit name. Invoked automatically by
 >>> pluralize("inch", 5)
 'inches'
 ```
+
+---
+
+## Thai, Lao and Khmer: a digit after a scale word
+
+Spoken th/lo/km elide the place of a digit after a scale word of a thousand
+or more: "หมื่นห้า" is 15 000 and "ล้านสอง" 1 200 000. Without a multiplier
+before the scale word that is the only reading, in every function. With
+one ("สองพันห้า", lo "ສອງພັນ ຫ້າ", km "ពីរពាន់ ប្រាំ") num2words2 writes the
+same words for the digit as units (2005), so:
+
+- `words2num` returns the renderer's reading (2005) and gives no sign that
+  the speaker may have meant 2500: "พันห้า" is 1500, "หนึ่งพันห้า" 1005;
+- the sentence functions leave such a span as words, a year included
+  ("ปีสองพันห้า"): unspaced text gives no sure year label ("ต่อปี" is
+  "per year"), so none is guessed.
 
 ---
 
