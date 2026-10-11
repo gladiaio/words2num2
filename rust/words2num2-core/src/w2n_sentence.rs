@@ -3648,7 +3648,7 @@ fn words2num_sentence_folded(
         // Walked piece by piece: fr "trente-quatre cents" after "dollars et"
         // is 34 US cents, not 3400 (see `pieces_for_walk`).
         let mut out = String::new();
-        for (piece, walk) in crate::w2n_currency::pieces_for_walk(sentence, &resolved) {
+        for (piece, walk) in crate::w2n_currency::pieces_for_walk(sentence, &resolved, !matches!(to, "ordinal" | "ordinal_num")) {
             if walk {
                 out.push_str(&words2num_sentence_walk(&piece, lang, to, has_kwargs)?);
             } else {
@@ -7172,6 +7172,9 @@ mod plain_walk_subunit_tests {
         assert_eq!(s("douze dollars et (vingt cents)", "fr", "cardinal"), "12 dollars et (20 cents)");
         assert_eq!(s("un dollar et (un cent)", "fr", "cardinal"), "1 dollar et (un cent)");
         assert_eq!(s("douze dollars et vingt cents", "fr", "ordinal"), "douze dollars et vingt cents");
+        let co = |t: &str, to: &str| super::words2num_sentence_opts(t, "fr", to, false, true).unwrap();
+        assert_eq!(co("douze dollars et vingt cents", "ordinal"), "douze dollars et vingt cents");
+        assert_eq!(co("douze dollars et un cent chacun", "cardinal"), "12,01 $ chacun");
         // currency=True: the count is a plain number naming no currency,
         // not across a sentence or two "et"-joined numbers (#1013, #1017).
         let c = |t: &str, l: &str| super::words2num_sentence_opts(t, l, "cardinal", false, true).unwrap();

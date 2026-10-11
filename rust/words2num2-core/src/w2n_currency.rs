@@ -1265,8 +1265,8 @@ fn article_one(lang: &str, word: &str) -> bool {
 ///   en "a"/"an", an article in running text — unless a subunit after the
 ///   unit says it is money: "a dollar and twenty cents", "une livre et vingt
 ///   pence" ([`subunit_follows`]).
-pub fn pieces_for_walk(sentence: &str, lang: &str) -> Vec<(String, bool)> {
-    pieces_for_walk_with(sentence, lang, false, true)
+pub fn pieces_for_walk(sentence: &str, lang: &str, counts: bool) -> Vec<(String, bool)> {
+    pieces_for_walk_with(sentence, lang, false, counts)
 }
 
 /// [`pieces_for_walk`] with only the subunit cut, no currency rewrites: the
@@ -1375,11 +1375,12 @@ fn pieces_for_walk_with(sentence: &str, lang: &str, subunits_only: bool, counts:
                     Ok(Some(v)) => v,
                     _ => -1,
                 });
-                // "<2-9> cents" is also a hundreds multiple; the plain walk
+                // "<2-9> cents" is also a hundreds multiple ("un cent" is no
+                // 100: French says "cent", #1063); the plain walk
                 // also takes 11-19 for one ("douze cents personnes" is 1200
                 // people), so there it must end the clause. "dix cents" is no
                 // 1000 ("mille"), so 10 is no hundreds multiple.
-                let hundreds = figure.is_none() && if subunits_only { (2..=19).contains(&v) && v != 10 } else { (1..10).contains(&v) };
+                let hundreds = figure.is_none() && if subunits_only { (2..=19).contains(&v) && v != 10 } else { (2..10).contains(&v) };
                 // currency=True keeps, as written, a count it cannot read as
                 // one integer but that is one amount: a decimal ("deux virgule
                 // cinq cents", "2,5 cents"), native digits, a long figure.
