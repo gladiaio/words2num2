@@ -4361,7 +4361,10 @@ fn words2num_sentence_walk(
                 // နှစ်" is 5 years, then 2 (#1050).
                 && !prev_word_index(&parts, i).is_some_and(|k| {
                     crate::normalize(rstrip_punct(&parts[k])) == crate::normalize("နှစ်")
-                        && prev_word(&parts, k).is_some_and(|p| my_figure(&p))
+                        && !has_trailing_mark(&parts[k])
+                        && prev_word_index(&parts, k).is_some_and(|f| {
+                            !has_trailing_mark(&parts[f]) && my_figure(rstrip_punct(&parts[f]))
+                        })
                 })
                 // Not across a mark: "ငါး။ နှစ် ယောက်" opens a new sentence;
                 // nor after a word with trailing punctuation ("ငါး-").
@@ -7308,6 +7311,8 @@ mod my_year_counter_tests {
         assert_eq!(s("\u{B2} သုံး နှစ် လေး လ"), "\u{B2} 3 နှစ် 4 လ");
         assert_eq!(s("သုံး နှစ် လေး ပြား"), "324 ပြား");
         assert_eq!(s("5 နှစ် နှစ်"), "5 နှစ် 2");
+        assert_eq!(s("5\u{104B} နှစ် နှစ်"), "5\u{104B} 2 နှစ်");
+        assert_eq!(s("2024, နှစ် နှစ်"), "2024, 2 နှစ်");
         // A compatibility digit is no figure.
         assert_eq!(s("\u{B2} နှစ်"), "\u{B2} 2");
         // A digit after the point is no year (#1018).
