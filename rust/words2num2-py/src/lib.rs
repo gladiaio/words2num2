@@ -128,10 +128,12 @@ fn quantity_to_py(py: Python<'_>, q: w2n_sentence::Quantity) -> PyResult<Py<PyAn
 // #[pyfunction] surface — identical names/signatures to the historic shim
 // ---------------------------------------------------------------------------
 
-/// `_rust.normalize(text)` — `Words2Num_Base._normalize`.
+/// `_rust.normalize(text)` — `Words2Num_Base._normalize`; numerical symbols
+/// stay as written unless `convert_numerical_symbols` (#972).
 #[pyfunction]
-fn normalize(text: &str) -> String {
-    words2num2_core::normalize(text)
+#[pyo3(signature = (text, convert_numerical_symbols=false))]
+fn normalize(text: &str, convert_numerical_symbols: bool) -> String {
+    words2num2_core::normalize_public(text, convert_numerical_symbols)
 }
 
 /// `_rust.lookup(lang, text, ordinal, negative_words)`.
@@ -224,18 +226,21 @@ fn reject_kwargs(func: &str, kwargs: Option<&Bound<'_, PyDict>>) -> PyResult<()>
 /// mode selection). No conversion takes extra keyword arguments, so any key in
 /// `kwargs` is a `TypeError` naming it, as Python's own would.
 #[pyfunction]
-#[pyo3(signature = (text, lang="en", to="cardinal", kwargs=None))]
+#[pyo3(signature = (text, lang="en", to="cardinal", kwargs=None, convert_numerical_symbols=false))]
 fn words2num(
     py: Python<'_>,
     text: &str,
     lang: &str,
     to: &str,
     kwargs: Option<Bound<'_, PyDict>>,
+    convert_numerical_symbols: bool,
 ) -> PyResult<Py<PyAny>> {
     reject_kwargs("words2num", kwargs.as_ref())?;
     let (text, lang, to) = (text.to_owned(), lang.to_owned(), to.to_owned());
     // Pure Rust from here: other Python threads run meanwhile (#186).
-    match py.detach(move || words2num2_core::words2num(&text, &lang, &to)) {
+    match py.detach(move || {
+        words2num2_core::with_numerical_symbols(convert_numerical_symbols, || words2num2_core::words2num(&text, &lang, &to))
+    }) {
         Ok(v) => en_value_to_py(py, v),
         Err(e) => Err(w2n_error_to_pyerr(py, e)),
     }
@@ -243,7 +248,7 @@ fn words2num(
 
 /// `_rust.words2num_sentence(sentence, lang, to, kwargs)`.
 #[pyfunction]
-#[pyo3(signature = (sentence, lang="en", to="cardinal", kwargs=None, currency=false, date=false, region=None, date_format="written"))]
+#[pyo3(signature = (sentence, lang="en", to="cardinal", kwargs=None, currency=false, convert_numerical_symbols=false, date=false, region=None, date_format="written"))]
 #[allow(clippy::too_many_arguments)]
 fn words2num_sentence(
     py: Python<'_>,
@@ -252,6 +257,7 @@ fn words2num_sentence(
     to: &str,
     kwargs: Option<Bound<'_, PyDict>>,
     currency: bool,
+    convert_numerical_symbols: bool,
     date: bool,
     region: Option<String>,
     date_format: &str,
@@ -263,7 +269,9 @@ fn words2num_sentence(
     let date_format = date_format.to_owned();
     // A long transcript takes a while: release the GIL for the walk (#186).
     py.detach(move || {
-        w2n_sentence::words2num_sentence_full(&sentence, &lang, &to, false, currency, date, region.as_deref(), &date_format)
+        words2num2_core::with_numerical_symbols(convert_numerical_symbols, || {
+            w2n_sentence::words2num_sentence_full(&sentence, &lang, &to, false, currency, date, region.as_deref(), &date_format)
+        })
     })
         .map_err(|e| w2n_error_to_pyerr(py, e))
 }
@@ -278,7 +286,7 @@ fn pluralize(long_form: Option<&str>, value: Bound<'_, PyAny>) -> PyResult<Optio
 
 /// `_rust.auto_parse(text, lang, prefer, thousands_sep, decimal_sep)`.
 #[pyfunction]
-#[pyo3(signature = (text, lang="en", prefer=None, thousands_sep=None, decimal_sep=None))]
+#[pyo3(signature = (text, lang="en", prefer=None, thousands_sep=None, decimal_sep=None, convert_numerical_symbols=false))]
 fn auto_parse(
     py: Python<'_>,
     text: &str,
@@ -286,12 +294,15 @@ fn auto_parse(
     prefer: Option<HashMap<String, String>>,
     thousands_sep: Option<&str>,
     decimal_sep: Option<&str>,
+    convert_numerical_symbols: bool,
 ) -> PyResult<Py<PyAny>> {
     let prefer = prefer.unwrap_or_default();
     let (text, lang) = (text.to_owned(), lang.to_owned());
     let (ts, ds) = (thousands_sep.map(str::to_owned), decimal_sep.map(str::to_owned));
     let parsed = py.detach(move || {
-        w2n_sentence::auto_parse(&text, &lang, &prefer, ts.as_deref(), ds.as_deref())
+        words2num2_core::with_numerical_symbols(convert_numerical_symbols, || {
+            w2n_sentence::auto_parse(&text, &lang, &prefer, ts.as_deref(), ds.as_deref())
+        })
     });
     match parsed {
         Ok(q) => quantity_to_py(py, q),
@@ -302,7 +313,8 @@ fn auto_parse(
 /// `_rust.auto_parse_sentence(text, lang, prefer, thousands_sep, decimal_sep,
 /// expand)`.
 #[pyfunction]
-#[pyo3(signature = (text, lang="en", prefer=None, thousands_sep=None, decimal_sep=None, expand=false))]
+#[pyo3(signature = (text, lang="en", prefer=None, thousands_sep=None, decimal_sep=None, expand=false, convert_numerical_symbols=false))]
+#[allow(clippy::too_many_arguments)]
 fn auto_parse_sentence(
     py: Python<'_>,
     text: &str,
@@ -311,12 +323,15 @@ fn auto_parse_sentence(
     thousands_sep: Option<&str>,
     decimal_sep: Option<&str>,
     expand: bool,
+    convert_numerical_symbols: bool,
 ) -> PyResult<String> {
     let prefer = prefer.unwrap_or_default();
     let (text, lang) = (text.to_owned(), lang.to_owned());
     let (ts, ds) = (thousands_sep.map(str::to_owned), decimal_sep.map(str::to_owned));
     py.detach(move || {
-        w2n_sentence::auto_parse_sentence(&text, &lang, &prefer, ts.as_deref(), ds.as_deref(), expand)
+        words2num2_core::with_numerical_symbols(convert_numerical_symbols, || {
+            w2n_sentence::auto_parse_sentence(&text, &lang, &prefer, ts.as_deref(), ds.as_deref(), expand)
+        })
     })
     .map_err(|e| w2n_error_to_pyerr(py, e))
 }

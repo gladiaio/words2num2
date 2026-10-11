@@ -1197,6 +1197,22 @@ fn article_homograph(lang: &str, name: &str) -> bool {
     )
 }
 
+/// After the unit name at word `v`: an optional connector, one to four number
+/// words, then a subunit name ("dollar | and twenty cents", "livre | vingt
+/// pence"). What makes "a dollar" or "une livre" an amount, not an article
+/// before a word.
+fn subunit_follows(lang: &str, conns: &[&str], keys: &[String], named: &[Option<Match>], v: usize) -> bool {
+    let mut x = v + 1;
+    if keys.get(x).is_some_and(|k| conns.contains(&k.as_str())) {
+        x += 1;
+    }
+    let first = x;
+    while x < keys.len() && x - first < 4 && crate::token_may_be_number(lang, &keys[x]) {
+        x += 1;
+    }
+    x > first && named.get(x).is_some_and(|m| m.as_ref().is_some_and(|m| m.word.sub))
+}
+
 /// The article-one of a language, which counts 1 in front of a currency name.
 fn article_one(lang: &str, word: &str) -> bool {
     matches!(
@@ -1224,7 +1240,10 @@ fn article_one(lang: &str, word: &str) -> bool {
 /// * the article-one in front of a currency name is the amount 1: "one yen",
 ///   "un rouble", "um iene" (#103) — the walker only counts it before its own
 ///   short list of units. Not before a name whose ordinary reading dominates
-///   ([`article_homograph`]): "un livre de poche", "one real problem".
+///   ([`article_homograph`]): "un livre de poche", "one real problem". Nor
+///   en "a"/"an", an article in running text — unless a subunit after the
+///   unit says it is money: "a dollar and twenty cents", "une livre et vingt
+///   pence" ([`subunit_follows`]).
 pub fn pieces_for_walk(sentence: &str, lang: &str) -> Vec<(String, bool)> {
     let base = lang.split(&['_', '-'][..]).next().unwrap_or(lang);
     if hand_lexicon(base).is_empty() {
@@ -1278,12 +1297,13 @@ pub fn pieces_for_walk(sentence: &str, lang: &str) -> Vec<(String, bool)> {
             let p = keys[w - 1].as_str();
             conns.contains(&p) || crate::token_may_be_number(base, p) || masculine_numeral(base, p).is_some()
         };
-        if !in_compound
-            && walker_article(base, &keys[w])
-            && word_key(&parts[words[w]].text).1.is_empty()
-            && w + 1 < words.len()
-            && starts_unit(w + 1)
-        {
+        // "a dollar and twenty cents", "une livre et vingt pence": the subunit
+        // makes it money, whatever the article or the unit's other reading.
+        let confirmed = |v: usize| is_unit(v) && subunit_follows(base, conns, &keys, &named, v);
+        let article_unit = w + 1 < words.len()
+            && ((walker_article(base, &keys[w]) && starts_unit(w + 1))
+                || (article_one(base, &keys[w]) && confirmed(w + 1)));
+        if !in_compound && word_key(&parts[words[w]].text).1.is_empty() && article_unit {
             renames.push((words[w], "1".to_string()));
         }
         // A feminine numeral whose number run ends on a currency unit. A lone
@@ -1554,6 +1574,17 @@ mod tests {
         assert_eq!(fold("una corona de flores", "es"), "una corona de flores");
         assert_eq!(fold("uma libra", "pt"), "uma libra");
         assert_eq!(fold("vinte e uma libras", "pt"), "21 £");
+        // An article and a homograph count when a subunit makes it money.
+        assert_eq!(fold("a dollar and twenty cents", "en"), "$1.20");
+        assert_eq!(fold("it costs an euro and fifty cents", "en"), "it costs €1.50");
+        assert_eq!(fold("a pound and fifty pence", "en"), "£1.50");
+        assert_eq!(fold("une livre et vingt pence", "fr"), "1,20 £");
+        assert_eq!(fold("une livre vingt pence", "fr"), "1,20 £");
+        // Without one, they stay words.
+        assert_eq!(fold("a dollar", "en"), "a dollar");
+        assert_eq!(fold("a dollar and two friends", "en"), "a dollar and 2 friends");
+        assert_eq!(fold("une livre et deux kilos", "fr"), "une livre et 2 kilos");
+        assert_eq!(fold("une livre de beurre et vingt centimes", "fr"), "une livre de beurre et 20 centimes");
         // Plain sentence mode is not touched.
         let plain = |t: &str, l: &str| crate::w2n_sentence::words2num_sentence(t, l, "cardinal", false).unwrap();
         assert_eq!(plain("un livre de poche", "fr"), "un livre de poche");

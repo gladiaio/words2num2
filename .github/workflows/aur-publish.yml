@@ -16,25 +16,40 @@ on:
         required: true
         type: string
 
+permissions:
+  contents: read
+
 jobs:
   aur:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
+      # Inputs and step outputs reach the shell through env, never by
+      # ${{ }} substitution into the script, and the version must be a
+      # plain X.Y.Z: it is spliced into URLs, sed and a commit (#854).
       - name: Resolve version
         id: ver
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
-          if [ -n "${{ inputs.version }}" ]; then
-            echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
+          if [ -n "$INPUT_VERSION" ]; then
+            VER="$INPUT_VERSION"
           else
-            TAG="${GITHUB_REF#refs/tags/v}"
-            echo "version=$TAG" >> $GITHUB_OUTPUT
+            VER="${GITHUB_REF#refs/tags/v}"
           fi
+          if [[ ! "$VER" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::version must be X.Y.Z"
+            exit 1
+          fi
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
 
       - name: Wait for PyPI sdist to be live
+        env:
+          VER: ${{ steps.ver.outputs.version }}
         run: |
-          VER="${{ steps.ver.outputs.version }}"
           # auto-release dispatches this alongside release.yml, which needs
           # the wheel builds and tests to finish first: wait up to an hour,
           # and fail (rather than hash an error page) if it never appears.
@@ -53,17 +68,20 @@ jobs:
 
       - name: Compute sha256 of PyPI sdist
         id: sha
+        env:
+          VER: ${{ steps.ver.outputs.version }}
         run: |
           set -euo pipefail
-          VER="${{ steps.ver.outputs.version }}"
           SHA=$(curl -sfL "https://files.pythonhosted.org/packages/source/w/words2num2/words2num2-${VER}.tar.gz" | sha256sum | awk '{print $1}')
-          echo "sha=$SHA" >> $GITHUB_OUTPUT
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
           echo "sha256: $SHA"
 
       - name: Update PKGBUILD + .SRCINFO
+        env:
+          VER: ${{ steps.ver.outputs.version }}
+          SHA: ${{ steps.sha.outputs.sha }}
         run: |
-          VER="${{ steps.ver.outputs.version }}"
-          SHA="${{ steps.sha.outputs.sha }}"
+          [[ "$SHA" =~ ^[0-9a-f]{64}$ ]] || { echo "::error::bad sha256"; exit 1; }
           cd packaging/aur/python-words2num2
           sed -i -E "s/^pkgver=.*/pkgver=${VER}/" PKGBUILD
           sed -i -E "s/^pkgrel=.*/pkgrel=1/" PKGBUILD
@@ -79,6 +97,7 @@ jobs:
       - name: Push to AUR
         env:
           AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          VER: ${{ steps.ver.outputs.version }}
         run: |
           if [ -z "$AUR_SSH_PRIVATE_KEY" ]; then
             echo "::warning::AUR_SSH_PRIVATE_KEY secret not set; skipping push."
@@ -94,7 +113,6 @@ jobs:
             User aur
           EOF
 
-          VER="${{ steps.ver.outputs.version }}"
           git clone ssh://aur@aur.archlinux.org/python-words2num2.git /tmp/aur || true
           cp packaging/aur/python-words2num2/PKGBUILD /tmp/aur/
           cp packaging/aur/python-words2num2/.SRCINFO /tmp/aur/
