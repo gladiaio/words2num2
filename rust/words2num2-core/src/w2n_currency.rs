@@ -1360,17 +1360,29 @@ fn pieces_for_walk_with(sentence: &str, lang: &str, subunits_only: bool) -> Vec<
                 // one integer but that is one amount: a decimal ("deux virgule
                 // cinq cents", "2,5 cents"), native digits, a long figure.
                 // Never across a connector: "cinq et deux cents" (#1017, #1022).
-                let numberish = |k: &String| {
-                    k.chars().any(char::is_numeric) || crate::token_may_be_number(lang, k) || matches!(k.as_str(), "virgule" | "point")
+                // The raw text too: a symbol ("Ⅻ") may fold in the key.
+                let numberish = |v: usize| {
+                    let k = &keys[v];
+                    parts[words[v]].text.chars().any(char::is_numeric)
+                        || crate::token_may_be_number(lang, k)
+                        || matches!(k.as_str(), "virgule" | "point")
                 };
+                // Also a count of 100 or more ("cent cinquante cents", "mille
+                // cents"), unless its last word is the 2-9 that multiplies
+                // "cents" ("mille deux cents personnes" is 1200), and a symbol
+                // the table does not read ("Ⅻ cents") (#1025).
+                let last_multiplies = matches!(crate::lookup_norm(lang, &keys[w - 1], false, &[]), Ok(Some(2..=9)));
+                let unread = v == -1 || !all_numbers || (v >= 100 && !last_multiplies);
                 let opaque = !subunits_only
-                    && v == -1
-                    && keys[w - back..w].iter().all(numberish)
+                    && unread
+                    && (w - back..w).all(numberish)
                     && !keys[w - back..w].iter().any(|k| conns.contains(&k.as_str()));
+                // "cent" in the count is the number, not the subunit name.
+                let unnamed_count = (w - back..w).all(|v| named[v].is_none() || crate::token_may_be_number(lang, &keys[v]));
                 unit_ends_at(w - back - 2)
                     && unpunct
-                    && unnamed
-                    && (opaque || (all_numbers && (figure.is_some() || (0..=99).contains(&v)) && (!hundreds || ends_clause)))
+                    && ((opaque && unnamed_count)
+                        || (unnamed && all_numbers && (figure.is_some() || (0..=99).contains(&v)) && (!hundreds || ends_clause)))
             });
             if numeric_sub && ok {
                 kept.push(words[w]);
