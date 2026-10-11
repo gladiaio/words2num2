@@ -298,7 +298,8 @@ fn range_article(st: Style, w: &str) -> bool {
     let words: &[&str] = match st {
         Style::EnUs | Style::EnGb => &["the"],
         Style::Fr => &["le"],
-        Style::De => &["zum", "dem"],
+        // "zum" (zu dem) links a range on its own: "vom … zum …" (#1079).
+        Style::De => &["dem"],
         Style::Es => &["el"],
         Style::Pt => &["o"],
         Style::It => &["fino", "il"],

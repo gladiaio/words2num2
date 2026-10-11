@@ -174,6 +174,7 @@ def test_date_and_currency_together():
             "van 12-03-2000 tot en met 13-03-2000",
         ),
         ("it", "il dodici tre duemilaventisei", "il 12/03/2026"),
+        ("de", "vom 12 3 2000 zum 13 3 2000", "vom 12.03.2000 zum 13.03.2000"),
         # A bare article is no range link (#1076).
         (
             "en",
