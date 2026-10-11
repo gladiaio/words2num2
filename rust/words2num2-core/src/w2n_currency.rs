@@ -1328,31 +1328,34 @@ fn pieces_for_walk_with(sentence: &str, lang: &str, subunits_only: bool) -> Vec<
             };
             let ends_clause = w + 1 == words.len()
                 || matches!(word_key(&parts[words[w]].text).1.as_str(), "." | "!" | "?" | ",");
+            // The words between the connector and the subunit are a plain
+            // number, unpunctuated, naming no currency, an amount of 1-99
+            // cents (#1002, #1003): not "vingt et un. trois cents", "cinq et
+            // deux cents", "soixante cents et deux cents" (#1017).
             let ok = conn.is_some_and(|back| {
-                let count = keys[w - back..w].join(" ");
-                let small = matches!(crate::lookup_norm(base, &count, false, &[]), Ok(Some(v)) if v < 10);
-                unit_ends_at(w - back - 2) && (!small || ends_clause)
+                let window = &words[w - back..w];
+                let unpunct = window.iter().all(|&j| word_key(&parts[j].text).1.is_empty())
+                    && word_key(&parts[words[w - back - 1]].text).1.is_empty();
+                let unnamed = (w - back..w).all(|v| named[v].is_none());
+                // The regional table: fr_CH "nonante-neuf", fr_BE "septante".
+                let all_numbers = keys[w - back..w].iter().all(|k| crate::token_may_be_number(lang, k) || conns.contains(&k.as_str()));
+                let v = match crate::lookup_norm(lang, &keys[w - back..w].join(" "), false, &[]) {
+                    Ok(Some(v)) => v,
+                    _ => 0,
+                };
+                // "<2-9> cents" is also a hundreds multiple; the plain walk
+                // also takes 11-19 for one ("douze cents personnes" is 1200
+                // people), so there it must end the clause. "dix cents" is no
+                // 1000 ("mille"), so 10 is no hundreds multiple.
+                let hundreds = if subunits_only { (2..=19).contains(&v) && v != 10 } else { v < 10 };
+                unit_ends_at(w - back - 2)
+                    && unpunct
+                    && unnamed
+                    && all_numbers
+                    && (1..=99).contains(&v)
+                    && (!hundreds || ends_clause)
             });
-            // The plain walk is stricter (#1002, #1003): the words between the
-            // connector and the subunit are a plain number, unpunctuated, an
-            // amount of 1-99 cents; 2-19 only where the subunit ends the clause,
-            // as "douze cents personnes" is 1200 people.
-            let plain_ok = !subunits_only
-                || conn.is_some_and(|back| {
-                    let window = &words[w - back..w];
-                    let unpunct = window.iter().all(|&j| word_key(&parts[j].text).1.is_empty())
-                        && word_key(&parts[words[w - back - 1]].text).1.is_empty();
-                    // The regional table: fr_CH "nonante-neuf", fr_BE "septante".
-                    let all_numbers = keys[w - back..w].iter().all(|k| crate::token_may_be_number(lang, k) || conns.contains(&k.as_str()));
-                    let v = match crate::lookup_norm(lang, &keys[w - back..w].join(" "), false, &[]) {
-                        Ok(Some(v)) => v,
-                        _ => 0,
-                    };
-                    // "dix cents" is no 1000 ("mille"), so 10 is no hundreds multiple.
-                    let hundreds = (2..=19).contains(&v) && v != 10;
-                    unpunct && all_numbers && (1..=99).contains(&v) && (!hundreds || ends_clause)
-                });
-            if numeric_sub && ok && plain_ok {
+            if numeric_sub && ok {
                 kept.push(words[w]);
             }
         }

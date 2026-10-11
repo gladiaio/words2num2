@@ -6911,6 +6911,17 @@ mod plain_walk_subunit_tests {
         // The connector after the unit, not the "et" inside the count (#1010).
         assert_eq!(s("douze dollars et vingt et un cents", "fr_BE", "cardinal"), "12 dollars et 21 cents");
         assert_eq!(s("douze dollars et nonante et un cents", "fr_CH", "cardinal"), "12 dollars et 91 cents");
+        // currency=True: the count is a plain number naming no currency,
+        // not across a sentence or two "et"-joined numbers (#1013, #1017).
+        let c = |t: &str, l: &str| super::words2num_sentence_opts(t, l, "cardinal", false, true).unwrap();
+        assert_eq!(c("douze dollars et vingt et un cents", "fr_BE"), "12,21 $");
+        assert_eq!(c("cinquante dollars et soixante cents et deux cents personnes", "fr_BE"), "50,60 $ et 200 personnes");
+        assert_eq!(c("dix euros et cinquante centimes et trois cents personnes", "fr_CH"), "10,50 € et 300 personnes");
+        assert_eq!(c("cent dollars et vingt cents et quatre cents invités", "fr_CA"), "100,20 $ et 400 invités");
+        assert_eq!(c("dix dollars et cinq et deux cents personnes", "fr"), "10 $ et 5 et 200 personnes");
+        assert_eq!(c("mille euros et cinq et trois cents personnes", "fr"), "1 000 € et 5 et 300 personnes");
+        assert_eq!(c("dix dollars et deux cents", "fr"), "10,02 $");
+        assert_eq!(c("dix dollars et quinze cents chacun", "fr"), "10,15 $ chacun");
     }
 }
 
