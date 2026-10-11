@@ -1424,10 +1424,11 @@ fn pieces_for_walk_with(sentence: &str, lang: &str, subunits_only: bool, counts:
                 // A one-word count is the amount: "et un cent", "et neuf
                 // cents" are 1 and 9 cents, not the article "un" or "neuf"
                 // (new), which a lone homograph would stay (#1009).
-                // Only a bare word: a mark or format character before it
-                // ("(vingt", "«un") would be lost by the rewrite.
-                let bare = parts[words[w - 1]].text.starts_with(char::is_alphanumeric)
-                    && !parts[words[w - 1]].text.chars().any(crate::w2n_sentence::is_format_char);
+                let text = &parts[words[w - 1]].text;
+                let core = &text[..text.len() - word_key(text).1.len()];
+                // Only a bare word: a mark or format character before or in
+                // it ("(vingt", "«un", "neuf…", "vingt(") would be lost (#1075).
+                let bare = !core.is_empty() && core.chars().all(|c| c.is_alphanumeric() || c == '-');
                 if counts && conn == Some(1) && bare {
                     if let Ok(Some(v)) = crate::lookup_norm(lang, &keys[w - 1], false, &[]) {
                         count_renames.push((words[w - 1], v.to_string()));
