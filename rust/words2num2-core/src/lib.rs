@@ -26,6 +26,7 @@ pub mod w2n_decimal;
 pub mod w2n_formats;
 pub mod w2n_forms;
 pub mod w2n_lang_en;
+pub mod w2n_phone;
 pub mod w2n_sentence;
 
 /// The public single-token entry point (`words2num2.words2num`). Its dispatch

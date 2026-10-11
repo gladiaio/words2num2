@@ -370,11 +370,11 @@ mod tests {
     use super::fold_dates;
 
     fn walk(text: &str, lang: &str) -> String {
-        crate::w2n_sentence::words2num_sentence_full(text, lang, "cardinal", false, false, true, None, "written").unwrap()
+        crate::w2n_sentence::words2num_sentence_full(text, lang, "cardinal", false, false, true, None, "written", false).unwrap()
     }
 
     fn walk_with(text: &str, lang: &str, region: Option<&str>, format: &str) -> String {
-        crate::w2n_sentence::words2num_sentence_full(text, lang, "cardinal", false, false, true, region, format).unwrap()
+        crate::w2n_sentence::words2num_sentence_full(text, lang, "cardinal", false, false, true, region, format, false).unwrap()
     }
 
     #[test]

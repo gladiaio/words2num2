@@ -3412,7 +3412,7 @@ pub fn words2num_sentence_opts(
     has_kwargs: bool,
     currency: bool,
 ) -> Result<String, W2nError> {
-    words2num_sentence_full(sentence, lang, to, has_kwargs, currency, false, None, "written")
+    words2num_sentence_full(sentence, lang, to, has_kwargs, currency, false, None, "written", false)
 }
 
 /// [`words2num_sentence_opts`] with the date pass: day + month (+ year) spans
@@ -3420,8 +3420,10 @@ pub fn words2num_sentence_opts(
 /// 2026", "am 12. März 2026"). See [`crate::w2n_date`].
 ///
 /// `region` ("US", "GB"...) overrides the language code's region for the
-/// date order; `date_format` is `"written"` (default) or `"iso"`
-/// ("2026-03-12" for every date with a year).
+/// date order and the phone numbers; `date_format` is `"written"` (default)
+/// or `"iso"` ("2026-03-12" for every date with a year). `phone` writes each
+/// phone number the way its country does ("06 12 34 56 78", "(555)
+/// 234-5678", "+33 6 12 34 56 78"; see [`crate::w2n_phone`]).
 #[allow(clippy::too_many_arguments)]
 pub fn words2num_sentence_full(
     sentence: &str,
@@ -3432,6 +3434,7 @@ pub fn words2num_sentence_full(
     date: bool,
     region: Option<&str>,
     date_format: &str,
+    phone: bool,
 ) -> Result<String, W2nError> {
     let iso = match date_format {
         "written" => false,
@@ -3443,7 +3446,10 @@ pub fn words2num_sentence_full(
             )))
         }
     };
-    let out = words2num_sentence_folded(sentence, lang, to, has_kwargs, currency)?;
+    let mut out = words2num_sentence_folded(sentence, lang, to, has_kwargs, currency)?;
+    if phone {
+        out = crate::w2n_phone::fold_phones(&out, lang, region);
+    }
     Ok(if date { crate::w2n_date::fold_dates_with(&out, lang, region, iso) } else { out })
 }
 
