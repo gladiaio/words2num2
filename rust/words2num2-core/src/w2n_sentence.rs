@@ -499,8 +499,12 @@ fn rstrip_punct(s: &str) -> &str {
     // Format characters ride with a mark before them ("twenty,\u{200b}"),
     // and only then: a bare ZWSP is a word-break hint, as inside unspaced
     // th/zh/ja numbers (#870, #998).
+    // Only after a mark that ends a run: a closing bracket or quote is split
+    // off by the tokenizer instead, and "twenty)\u{200b} one" must not read
+    // as "twenty" running on into 21 (#1004).
+    let terminal = |c: char| matches!(c, '.' | ',' | ';' | ':' | '!' | '?');
     let bare = s.trim_end_matches(is_format_char);
-    if bare.len() < s.len() && bare.ends_with(mark) {
+    if bare.len() < s.len() && bare.ends_with(terminal) {
         return bare.trim_end_matches(|c: char| mark(c) || is_format_char(c));
     }
     s.trim_end_matches(mark)
@@ -6803,6 +6807,9 @@ mod format_char_punct_tests {
         assert_eq!(s("สองร้อย\u{200B}ห้าสิบ", "th"), "250");
         assert_eq!(s("one\u{200B} twenty-one", "en"), "1 21");
         assert_eq!(s("twenty one", "en"), "21");
+        // A closing bracket or quote with a format character still ends the run.
+        assert_eq!(s("twenty)\u{200B} one", "en"), "twenty)\u{200B} one");
+        assert_eq!(s("I counted twenty.)\u{200B} One more", "en"), "I counted twenty.)\u{200B} One more");
     }
 }
 
