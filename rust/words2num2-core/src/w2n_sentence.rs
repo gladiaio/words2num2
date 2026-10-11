@@ -3474,7 +3474,7 @@ fn words2num_sentence_folded(
         sentence
     };
     if currency {
-        let resolved = resolve_lang(lang)?;
+        let resolved = resolved_lang.clone();
         // Walked piece by piece: fr "trente-quatre cents" after "dollars et"
         // is 34 US cents, not 3400 (see `pieces_for_walk`).
         let mut out = String::new();
@@ -3497,7 +3497,8 @@ fn words2num_sentence_folded(
     if pieces.len() == 1 {
         return words2num_sentence_walk(sentence, lang, to, has_kwargs);
     }
-    // A private-use character can't occur in a transcript.
+    // Private-use characters, unlikely in a transcript; a text that holds
+    // the mark anyway takes the unmasked walk below.
     const MARK: &str = "\u{F8FF}wnsub\u{F8FF}";
     let mut masked = String::new();
     let mut kept: Vec<String> = Vec::new();
