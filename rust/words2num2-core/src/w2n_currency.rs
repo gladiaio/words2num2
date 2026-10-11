@@ -888,11 +888,20 @@ fn parse_num(word: &str) -> Option<Num> {
 }
 
 /// Lower-cased, diacritics stripped, trailing punctuation kept apart.
-/// A mark a word may end in: anything that is no letter or digit (ASCII,
-/// fullwidth, CJK, script marks, quotes, brackets), kept apart and written
-/// back after a folded amount (#1067, #1071).
+/// The punctuation a word may end in, kept apart and written back after a
+/// folded amount: ASCII, closing quotes and brackets, fullwidth, CJK and
+/// script sentence marks (#1067, #1071). No dash, slash or symbol ("€",
+/// "%", "+", emoji): those stay on the word (#1072, #1074).
 fn trailing_mark(c: char) -> bool {
-    !c.is_alphanumeric() && !crate::w2n_sentence::is_format_char(c)
+    LEGACY_MARKS.contains(c) || "”’›」』】》）］｝〕〉，。．！？；：、…।॥،؛؟۔።፣፤".contains(c)
+}
+
+/// The marks the currency pass has always split off a word; the subunit
+/// count must carry none of them to be read as cents (#1073).
+const LEGACY_MARKS: &str = ",.;:!?)]\"'»";
+
+fn legacy_trailing(word: &str) -> bool {
+    word.ends_with(|c: char| LEGACY_MARKS.contains(c))
 }
 
 fn word_key(word: &str) -> (String, String) {
@@ -1115,7 +1124,7 @@ pub fn fold_currency(text: &str, lang: &str) -> String {
         // subunit follows: "zéro dollar, et cinquante-cinq centimes" (the
         // punctuation of a transcript), "twelve euros, thirty-four cents" (how
         // num2words writes English amounts, #47).
-        let comma = trailing == ",";
+        let comma = matches!(trailing.as_str(), "," | "，" | "、");
         if (trailing.is_empty() || comma) && frac.is_none() && cur.decimals > 0 {
             if let Some(k) = next_word(&parts, m.end) {
                 let (kkey, _) = word_key(&parts[k].text);
@@ -1362,8 +1371,8 @@ fn pieces_for_walk_with(sentence: &str, lang: &str, subunits_only: bool) -> Vec<
             // deux cents", "soixante cents et deux cents" (#1017).
             let ok = conn.is_some_and(|back| {
                 let window = &words[w - back..w];
-                let unpunct = window.iter().all(|&j| word_key(&parts[j].text).1.is_empty())
-                    && word_key(&parts[words[w - back - 1]].text).1.is_empty();
+                let unpunct = window.iter().all(|&j| !legacy_trailing(&parts[j].text))
+                    && !legacy_trailing(&parts[words[w - back - 1]].text);
                 let unnamed = (w - back..w).all(|v| named[v].is_none());
                 // A count in figures: "12 dollars et 50 cents". A figure is
                 // never multiplied by "cents", so it needs no clause end.
