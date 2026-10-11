@@ -1310,9 +1310,11 @@ fn pieces_for_walk_with(sentence: &str, lang: &str, subunits_only: bool) -> Vec<
     for w in 0..words.len() {
         // A subunit name after "<unit> <connector> <one to four words>".
         if named[w].as_ref().is_some_and(|m| m.word.sub) {
+            // The connector right after the unit name, not one inside the
+            // count: fr_BE "dollars et vingt et un cents" (#1010).
             let conn = (1..=4usize)
                 .take_while(|&back| back + 2 <= w)
-                .find(|&back| conns.contains(&keys[w - back - 1].as_str()));
+                .find(|&back| conns.contains(&keys[w - back - 1].as_str()) && unit_ends_at(w - back - 2));
             // Only a subunit name the walker would read as a number (fr
             // "cents") needs this. "<2-9> cents" is also a real hundreds
             // multiple ("mille euros et deux cents personnes" is 200 people),
@@ -1326,31 +1328,51 @@ fn pieces_for_walk_with(sentence: &str, lang: &str, subunits_only: bool) -> Vec<
             };
             let ends_clause = w + 1 == words.len()
                 || matches!(word_key(&parts[words[w]].text).1.as_str(), "." | "!" | "?" | ",");
+            // The words between the connector and the subunit are a plain
+            // number, unpunctuated, naming no currency, an amount of 1-99
+            // cents (#1002, #1003): not "vingt et un. trois cents", "cinq et
+            // deux cents", "soixante cents et deux cents" (#1017).
             let ok = conn.is_some_and(|back| {
-                let count = keys[w - back..w].join(" ");
-                let small = matches!(crate::lookup_norm(base, &count, false, &[]), Ok(Some(v)) if v < 10);
-                unit_ends_at(w - back - 2) && (!small || ends_clause)
-            });
-            // The plain walk is stricter (#1002, #1003): the words between the
-            // connector and the subunit are a plain number, unpunctuated, an
-            // amount of 1-99 cents; 2-19 only where the subunit ends the clause,
-            // as "douze cents personnes" is 1200 people.
-            let plain_ok = !subunits_only
-                || conn.is_some_and(|back| {
-                    let window = &words[w - back..w];
-                    let unpunct = window.iter().all(|&j| word_key(&parts[j].text).1.is_empty())
-                        && word_key(&parts[words[w - back - 1]].text).1.is_empty();
-                    // The regional table: fr_CH "nonante-neuf", fr_BE "septante".
-                    let all_numbers = keys[w - back..w].iter().all(|k| crate::token_may_be_number(lang, k) || conns.contains(&k.as_str()));
-                    let v = match crate::lookup_norm(lang, &keys[w - back..w].join(" "), false, &[]) {
-                        Ok(Some(v)) => v,
-                        _ => 0,
-                    };
-                    // "dix cents" is no 1000 ("mille"), so 10 is no hundreds multiple.
-                    let hundreds = (2..=19).contains(&v) && v != 10;
-                    unpunct && all_numbers && (1..=99).contains(&v) && (!hundreds || ends_clause)
+                let window = &words[w - back..w];
+                let unpunct = window.iter().all(|&j| word_key(&parts[j].text).1.is_empty())
+                    && word_key(&parts[words[w - back - 1]].text).1.is_empty();
+                let unnamed = (w - back..w).all(|v| named[v].is_none());
+                // A count in figures: "12 dollars et 50 cents". A figure is
+                // never multiplied by "cents", so it needs no clause end.
+                let figure = (back == 1 && !keys[w - 1].is_empty() && keys[w - 1].bytes().all(|b| b.is_ascii_digit()))
+                    .then(|| keys[w - 1].parse::<i64>().ok())
+                    .flatten();
+                // The regional table: fr_CH "nonante-neuf", fr_BE "septante".
+                let all_numbers = figure.is_some()
+                    || keys[w - back..w].iter().all(|k| crate::token_may_be_number(lang, k) || conns.contains(&k.as_str()));
+                // Zero too: "douze dollars et zéro cent" is the renderer's
+                // spelling of 12.00 (#1019).
+                let v = figure.unwrap_or_else(|| match crate::lookup_norm(lang, &keys[w - back..w].join(" "), false, &[]) {
+                    Ok(Some(v)) => v,
+                    _ => -1,
                 });
-            if numeric_sub && ok && plain_ok {
+                // "<2-9> cents" is also a hundreds multiple; the plain walk
+                // also takes 11-19 for one ("douze cents personnes" is 1200
+                // people), so there it must end the clause. "dix cents" is no
+                // 1000 ("mille"), so 10 is no hundreds multiple.
+                let hundreds = figure.is_none() && if subunits_only { (2..=19).contains(&v) && v != 10 } else { (1..10).contains(&v) };
+                // currency=True keeps, as written, a count it cannot read as
+                // one integer but that is one amount: a decimal ("deux virgule
+                // cinq cents", "2,5 cents"), native digits, a long figure.
+                // Never across a connector: "cinq et deux cents" (#1017, #1022).
+                let numberish = |k: &String| {
+                    k.chars().any(char::is_numeric) || crate::token_may_be_number(lang, k) || matches!(k.as_str(), "virgule" | "point")
+                };
+                let opaque = !subunits_only
+                    && v == -1
+                    && keys[w - back..w].iter().all(numberish)
+                    && !keys[w - back..w].iter().any(|k| conns.contains(&k.as_str()));
+                unit_ends_at(w - back - 2)
+                    && unpunct
+                    && unnamed
+                    && (opaque || (all_numbers && (figure.is_some() || (0..=99).contains(&v)) && (!hundreds || ends_clause)))
+            });
+            if numeric_sub && ok {
                 kept.push(words[w]);
             }
         }
