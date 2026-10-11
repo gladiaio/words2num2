@@ -95,6 +95,102 @@ def test_date_and_currency_together():
         ("en", "thirteen twelve twenty twenty six", "13 12 2026"),
         ("en", "two twenty nine twenty twenty five", "2 29 2025"),
         ("en", "three twelve", "3 12"),
+        # Three bare numbers inside a sentence, no date cue: quantities (#1031).
+        ("en", "we need three twelve two thousand people", "we need 3 12 2000 people"),
+        ("en", "we sold three twelve two thousand and six", "we sold 3 12 2006"),
+        ("es", "tres de doce dos mil personas", "3 de 12 2000 personas"),
+        (
+            "de",
+            "wir brauchen drei zwölf zweitausend leute",
+            "wir brauchen 3 12 2000 leute",
+        ),
+        (
+            "fr",
+            "il faut trois douze deux mille personnes",
+            "il faut 3 12 2000 personnes",
+        ),
+        ("en", "on three twelve twenty twenty six", "on 3/12/2026"),
+        (
+            "de",
+            "wir treffen uns zwölften dritten zweitausendsechsundzwanzig",
+            "wir treffen uns 12.03.2026",
+        ),
+        (
+            "en",
+            "from three twelve twenty twenty six to four one twenty twenty seven",
+            "from 3/12/2026 to 4/1/2027",
+        ),
+        (
+            "es",
+            "del doce tres dos mil veintiséis al quince tres dos mil veintiséis",
+            "del 12/03/2026 al 15/03/2026",
+        ),
+        ("en", "Date: three twelve twenty twenty six", "Date: 3/12/2026"),
+        (
+            "en",
+            "Meeting moved. three twelve twenty twenty six.",
+            "Meeting moved. 3/12/2026.",
+        ),
+        ("en", "three twelve twenty twenty six at three thirty", "3/12/2026 at 3:30"),
+        ("de", "bis zum 13. 3. 2026", "bis zum 13.03.2026"),
+        (
+            "nl",
+            "van 12 3 2026 tot en met 13 3 2026",
+            "van 12-03-2026 tot en met 13-03-2026",
+        ),
+        ("pt", "de 12 3 2026 a 13 3 2026", "de 12/03/2026 a 13/03/2026"),
+        # A round year with a word after it is a quantity, even after a cue.
+        ("en", "by three twelve two thousand people", "by 3 12 2000 people"),
+        ("de", "ab drei zwölf zweitausend Euro", "ab 3 12 2000 Euro"),
+        ("en", "on three twelve twenty twenty six I paid", "on 3/12/2026 I paid"),
+        # "Alone" needs a sentence end or a real clock time (#1057, #1058).
+        ("en", "three twelve two thousand at most", "3 12 2000 at most"),
+        ("en", "3 12 2000, 4 5 1999, 7 8 2001", "3 12 2000, 4 5 1999, 7 8 2001"),
+        ("fr", "Résultat : 3 12 2000.", "Résultat : 3 12 2000."),
+        ("en", "three twelve twenty twenty six at noon", "3/12/2026 at noon"),
+        # A date word always gives a date; pt "de" alone only opens a range.
+        (
+            "en",
+            "born on three twelve two thousand in Paris",
+            "born on 3/12/2000 in Paris",
+        ),
+        ("en", "DOB: 3 12 2000, male", "DOB: 3/12/2000, male"),
+        ("en", "from 3 12 2000 to 4 12 2000", "from 3/12/2000 to 4/12/2000"),
+        ("pt", "um grupo de três doze dois mil e dez", "um grupo de 3 12 2010"),
+        # A range word needs a second date after it (#1051 N1).
+        (
+            "pt",
+            "precisamos de três doze dois mil a cada mês",
+            "precisamos de 3 12 2000 a cada mês",
+        ),
+        (
+            "en",
+            "from three twelve two thousand to five thousand people",
+            "from 3 12 2000 to 5000 people",
+        ),
+        (
+            "nl",
+            "van 12 3 2000 tot en met 13 3 2000",
+            "van 12-03-2000 tot en met 13-03-2000",
+        ),
+        ("it", "il dodici tre duemilaventisei", "il 12/03/2026"),
+        # The second end in any date form (#1051 N4).
+        (
+            "en",
+            "from three twelve two thousand to four slash twelve slash two thousand",
+            "from 3/12/2000 to 4/12/2000",
+        ),
+        (
+            "en",
+            "from three twelve two thousand to december fourth two thousand",
+            "from 3/12/2000 to December 4, 2000",
+        ),
+        (
+            "es",
+            "del tres doce dos mil al cuatro de doce de dos mil",
+            "del 03/12/2000 al 04/12/2000",
+        ),
+        ("en", "the deadline is 3/12/2026 and", "the deadline is 3/12/2026 and"),
     ],
 )
 def test_numeric_date(lang, text, expected):

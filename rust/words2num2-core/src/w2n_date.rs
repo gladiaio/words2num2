@@ -24,7 +24,13 @@
 //! 2026", es "12 del 3 de 2026"), is written in figures, in the order and
 //! with the separator of the region: en (US) month first "3/12/2026"; en_GB,
 //! fr, es, it, pt day first "12/03/2026"; de "12.03.2026"; nl "12-03-2026".
-//! It needs a four-digit year and a real calendar date.
+//! It needs a four-digit year and a real calendar date. With no separator
+//! (no "slash", no de dots, no es/pt "de … de") it also needs a date cue
+//! right before it (en "on", fr "le", de "am", es "el" ...), a date it is the
+//! second end of ("from … to …"), or to stand alone (a whole sentence, or
+//! a clock time after it): "we need three twelve two thousand people" is
+//! three quantities (#1031). After a preposition cue ("by", "from", de "ab")
+//! a round year with a word after it stays a quantity.
 //!
 //! `region` ("US", "GB"...) overrides the region of the language code;
 //! `iso` writes every date that has a year as "2026-03-12".
@@ -235,10 +241,83 @@ fn open(trail: &str) -> bool {
     trail.is_empty()
 }
 
+/// A word that announces a date: "on", "born", "le", "am", "el" ...
+fn date_cue(st: Style, w: &str) -> bool {
+    let cues: &[&str] = match st {
+        Style::EnUs | Style::EnGb => &["on", "born", "dob", "dated", "date", "since", "until", "till", "from", "by", "before", "after", "between"],
+        Style::Fr => &["le", "du", "au", "depuis", "jusqu'au", "entre", "né", "née", "daté", "datée", "date"],
+        Style::De => &["am", "vom", "bis", "seit", "ab", "zwischen", "datum", "geboren", "zum", "dem"],
+        Style::Es => &["el", "del", "al", "desde", "hasta", "entre", "fecha", "nació", "nacido", "nacida"],
+        Style::Pt => &["em", "no", "dia", "de", "desde", "até", "entre", "data", "nasceu", "nascido", "nascida"],
+        Style::It => &["il", "dal", "al", "tra", "fra", "nato", "nata", "data", "fino"],
+        Style::Nl => &["op", "van", "tot", "sinds", "tussen", "datum", "geboren"],
+    };
+    cues.contains(&w)
+}
+
+/// How strongly a cue announces a date: 2 for a date word ("on", "born",
+/// fr "le", de "am"), 1 for a preposition that also takes quantities ("by",
+/// "from", de "ab"), 0 for a very common word (pt "de", de "dem" / "zum").
+fn cue_strength(st: Style, w: &str) -> u8 {
+    let (weak, very_weak): (&[&str], &[&str]) = match st {
+        Style::EnUs | Style::EnGb => (&["by", "from", "after", "before", "since", "until", "till"], &[]),
+        Style::Fr => (&["au", "du", "depuis", "jusqu'au"], &[]),
+        Style::De => (&["ab", "bis", "seit", "vom"], &["dem", "zum"]),
+        Style::Es => (&["hasta", "desde", "al", "del"], &[]),
+        Style::Pt => (&["em", "no", "desde", "até"], &["de"]),
+        Style::It => (&["al", "dal", "fino"], &[]),
+        Style::Nl => (&["op", "van", "tot", "sinds"], &[]),
+    };
+    if very_weak.contains(&w) {
+        0
+    } else if weak.contains(&w) {
+        1
+    } else {
+        2
+    }
+}
+
+/// A word that joins the two ends of a date range: "from … to …".
+fn range_word(st: Style, w: &str) -> bool {
+    let words: &[&str] = match st {
+        Style::EnUs | Style::EnGb => &["to", "and", "through", "till", "until"],
+        Style::Fr => &["au", "et", "jusqu'au"],
+        Style::De => &["bis", "und"],
+        Style::Es => &["al", "y", "hasta"],
+        Style::Pt => &["a", "e", "até"],
+        Style::It => &["al", "e"],
+        Style::Nl => &["tot", "en", "met"],
+    };
+    words.contains(&w)
+}
+
+/// A clock time spoken as a word ("at noon").
+fn time_word(w: &str) -> bool {
+    matches!(
+        w,
+        "noon" | "midnight" | "midi" | "minuit" | "mittag" | "mitternacht" | "mediodía" | "medianoche"
+            | "meio-dia" | "meia-noite" | "mezzogiorno" | "mezzanotte" | "middernacht"
+    )
+}
+
+/// A word that introduces a clock time after a date ("… at 3:30").
+fn clock_cue(st: Style, w: &str) -> bool {
+    let words: &[&str] = match st {
+        Style::EnUs | Style::EnGb => &["at"],
+        Style::Fr => &["à"],
+        Style::De => &["um"],
+        Style::Es => &["a"],
+        Style::Pt => &["às"],
+        Style::It => &["alle"],
+        Style::Nl => &["om"],
+    };
+    words.contains(&w)
+}
+
 /// A date spoken all in numbers at token `i`: N1 [sep] N2 [sep] YEAR, with
 /// sep "slash" or "/" (both or none), de "12. 3. 2026", es / pt "12 del 3
 /// de 2026". N1 is the month in en (US), the day elsewhere.
-fn numeric_at(st: Style, toks: &[&str], i: usize) -> Option<Span> {
+fn numeric_at(lang: &str, st: Style, toks: &[&str], i: usize, chained: bool) -> Option<Span> {
     let at = |k: usize| toks.get(k).copied().filter(|t| !t.is_empty());
     let low = |k: usize| at(k).map(|t| split_trail(t).0.to_lowercase());
     let (a, a_trail) = small(st, at(i)?)?;
@@ -259,21 +338,115 @@ fn numeric_at(st: Style, toks: &[&str], i: usize) -> Option<Span> {
         return None;
     }
     let s2 = sep(i + 2 + s1);
-    if (s1 == 0) != (s2 == 0) && !es {
-        return None; // "3 slash 12 2026": half a date
+    if (s1 == 0) != (s2 == 0) {
+        return None; // "3 slash 12 2026", "tres de doce 2000": half a date
     }
     let (y, trail) = at(i + 2 + s1 + s2).and_then(year)?;
+    // With no separator, three numbers are a date only after a date cue ("on
+    // 3 12 2026", "le 12 3 2026") or as the whole text: "we need 3 12 2000
+    // people" is three quantities (#1031).
+    let len = 3 + s1 + s2;
+    // de "12. 3. 2026": the ordinal dots are a separator too.
+    let de_dots = st == Style::De && [i, i + 1].iter().all(|&k| at(k).is_some_and(|t| t.ends_with('.')));
+    if s1 == 0 && !de_dots && !chained {
+        let word = |t: &str| t.chars().any(char::is_alphanumeric);
+        let sentence_end = |t: &str| t.trim_end_matches(['"', '\'', ')', '»', '”']).ends_with(['.', '!', '?']);
+        let back: Vec<&str> = toks[..i].iter().rev().copied().filter(|t| !t.is_empty()).collect();
+        // A cue, with ":" or "," after it (also spaced: "Date : …"), a bracket
+        // before it ("(on").
+        let cue_at = back.iter().position(|t| word(t));
+        let cue = cue_at
+            .filter(|&n| back[..n].iter().all(|t| matches!(*t, ":" | ",")))
+            .and_then(|n| {
+                let (prev, prev_trail) = split_trail(back[n]);
+                let prev = prev.trim_start_matches(|c: char| !c.is_alphanumeric()).to_lowercase();
+                let strength = cue_strength(st, &prev);
+                // A very common word counts behind a real cue ("ab dem", "bis
+                // zum"), taking its strength.
+                let strength = if strength == 0 {
+                    back.get(n + 1).map_or(0, |t| {
+                        let w = split_trail(t).0.to_lowercase();
+                        if date_cue(st, &w) { cue_strength(st, &w).max(1) } else { 0 }
+                    })
+                } else {
+                    strength
+                };
+                (matches!(prev_trail, "" | ":" | ",") && date_cue(st, &prev)).then_some(strength)
+            });
+        let cued = cue.is_some();
+        // Alone: at the start of the text or of a sentence (punctuation-only
+        // tokens such as a bullet may come between), and up to the end of it,
+        // or before a clock time ("at 3:30") (#1057, #1058).
+        let starts = match cue_at {
+            None => true,
+            Some(n) => sentence_end(back[n]) && back[..n].iter().all(|t| !word(t)),
+        };
+        let after: Vec<&str> = toks[(i + len).min(toks.len())..].iter().copied().filter(|t| !t.is_empty()).collect();
+        let time_next = |k: usize| {
+            after.get(k).is_some_and(|t| clock_cue(st, &split_trail(t).0.to_lowercase()))
+                && after.get(k + 1).is_some_and(|t| {
+                    t.starts_with(|c: char| c.is_ascii_digit()) || time_word(&split_trail(t).0.to_lowercase())
+                })
+        };
+        let ends = if trail.is_empty() {
+            match after.iter().position(|t| word(t)) {
+                None => after.iter().all(|t| t.chars().all(|c| matches!(c, '.' | '!' | '?' | '"' | ')' | '»' | '”'))),
+                Some(k) => after[..k].is_empty() && time_next(0),
+            }
+        } else {
+            sentence_end(&trail)
+        };
+        if !cued && !(starts && ends) {
+            return None;
+        }
+        // After a preposition cue, a round year with a word after it is a
+        // quantity: "by three twelve two thousand people" (#1055); after a
+        // very common word (pt "de", de "dem"), any year is. A range word
+        // after it ("from … to …") is no such word; a date word ("born on",
+        // "am") always gives a date.
+        // Range words, then a second date: three numbers or one in figures
+        // ("to 4 12 2000", "tot en met 13 3 2000", "to 4/12/2000") (#1051 N1).
+        let r = after
+            .iter()
+            .take(3)
+            .take_while(|t| {
+                let (w, trail) = split_trail(t);
+                trail.is_empty() && range_word(st, &w.to_lowercase())
+            })
+            .count();
+        // The second end in any date form the pass reads ("4/12/2000", "4
+        // slash 12 slash 2000", "december fourth 2000", es "cuatro de
+        // diciembre de …"): the same span lookup, as a chained span.
+        let second_at = (i + len..toks.len()).filter(|&k| !toks[k].is_empty()).nth(r);
+        let range_next = r > 0
+            && second_at.is_some_and(|k| {
+                let t = toks[k];
+                let core = split_trail(t).0;
+                let parts: Vec<&str> = core.split(['/', '.', '-']).collect();
+                let figure_date = parts.len() == 3
+                    && parts.iter().all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
+                    && parts.iter().any(|p| p.len() == 4);
+                figure_date || span_at(lang, st, toks, k, true).is_some()
+            });
+        let word_after = !ends && !range_next;
+        match cue {
+            Some(1) if y.ends_with("00") && word_after => return None,
+            // pt "de" alone only opens a range: "de 12 3 2026 a 13 3 2026".
+            Some(0) if !range_next => return None,
+            _ => {}
+        }
+    }
     let (d, m) = if st == Style::EnUs { (b, a) } else { (a, b) };
     let yn: u32 = y.parse().ok()?;
     if !(1..=12).contains(&m) || d == 0 || d > days_in(m, yn) {
         return None;
     }
-    Some(Span { day: Some(d), month: String::new(), month_no: Some(m), year: Some(y), trail, len: 3 + s1 + s2 })
+    Some(Span { day: Some(d), month: String::new(), month_no: Some(m), year: Some(y), trail, len })
 }
 
 /// The date span starting at token `i`, if any.
-fn span_at(lang: &str, st: Style, toks: &[&str], i: usize) -> Option<Span> {
-    if let Some(s) = numeric_at(st, toks, i) {
+fn span_at(lang: &str, st: Style, toks: &[&str], i: usize, chained: bool) -> Option<Span> {
+    if let Some(s) = numeric_at(lang, st, toks, i, chained) {
         return Some(s);
     }
     let at = |k: usize| toks.get(k).copied().filter(|t| !t.is_empty());
@@ -350,11 +523,24 @@ pub fn fold_dates_with(text: &str, lang: &str, region: Option<&str>, iso: bool) 
     let toks: Vec<&str> = text.split(' ').collect();
     let mut out: Vec<String> = Vec::with_capacity(toks.len());
     let mut i = 0;
+    // The token right after the last date folded: a range word there makes
+    // the next span the second end of a range ("from 3/12/2026 to 4 1 2027").
+    let mut after_date: Option<usize> = None;
     while i < toks.len() {
-        match span_at(lang, st, &toks, i) {
+        // Up to three range words ("to", nl "tot en met").
+        let chained = after_date.is_some_and(|k| {
+            k < i
+                && i - k <= 3
+                && toks[k..i].iter().all(|t| {
+                    let (w, trail) = split_trail(t);
+                    trail.is_empty() && range_word(st, &w.to_lowercase())
+                })
+        });
+        match span_at(lang, st, &toks, i, chained) {
             Some(s) => {
                 out.push(render(st, &s, iso));
                 i += s.len;
+                after_date = open(&s.trail).then_some(i);
             }
             None => {
                 out.push(toks[i].to_string());
