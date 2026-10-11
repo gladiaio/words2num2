@@ -221,6 +221,13 @@ def test_bare_format_char_after_number_is_kept_issue_1005(text, lang, expected):
     assert words2num2.words2num_sentence(text, lang=lang) == expected
 
 
-def test_currency_fold_keeps_format_char_issue_1021():
-    got = words2num2.words2num_sentence("x twenty\u200b dollars", currency=True)
-    assert got == "x $20\u200b"
+@pytest.mark.parametrize(
+    "text, kwargs, expected",
+    [
+        ("it costs twelve\u200b dollars", {"currency": True}, "it costs $12\u200b"),
+        ("x 20\u200b dollars", {"currency": True}, "x $20\u200b"),
+        ("on the fifth\u200b of march", {"date": True}, "on March 5"),
+    ],
+)
+def test_folds_still_read_a_format_char_value_issue_1021(text, kwargs, expected):
+    assert words2num2.words2num_sentence(text, **kwargs) == expected
