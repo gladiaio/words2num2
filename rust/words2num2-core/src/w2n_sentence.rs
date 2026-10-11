@@ -6913,6 +6913,19 @@ mod glued_sign_figure_tests {
         assert_eq!(w("minus5", "en", "cardinal"), None);
         assert_eq!(w("moins1.234", "fr", "cardinal"), None);
         same("moins, 1.234", "-1.234", "fr", "cardinal");
+        // A sign word with a mark, then a space, then the figure (#1032).
+        same("moins: 1.234", "-1.234", "fr", "cardinal");
+        same("minus: 1.234", "-1.234", "de", "cardinal");
+        same("\u{043C}\u{0438}\u{043D}\u{0443}\u{0441}: 1.234", "-1.234", "ru", "cardinal");
+        same("menos: 1.234", "-1.234", "es", "cardinal");
+        same("moins: 1 234", "-1 234", "fr", "cardinal");
+        same("minus: 1,234", "-1,234", "en", "cardinal");
+        same("minus. 1 234", "-1 234", "en", "cardinal");
+        same("minus: 1,5", "-1,5", "de", "cardinal");
+        same("moins; 2,5", "-2,5", "fr", "cardinal");
+        same("-. 5", "-5", "en", "cardinal");
+        assert_eq!(w("-:5", "en", "cardinal"), None);
+        assert_eq!(w("-(5", "en", "cardinal"), None);
         // #984: a point before the figure is the figure's, a bare dash glued to
         // a comma no sign word, and other punctuation no part of a sign.
         assert_eq!(w("-.5", "de", "cardinal").as_deref(), Some("Float(-0.5)"), "as on main");
