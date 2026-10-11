@@ -6,6 +6,10 @@ follows [Semantic Versioning](https://semver.org/) and uses
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-10-11
+
+**Breaking:** numerical symbols (`½` `①` `⑩` `²` `₃` `Ⅻ` `㊀` …) are no longer read as numbers or folded by default, in every entry point including `normalize()` (#958, #960, #971); pass `convert_numerical_symbols=True` to get the old behaviour. From this release on, a release is cut automatically every day at noon (Paris) when `main` has unreleased changes (`scheduled-release.yml`).
+
 The October 2026 audit (gladiaio/words2num2#40–#268) rendered every advertised language with
 num2words2-core in every mode, parsed it back, and filed each distinct defect. This release fixes
 169 of them; the rest are num2words2 renderer defects (fixed upstream, mitigated here where possible)
