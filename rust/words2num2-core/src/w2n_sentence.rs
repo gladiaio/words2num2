@@ -4188,6 +4188,8 @@ fn words2num_sentence_walk(
                 && resolved.starts_with("my")
                 && crate::normalize(rstrip_punct(piece)) == crate::normalize("နှစ်")
                 && prev_word(&parts, i).is_some_and(|p| starts_run(&converter, &p, decimal_heads))
+                // Not across a mark: "ငါး။ နှစ် ယောက်" opens a new sentence.
+                && parts[..i].iter().rev().find(|t| !py_str_isspace(t)).is_some_and(|raw| !has_trailing_mark(raw) && !tokens::is_punct_part(raw))
             {
                 // my "ငါး နှစ်": the year after a number, no 2 (#876).
                 None
@@ -6964,5 +6966,19 @@ mod my_year_counter_tests {
         assert_eq!(s("နှစ် ယောက်"), "2 ယောက်");
         assert!(crate::words2num("နှစ်ထောင့်နှစ်ဆယ့်လေး နှစ်", "my", "cardinal").is_err());
         assert!(crate::words2num("နှစ်ထောင့်နှစ်ဆယ့်လေး ငါး", "my", "cardinal").is_err());
+        // Not across a mark: a new sentence's "two people".
+        assert_eq!(s("ငါး။ နှစ် ယောက် လာတယ်"), "5။ 2 ယောက် လာတယ်");
+        assert_eq!(s("ငါး, နှစ် ယောက်"), "5, 2 ယောက်");
+    }
+
+    /// #876: spaced groups add only below the lowest place filled, in every
+    /// language with additive groups: ko and hu as en "2024 2".
+    #[test]
+    fn spaced_groups_below_lowest_place_issue_876() {
+        let s = |t: &str, l: &str| super::words2num_sentence(t, l, "cardinal", false).unwrap();
+        assert_eq!(s("칠만 이천팔백삼십팔 삼", "ko"), "72838 3");
+        assert_eq!(s("천삼십육 이", "ko"), "1036 2");
+        assert_eq!(s("ezerháromszáznegyvenhárom kettő", "hu"), "1343 2");
+        assert!(crate::words2num("ezerötszáz száz", "hu", "cardinal").is_err());
     }
 }

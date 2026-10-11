@@ -267,3 +267,20 @@ def test_elided_place_cardinal_keeps_renderer_spelling():
     assert words2num("หมื่นห้า", lang="th") == 15000
     assert words2num("ໝື່ນຫ້າ", lang="lo") == 15000
     assert words2num("สองพันห้า", lang="th") == 2005
+
+
+@pytest.mark.parametrize(
+    "lang,text,expected",
+    [
+        # my "နှစ်" after a number is the year counter, no 2 (#876).
+        ("my", "အသက် နှစ်ဆယ့်တစ် နှစ်", "အသက် 21 နှစ်"),
+        ("my", "ငါး နှစ် ကြာ", "5 နှစ် ကြာ"),
+        ("my", "တစ်သောင်း နှစ်", "10002"),
+        ("my", "ငါး။ နှစ် ယောက် လာတယ်", "5။ 2 ယောက် လာတယ်"),
+        # Spaced groups add only below the lowest place filled.
+        ("ko", "칠만 이천팔백삼십팔 삼", "72838 3"),
+        ("hu", "ezerháromszáznegyvenhárom kettő", "1343 2"),
+    ],
+)
+def test_year_counter_and_spaced_groups_issue_876(lang, text, expected):
+    assert words2num_sentence(text, lang=lang) == expected
