@@ -231,3 +231,11 @@ def test_bare_format_char_after_number_is_kept_issue_1005(text, lang, expected):
 )
 def test_folds_still_read_a_format_char_value_issue_1021(text, kwargs, expected):
     assert words2num2.words2num_sentence(text, **kwargs) == expected
+
+
+@pytest.mark.parametrize(
+    "text, lang, expected",
+    [("moins: 1.234", "fr", -1234), ("minus: 1,234", "en", -1234)],
+)
+def test_sign_word_mark_space_figure_issue_1032(text, lang, expected):
+    assert words2num(text, lang=lang) == expected

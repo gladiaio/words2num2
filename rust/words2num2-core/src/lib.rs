@@ -170,14 +170,16 @@ pub(crate) fn signed_figure_in(text: &str, lang: &str) -> Option<String> {
     // What touches the figure is a space, a comma, or the sign itself: "-.5"
     // is -0.5, its point no part of the sign, and "-(5" no number (#984).
     let signs = sign_prefixes(&resolved);
-    // The last mark before the figure other than a comma or a space: "-.,5"
-    // keeps its point out of the sign too.
+    // The last mark before the figure other than a comma: "-.,5" keeps its
+    // point out of the sign too.
     // A closing bracket ends a sign too (kn "(-) 1 234"), and a tsheg a
     // Tibetan word (bo "མེད་ཆ་ 1 234").
     let touches = |c: char| {
         c.is_alphabetic() || matches!(c, '+' | ')' | '\u{0F0B}') || w2n_formats::is_minus(c) || unicode_mark(c)
     };
-    if !t[..at].chars().rev().find(|c| !c.is_whitespace() && !comma(*c)).is_some_and(touches) {
+    // A space ends the sign, whatever mark the sign word carries ("moins:
+    // 1.234" is -1234, #1032).
+    if !t[..at].chars().rev().find(|c| !comma(*c)).is_some_and(|c| c.is_whitespace() || touches(c)) {
         return None;
     }
     let word = normalize(head);
