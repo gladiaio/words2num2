@@ -7408,6 +7408,8 @@ mod leading_mark_tests {
         assert_eq!(c("x ,five dollars y", "en"), "x ,$5 y");
         assert_eq!(c("il reste ,deux cents euros", "fr"), "il reste ,200 \u{20AC}");
         assert_eq!(c("x .5 dollars", "en"), "x .5 dollars");
+        assert_eq!(c("x \u{3002}five dollars y", "en"), "x \u{3002}$5 y");
+        assert_eq!(c("x \u{3001}deux cents euros y", "fr"), "x \u{3001}200 \u{20AC} y");
         // Figures and plain marks are untouched.
         assert_eq!(s("x .5 y", "en"), "x .5 y");
         assert_eq!(s("x 3.5 y", "en"), "x 3.5 y");

@@ -858,7 +858,7 @@ struct Num {
 }
 
 fn parse_num(word: &str) -> Option<Num> {
-    let body = word.trim_start_matches(|c: char| ",;:!?،؛؟।॥۔։።፣፤，！？；：".contains(c));
+    let body = word.trim_start_matches(|c: char| ",;:!?،؛؟।॥۔։።፣፤，！？；：。、".contains(c));
     let lead = word[..word.len() - body.len()].to_string();
     let word = body;
     let core = word.trim_end_matches(crate::w2n_sentence::is_format_char);
