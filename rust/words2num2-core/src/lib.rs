@@ -1862,7 +1862,13 @@ fn additive_groups(lang: &str, toks: &[&str], sc: &Scales) -> Option<i64> {
             return None;
         }
         total = total.checked_add(v)?;
-        cap = 10i64.pow(v.ilog10());
+        // The next group stays below the lowest place this one filled: my
+        // "တစ်သောင်း နှစ်" is 10002, but "2024 ငါး" is no 2029 (#876).
+        let mut place = 1i64;
+        while total % (place * 10) == 0 && place < i64::MAX / 10 {
+            place *= 10;
+        }
+        cap = place;
     }
     Some(total)
 }
