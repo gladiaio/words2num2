@@ -243,11 +243,11 @@ fn open(trail: &str) -> bool {
 /// A word that announces a date: "on", "born", "le", "am", "el" ...
 fn date_cue(st: Style, w: &str) -> bool {
     let cues: &[&str] = match st {
-        Style::EnUs | Style::EnGb => &["on", "born", "dated", "date", "since", "until", "till", "from", "by", "before", "after", "between"],
+        Style::EnUs | Style::EnGb => &["on", "born", "dob", "dated", "date", "since", "until", "till", "from", "by", "before", "after", "between"],
         Style::Fr => &["le", "du", "au", "depuis", "jusqu'au", "entre", "né", "née", "daté", "datée", "date"],
-        Style::De => &["am", "vom", "bis", "seit", "ab", "zwischen", "datum", "geboren"],
+        Style::De => &["am", "vom", "bis", "seit", "ab", "zwischen", "datum", "geboren", "zum", "dem"],
         Style::Es => &["el", "del", "al", "desde", "hasta", "entre", "fecha", "nació", "nacido", "nacida"],
-        Style::Pt => &["em", "no", "dia", "desde", "até", "entre", "data", "nasceu", "nascido", "nascida"],
+        Style::Pt => &["em", "no", "dia", "de", "desde", "até", "entre", "data", "nasceu", "nascido", "nascida"],
         Style::It => &["il", "dal", "al", "tra", "fra", "nato", "nata", "data", "fino"],
         Style::Nl => &["op", "van", "tot", "sinds", "tussen", "datum", "geboren"],
     };
@@ -263,7 +263,7 @@ fn range_word(st: Style, w: &str) -> bool {
         Style::Es => &["al", "y", "hasta"],
         Style::Pt => &["a", "e", "até"],
         Style::It => &["al", "e"],
-        Style::Nl => &["tot", "en"],
+        Style::Nl => &["tot", "en", "met"],
     };
     words.contains(&w)
 }
@@ -332,6 +332,11 @@ fn numeric_at(st: Style, toks: &[&str], i: usize, chained: bool) -> Option<Span>
         let ends = !open(&trail)
             || after.is_none_or(|t| !word(t) || clock_cue(st, &split_trail(t).0.to_lowercase()));
         if !cued && !(starts && ends) {
+            return None;
+        }
+        // A round year with a word after it is a quantity, even after a cue:
+        // "by three twelve two thousand people" (#1055).
+        if y.ends_with("00") && !ends {
             return None;
         }
     }
@@ -426,11 +431,14 @@ pub fn fold_dates_with(text: &str, lang: &str, region: Option<&str>, iso: bool) 
     // the next span the second end of a range ("from 3/12/2026 to 4 1 2027").
     let mut after_date: Option<usize> = None;
     while i < toks.len() {
+        // Up to three range words ("to", nl "tot en met").
         let chained = after_date.is_some_and(|k| {
-            k + 1 == i && {
-                let (w, trail) = split_trail(toks[k]);
-                trail.is_empty() && range_word(st, &w.to_lowercase())
-            }
+            k < i
+                && i - k <= 3
+                && toks[k..i].iter().all(|t| {
+                    let (w, trail) = split_trail(t);
+                    trail.is_empty() && range_word(st, &w.to_lowercase())
+                })
         });
         match span_at(lang, st, &toks, i, chained) {
             Some(s) => {

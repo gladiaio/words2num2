@@ -132,6 +132,17 @@ def test_date_and_currency_together():
             "Meeting moved. 3/12/2026.",
         ),
         ("en", "three twelve twenty twenty six at three thirty", "3/12/2026 at 3:30"),
+        ("de", "bis zum 13. 3. 2026", "bis zum 13.03.2026"),
+        (
+            "nl",
+            "van 12 3 2026 tot en met 13 3 2026",
+            "van 12-03-2026 tot en met 13-03-2026",
+        ),
+        ("pt", "de 12 3 2026 a 13 3 2026", "de 12/03/2026 a 13/03/2026"),
+        # A round year with a word after it is a quantity, even after a cue.
+        ("en", "by three twelve two thousand people", "by 3 12 2000 people"),
+        ("de", "ab drei zwölf zweitausend Euro", "ab 3 12 2000 Euro"),
+        ("en", "on three twelve twenty twenty six I paid", "on 3/12/2026 I paid"),
     ],
 )
 def test_numeric_date(lang, text, expected):
