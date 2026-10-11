@@ -21,6 +21,7 @@ use std::sync::{Arc, OnceLock, RwLock};
 mod ord_compose;
 pub mod ord_forms;
 pub mod w2n_currency;
+pub mod w2n_date;
 pub mod w2n_decimal;
 pub mod w2n_formats;
 pub mod w2n_forms;

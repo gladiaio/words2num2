@@ -12,6 +12,10 @@ num2words2-core in every mode, parsed it back, and filed each distinct defect. T
 or partly fixed, and stay open. On a 1.4M-value cardinal sweep, failures drop from 422774 to 20716
 with no value that parsed before parsing differently now.
 
+### Added
+
+- `words2num_sentence(..., date=True)`: a day + month (+ year) is written the way the language writes a date: "on march twelfth twenty twenty six" → "on March 12, 2026", `en_GB` → "12 March 2026", de "am zwölften märz" → "am 12. März", es "el primero de mayo" → "el 1 de mayo" (en, fr, de, es, pt, it, nl). Off by default.
+
 ### Changed (behaviour callers will notice)
 
 - `auto_parse_sentence` writes a decimal with the mark the same call reads as the decimal (the caller's `decimal_sep`, else "." when only `thousands_sep` is given, else the locale's), so its output reads back as the same number: de "3,125 kg" stays "3,125 kg" (was "3.125 kg", which de reads as 3125, so a second pass multiplied the value by 1000), and de "3.5 kg" becomes "3,5 kg". Locales with a decimal point are unchanged (#867).
