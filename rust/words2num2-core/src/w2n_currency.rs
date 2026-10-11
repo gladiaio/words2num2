@@ -1337,24 +1337,30 @@ fn pieces_for_walk_with(sentence: &str, lang: &str, subunits_only: bool) -> Vec<
                 let unpunct = window.iter().all(|&j| word_key(&parts[j].text).1.is_empty())
                     && word_key(&parts[words[w - back - 1]].text).1.is_empty();
                 let unnamed = (w - back..w).all(|v| named[v].is_none());
+                // A count in figures: "12 dollars et 50 cents". A figure is
+                // never multiplied by "cents", so it needs no clause end.
+                let figure = (back == 1 && !keys[w - 1].is_empty() && keys[w - 1].bytes().all(|b| b.is_ascii_digit()))
+                    .then(|| keys[w - 1].parse::<i64>().ok())
+                    .flatten();
                 // The regional table: fr_CH "nonante-neuf", fr_BE "septante".
-                let all_numbers = keys[w - back..w].iter().all(|k| crate::token_may_be_number(lang, k) || conns.contains(&k.as_str()));
+                let all_numbers = figure.is_some()
+                    || keys[w - back..w].iter().all(|k| crate::token_may_be_number(lang, k) || conns.contains(&k.as_str()));
                 // Zero too: "douze dollars et zéro cent" is the renderer's
                 // spelling of 12.00 (#1019).
-                let v = match crate::lookup_norm(lang, &keys[w - back..w].join(" "), false, &[]) {
+                let v = figure.unwrap_or_else(|| match crate::lookup_norm(lang, &keys[w - back..w].join(" "), false, &[]) {
                     Ok(Some(v)) => v,
                     _ => -1,
-                };
+                });
                 // "<2-9> cents" is also a hundreds multiple; the plain walk
                 // also takes 11-19 for one ("douze cents personnes" is 1200
                 // people), so there it must end the clause. "dix cents" is no
                 // 1000 ("mille"), so 10 is no hundreds multiple.
-                let hundreds = if subunits_only { (2..=19).contains(&v) && v != 10 } else { (1..10).contains(&v) };
+                let hundreds = figure.is_none() && if subunits_only { (2..=19).contains(&v) && v != 10 } else { (1..10).contains(&v) };
                 unit_ends_at(w - back - 2)
                     && unpunct
                     && unnamed
                     && all_numbers
-                    && (0..=99).contains(&v)
+                    && (figure.is_some() || (0..=99).contains(&v))
                     && (!hundreds || ends_clause)
             });
             if numeric_sub && ok {

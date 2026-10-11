@@ -6928,6 +6928,14 @@ mod plain_walk_subunit_tests {
         assert_eq!(c("douze dollars et zéro cent", "fr_CH"), "12,00 $");
         assert_eq!(c("cent dollars et zéro cent", "fr_BE"), "100,00 $");
         assert_eq!(c("douze dollars et zéro cents", "fr"), "12,00 $");
+        // A count in figures is a subunit amount, never hundreds.
+        assert_eq!(c("12 dollars et 50 cents", "fr"), "12,50 $");
+        assert_eq!(c("douze dollars et 99 cents", "fr"), "12,99 $");
+        assert_eq!(c("12 dollars et 2 cents personnes", "fr"), "12,02 $ personnes");
+        assert_eq!(c("12 dollars et 21 cents", "fr_BE"), "12,21 $");
+        assert_eq!(c("douze dollars et 150 cents", "fr"), "12 $ et 150 cents");
+        // The plain walk leaves a mid-clause "un cent" as written.
+        assert_eq!(s("douze dollars et un cent chacun", "fr", "cardinal"), "12 dollars et un cent chacun");
     }
 }
 
