@@ -316,3 +316,20 @@ def test_subunit_count_is_one_plain_number_issue_1017(text, lang, expected):
 )
 def test_one_word_subunit_count_issue_1009(text, currency, expected):
     assert words2num_sentence(text, lang="fr", currency=currency) == expected
+    "text, lang, expected",
+    [
+        ("x cinq euros， y", "fr", "x 5 €， y"),
+        ("x five dollars。", "en", "x $5。"),
+        ("twelve dollars and fifty cents！", "en", "$12.50！"),
+        ("x five dollars, y", "en", "x $5, y"),
+        ("x five dollars” y", "en", "x $5” y"),
+        ("x cinq euros． y", "fr", "x 5 €． y"),
+        # No symbol or dash split off; a fullwidth comma is a pause.
+        ("x cinq euros€ y", "fr", "x 5 euros€ y"),
+        ("five dollars 50% off", "en", "$5 50% off"),
+        ("x 12 dollars et 50’ cents", "fr", "x 12 $ et 50’ cents"),
+        ("x five dollars， fifty cents y", "en", "x $5.50 y"),
+    ],
+)
+def test_fold_keeps_cjk_trailing_mark_issue_1067(text, lang, expected):
+    assert words2num_sentence(text, lang=lang, currency=True) == expected
