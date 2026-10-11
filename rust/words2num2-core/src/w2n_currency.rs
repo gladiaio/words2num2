@@ -1372,10 +1372,12 @@ fn pieces_for_walk_with(sentence: &str, lang: &str, subunits_only: bool) -> Vec<
                 // one integer but that is one amount: a decimal ("deux virgule
                 // cinq cents", "2,5 cents"), native digits, a long figure.
                 // Never across a connector: "cinq et deux cents" (#1017, #1022).
-                // The raw text too: a symbol ("Ⅻ") may fold in the key.
+                // The raw text too, as the whole count: a symbol ("Ⅻ") may
+                // fold in the key.
                 let numberish = |v: usize| {
                     let k = &keys[v];
-                    parts[words[v]].text.chars().any(char::is_numeric)
+                    (back == 1 && parts[words[v]].text.chars().any(char::is_numeric))
+                        || k.chars().any(char::is_numeric)
                         || crate::token_may_be_number(lang, k)
                         || matches!(k.as_str(), "virgule" | "point")
                 };
@@ -1389,7 +1391,7 @@ fn pieces_for_walk_with(sentence: &str, lang: &str, subunits_only: bool) -> Vec<
                 // Only the singular: "mille cents" is no 1100.
                 let extends = keys[w] == "cent"
                     && crate::words2num(&format!("{} {}", keys[w - back..w].join(" "), keys[w]), lang, "cardinal").is_ok();
-                let unread = !extends && (v == -1 || !all_numbers || (v >= 100 && !last_multiplies));
+                let unread = !extends && (v == -1 || (!all_numbers && back == 1) || (v >= 100 && !last_multiplies));
                 let opaque = !subunits_only
                     && unread
                     && (w - back..w).all(numberish)

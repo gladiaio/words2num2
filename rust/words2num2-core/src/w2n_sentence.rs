@@ -7083,6 +7083,8 @@ mod plain_walk_subunit_tests {
         assert_eq!(c("vingt euros et mille cent un personnes", "fr"), "20 \u{20AC} et 1101 personnes");
         assert_eq!(c("vingt euros et dix mille cent personnes", "fr"), "20 \u{20AC} et 10100 personnes");
         assert_eq!(c("quinze euro et mille cent", "fr_CA"), "15 \u{20AC} et 1100");
+        // A symbol is opaque only as the whole count.
+        assert_eq!(c("douze dollars et \u{216B} deux cents personnes", "fr"), "12 $ et \u{216B} 200 personnes");
         // Words that are no count are no amount.
         assert_eq!(c("le billet coûte cinq dollars et la salle compte quatre cents places", "fr"), "le billet coûte 5 $ et la salle compte 400 places");
         // The plain walk leaves a mid-clause "un cent" as written.
