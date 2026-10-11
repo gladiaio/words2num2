@@ -7075,10 +7075,29 @@ mod plain_walk_subunit_tests {
         assert_eq!(c("douze dollars et 150 cents", "fr"), "12 $ et 150 cents");
         // A count that is one amount but no integer stays as written (#1022).
         assert_eq!(c("douze dollars et deux virgule cinq cents", "fr"), "12 $ et 2,5 cents");
+        assert_eq!(c("douze dollars et deux virgule cinq cent", "fr"), "12 $ et 2,5 cent");
+        assert_eq!(c("douze dollars et mille virgule cinq cent", "fr"), "12 $ et 1000,5 cent");
         assert_eq!(c("12 dollars et 2,5 cents", "fr"), "12 $ et 2,5 cents");
         assert_eq!(c("12 dollars et 2.5 cents", "fr_CA"), "12 $ et 2.5 cents");
         assert_eq!(c("12 dollars et \u{665}\u{660} cents", "fr"), "12 $ et \u{665}\u{660} cents");
         assert_eq!(c("12 dollars et 99999999999999999999 cents", "fr"), "12 $ et 99999999999999999999 cents");
+        // A count of 100 or more keeps "cents" as written; "mille deux
+        // cents personnes" is still 1200 (#1025).
+        assert_eq!(c("douze dollars et cent cinquante cents", "fr"), "12 $ et 150 cents");
+        assert_eq!(c("douze dollars et quatre cents cinquante cents", "fr"), "12 $ et 450 cents");
+        assert_eq!(c("douze dollars et mille cents", "fr"), "12 $ et 1000 cents");
+        assert_eq!(c("douze dollars et cent un cents", "fr_BE"), "12 $ et 101 cents");
+        assert_eq!(c("douze dollars et cent cinquante cents personnes", "fr"), "12 $ et 150 cents personnes");
+        assert_eq!(c("douze dollars et \u{216B} cents", "fr"), "12 $ et \u{216B} cents");
+        assert_eq!(c("dix dollars et mille deux cents personnes", "fr"), "10 $ et 1200 personnes");
+        // Unless "cent" extends the count into one number (#1029).
+        assert_eq!(c("dix euros et deux mille cent personnes", "fr_BE"), "10 \u{20AC} et 2100 personnes");
+        assert_eq!(c("vingt euros et mille cent cinquante personnes", "fr"), "20 \u{20AC} et 1150 personnes");
+        assert_eq!(c("vingt euros et mille cent un personnes", "fr"), "20 \u{20AC} et 1101 personnes");
+        assert_eq!(c("vingt euros et dix mille cent personnes", "fr"), "20 \u{20AC} et 10100 personnes");
+        assert_eq!(c("quinze euro et mille cent", "fr_CA"), "15 \u{20AC} et 1100");
+        // A symbol is opaque only as the whole count.
+        assert_eq!(c("douze dollars et \u{216B} deux cents personnes", "fr"), "12 $ et \u{216B} 200 personnes");
         // Words that are no count are no amount.
         assert_eq!(c("le billet coûte cinq dollars et la salle compte quatre cents places", "fr"), "le billet coûte 5 $ et la salle compte 400 places");
         // The plain walk leaves a mid-clause "un cent" as written.
