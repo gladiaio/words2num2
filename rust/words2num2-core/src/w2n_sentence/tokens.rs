@@ -47,7 +47,7 @@ fn is_legacy_trailing(c: char) -> bool {
 /// Punctuation that may close a word. A trailing run made only of the legacy
 /// class stays on the word; one holding anything else ("two)", "forty…",
 /// "vingt-deux»", "पाँच।") is cut off whole and kept verbatim.
-fn is_trailing_punct(c: char) -> bool {
+pub(super) fn is_trailing_punct(c: char) -> bool {
     is_legacy_trailing(c)
         || matches!(
             c,
