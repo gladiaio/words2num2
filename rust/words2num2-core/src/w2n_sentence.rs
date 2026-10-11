@@ -521,7 +521,7 @@ fn has_trailing_mark(s: &str) -> bool {
 /// An invisible format character (ZWSP, ZWNJ, ZWJ, word joiner, BOM, soft
 /// hyphen): it rides with the punctuation around it, so "twenty,\u{200b} one"
 /// still ends its number at the comma and keeps the ZWSP (#870).
-fn is_format_char(c: char) -> bool {
+pub(crate) fn is_format_char(c: char) -> bool {
     matches!(c, '\u{200B}'..='\u{200D}' | '\u{2060}' | '\u{FEFF}' | '\u{00AD}')
 }
 
@@ -6907,6 +6907,13 @@ mod format_char_punct_tests {
         assert_eq!(s("five\u{00AD} apples", "en"), "5\u{00AD} apples");
         assert_eq!(s("x f\u{FC}nf\u{200B} y", "de"), "x 5\u{200B} y");
         assert_eq!(s("x twenty\u{200B} one", "en"), "x 21");
+        // currency=True still folds the amount, the character after it (#1021).
+        let c = |t: &str, l: &str| super::words2num_sentence_opts(t, l, "cardinal", false, true).unwrap();
+        assert_eq!(c("x twenty\u{200B} dollars", "en"), "x $20\u{200B}");
+        assert_eq!(c("twenty\u{200B} dollars and five cents", "en"), "$20.05\u{200B}");
+        assert_eq!(c("ninety nine\u{200B} cents", "en"), "$0.99\u{200B}");
+        assert_eq!(c("cinq\u{200B} euros", "fr"), "5 \u{20AC}\u{200B}");
+        assert_eq!(c("zwanzig\u{2060} Euro", "de"), "20 \u{20AC}\u{2060}");
         assert_eq!(s("twenty one", "en"), "21");
         // A closing bracket, quote or script mark with a format character is
         // cut off whole, as without it (#1004).
