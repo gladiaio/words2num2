@@ -1,6 +1,11 @@
 name: CI
 
-on: [push, pull_request]
+on:
+  push:
+  pull_request:
+  # Dispatched by scheduled-release.yml on its release branch: a push or PR made with
+  # GITHUB_TOKEN triggers no workflow, but the required checks must still run on it.
+  workflow_dispatch:
 
 permissions:
   contents: read
