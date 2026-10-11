@@ -34,6 +34,9 @@ fn is_leading_punct(c: char) -> bool {
         c,
         '(' | '[' | '{' | '"' | '\'' | '`' | '«' | '‹' | '“' | '”' | '„' | '‟' | '‘' | '’' | '‚'
             | '‛' | '¿' | '¡' | '（' | '「' | '『' | '【' | '〈' | '《' | '〔' | '…' | '—' | '–'
+            // A clause mark glued to the next word (",deux cents", "।पाँच सौ")
+            // is cut off and kept, so the number opens after it (#1041, #1044).
+            | ',' | '.' | ';' | ':' | '!' | '?' | '।' | '॥' | '،' | '؛' | '؟' | '።' | '፣' | '፤'
     )
 }
 

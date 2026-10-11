@@ -7243,3 +7243,23 @@ mod script_mark_tests {
     }
 }
 
+#[cfg(test)]
+mod leading_mark_tests {
+    /// #1041, #1044: a clause mark glued before a number is cut off and kept;
+    /// the number reads whole after it.
+    #[test]
+    fn leading_clause_mark_issue_1041() {
+        let s = |t: &str, l: &str| super::words2num_sentence(t, l, "cardinal", false).unwrap();
+        assert_eq!(s(",deux cents", "fr"), ",200");
+        assert_eq!(s("il reste ,deux cents euros", "fr"), "il reste ,200 euros");
+        assert_eq!(s("j ai dit ...deux cents", "fr"), "j ai dit ...200");
+        assert_eq!(s("x ,one thousand two hundred y", "en"), "x ,1200 y");
+        assert_eq!(s(",two point five", "en"), ",2.5");
+        assert_eq!(s("x \u{0964}\u{092A}\u{093E}\u{0901}\u{091A} \u{0938}\u{094C} y", "hi"), "x \u{0964}500 y");
+        assert_eq!(s("twenty ,five", "en"), "20 ,5");
+        // Figures and plain marks are untouched.
+        assert_eq!(s("x .5 y", "en"), "x .5 y");
+        assert_eq!(s("x 3.5 y", "en"), "x 3.5 y");
+        assert_eq!(s("x ...and y", "en"), "x ...and y");
+    }
+}
