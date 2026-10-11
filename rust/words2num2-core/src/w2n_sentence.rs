@@ -2315,13 +2315,17 @@ fn table_digit_run(
 /// my: a figure before နှစ်: digits, with "," or "." between them, and no
 /// leading zero ("01" is a code): "2024", "2,024", "1.5", "၁.၅" (#1039).
 fn my_figure(p: &str) -> bool {
-    let chars: Vec<char> = p.chars().collect();
-    let digit = |c: &char| is_unicode_digit(*c);
-    !chars.is_empty()
-        && chars.first().is_some_and(digit)
-        && chars.last().is_some_and(digit)
-        && chars.iter().all(|c| digit(c) || matches!(c, ',' | '.'))
-        && !(chars.len() > 1 && digit_value(chars[0]) == Some(0) && digit(&chars[1]))
+    // Digits, then ","-groups of three, then one "." and its digits.
+    let (int, frac) = match p.split_once('.') {
+        Some((a, b)) => (a, Some(b)),
+        None => (p, None),
+    };
+    let digits = |t: &str| !t.is_empty() && t.chars().all(is_unicode_digit);
+    let mut groups = int.split(',');
+    let head = groups.next().unwrap_or("");
+    let grouped = groups.all(|g| g.chars().count() == 3 && digits(g));
+    let lead_zero = head.chars().count() > 1 && head.chars().next().and_then(digit_value) == Some(0);
+    digits(head) && grouped && !lead_zero && frac.is_none_or(digits)
 }
 
 /// The index of the word before part `i`, if any.
@@ -2349,7 +2353,7 @@ fn my_years_shape(converter: &Converter, resolved: &str, parts: &[String], k: us
         !has_trailing_mark(raw)
             && (digit(raw)
                 || (year(&parts[k])
-                    && (converter.to_cardinal(&clean).is_ok() || (!clean.is_empty() && clean.chars().all(is_unicode_digit)))))
+                    && (converter.to_cardinal(&clean).is_ok() || my_figure(&clean))))
     }) {
         return false;
     }
@@ -2357,7 +2361,8 @@ fn my_years_shape(converter: &Converter, resolved: &str, parts: &[String], k: us
     let (Some(w0), Some(w1), Some(w2)) = (w(0), w(1), w(2)) else { return false };
     // A leading zero is a code, no count of years (#1037).
     let zero = |t: &str| matches!(converter.to_cardinal(&rstrip_punct(t).to_lowercase()), Ok(W2nValue::Int(v)) if v == BigInt::from(0));
-    if !(digit(w0) && !zero(w0) && year(w1) && digit(w2)) {
+    // w0 is a digit word: no figure ("09"), no symbol ("²") (#1035 audit).
+    if w0.chars().any(char::is_numeric) || !(digit(w0) && !zero(w0) && year(w1) && digit(w2)) {
         return false;
     }
     // A counter, not a currency or a unit of measure: "သုံး နှစ် လေး ကျပ်" is
@@ -7288,6 +7293,10 @@ mod my_year_counter_tests {
         assert_eq!(s("\u{2460} နှစ်"), "\u{2460} 2");
         assert_eq!(s("ငါးရာ နှစ် နှစ် သုံး လ"), "500 223 လ");
         assert_eq!(s("ငါး နှစ် နှစ် နှစ်"), "5222");
+        assert_eq!(s("2,024 နှစ် နှစ် လေး ယောက်"), "2,024 224 ယောက်");
+        assert_eq!(s("09 နှစ် ငါး နှစ်"), "09 252");
+        assert_eq!(s("\u{B2} နှစ် ငါး နှစ်"), "\u{B2} 252");
+        assert_eq!(s("1,2,3 နှစ်"), "1,2,3 2");
         // A compatibility digit is no figure.
         assert_eq!(s("\u{B2} နှစ်"), "\u{B2} 2");
         // A digit after the point is no year (#1018).
