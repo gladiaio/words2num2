@@ -852,9 +852,15 @@ struct Num {
     frac: String,
     trailing: String,
     invisible: String,
+    /// A clause mark the walker kept before the figure (",5" of ",five",
+    /// #1047); never "." , which would be a decimal point.
+    lead: String,
 }
 
 fn parse_num(word: &str) -> Option<Num> {
+    let body = word.trim_start_matches(|c: char| ",;:!?،؛؟।॥۔։።፣፤，！？；：".contains(c));
+    let lead = word[..word.len() - body.len()].to_string();
+    let word = body;
     let core = word.trim_end_matches(crate::w2n_sentence::is_format_char);
     let invisible = word[core.len()..].to_string();
     let trimmed = core.trim_end_matches(|c: char| ",.;:!?)]\"'»".contains(c));
@@ -877,6 +883,7 @@ fn parse_num(word: &str) -> Option<Num> {
         frac: frac.to_string(),
         trailing,
         invisible,
+        lead,
     })
 }
 
@@ -1073,6 +1080,7 @@ pub fn fold_currency(text: &str, lang: &str) -> String {
                 ("0", digits)
             };
             let frac = format!("{:0>width$}", frac, width = d);
+            out.push_str(&num.lead);
             out.push_str(&render(base, cur, int, Some(&frac)));
             out.push_str(&num.invisible);
             out.push_str(&m.trailing);
@@ -1110,7 +1118,7 @@ pub fn fold_currency(text: &str, lang: &str) -> String {
                     sub_at = next_word(&parts, k);
                 }
                 let sub_num = sub_at.and_then(|s| parse_num(&parts[s].text).map(|n| (s, n)));
-                if let Some((s, sub_num)) = sub_num.filter(|(_, n)| n.frac.is_empty()) {
+                if let Some((s, sub_num)) = sub_num.filter(|(_, n)| n.frac.is_empty() && n.lead.is_empty()) {
                     let minor = minor_digits(&sub_num.int, cur);
                     let after = next_word(&parts, s);
                     // Explicit subunit word after it?
@@ -1147,6 +1155,7 @@ pub fn fold_currency(text: &str, lang: &str) -> String {
                 }
             }
         }
+        out.push_str(&num.lead);
         out.push_str(&render(base, cur, &num.int, frac.as_deref()));
         // Format characters ride after the amount they followed (#1021).
         out.push_str(&num.invisible);
