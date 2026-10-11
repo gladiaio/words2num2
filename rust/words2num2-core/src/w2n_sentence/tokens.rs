@@ -73,11 +73,13 @@ fn split_punct(tok: &str) -> Vec<&str> {
     let (lead, rest) = tok.split_at(lead_end);
     let mut trail_start = rest.len();
     // Format characters after a mark ride with it: "twenty)\u{200b}" is cut
-    // like "twenty)" (#1004). A run of them alone is no mark, and stays.
+    // like "twenty)" (#1004). The cut is at the first mark, so one before it
+    // stays on the word ("twenty\u{200b})" cuts ")", #1011), and a run of them
+    // alone is no mark at all.
     for (k, c) in rest.char_indices().rev() {
-        if is_trailing_punct(c) || is_format(c) {
+        if is_trailing_punct(c) {
             trail_start = k;
-        } else {
+        } else if !is_format(c) {
             break;
         }
     }

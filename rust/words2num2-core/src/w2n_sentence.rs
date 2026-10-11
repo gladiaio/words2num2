@@ -6847,6 +6847,9 @@ mod format_char_punct_tests {
         assert_eq!(s("twenty\u{201D}\u{200B} one", "en"), "20\u{201D}\u{200B} one");
         assert_eq!(s("\u{0639}\u{0634}\u{0631}\u{0648}\u{0646}\u{060C}\u{200B} \u{0648}\u{0627}\u{062D}\u{062F}", "ar"), "20\u{060C}\u{200B} 1");
         assert_eq!(s("x zwanzig tausend\u{3002}\u{200B} drei", "de"), "x 20000\u{3002}\u{200B} 3");
+        // A format character before the mark stays on the word (#1011).
+        assert_eq!(s("x twenty\u{200B}) one y", "en"), s("x twenty) one y", "en"));
+        assert_eq!(s("x zwanzig\u{200B}) drei y", "de"), s("x zwanzig) drei y", "de"));
     }
 }
 
