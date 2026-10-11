@@ -893,7 +893,7 @@ fn parse_num(word: &str) -> Option<Num> {
 /// script sentence marks (#1067, #1071). No dash, slash or symbol ("€",
 /// "%", "+", emoji): those stay on the word (#1072, #1074).
 fn trailing_mark(c: char) -> bool {
-    LEGACY_MARKS.contains(c) || "}”’›」』】》）］｝〕〉，。．！？；：、…‥‼⁇⁈⁉｡､।॥،؛؟۔።፣፤፧။၊។៕։՝".contains(c)
+    LEGACY_MARKS.contains(c) || "}”’“‘›」』】》）］｝〕〉｣〗〙〛＂＇，。．！？；：、…‥‼⁇⁈⁉｡､﹒﹐﹔﹖﹗․।॥،؛؟۔።፣፤፧။၊។៕։՝๚".contains(c)
 }
 
 /// The marks the currency pass has always split off a word; the subunit
@@ -1124,7 +1124,7 @@ pub fn fold_currency(text: &str, lang: &str) -> String {
         // subunit follows: "zéro dollar, et cinquante-cinq centimes" (the
         // punctuation of a transcript), "twelve euros, thirty-four cents" (how
         // num2words writes English amounts, #47).
-        let comma = matches!(trailing.as_str(), "," | "，" | "、");
+        let comma = matches!(trailing.as_str(), "," | "，" | "、" | "､" | "၊" | "՝" | "،" | "﹐");
         if (trailing.is_empty() || comma) && frac.is_none() && cur.decimals > 0 {
             if let Some(k) = next_word(&parts, m.end) {
                 let (kkey, _) = word_key(&parts[k].text);
