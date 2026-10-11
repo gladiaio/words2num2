@@ -6892,6 +6892,9 @@ mod plain_walk_subunit_tests {
         assert_eq!(s("vingt dollars et douze cents personnes", "fr", "cardinal"), "20 dollars et 1200 personnes");
         assert_eq!(s("dix dollars et cinq. Trois cents personnes", "fr", "cardinal"), "10 dollars et 5. 300 personnes");
         assert_eq!(s("douze dollars et douze cents", "fr", "cardinal"), "12 dollars et 12 cents");
+        // The connector after the unit, not the "et" inside the count (#1010).
+        assert_eq!(s("douze dollars et vingt et un cents", "fr_BE", "cardinal"), "12 dollars et 21 cents");
+        assert_eq!(s("douze dollars et nonante et un cents", "fr_CH", "cardinal"), "12 dollars et 91 cents");
     }
 }
 

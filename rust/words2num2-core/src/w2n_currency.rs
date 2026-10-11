@@ -1310,9 +1310,11 @@ fn pieces_for_walk_with(sentence: &str, lang: &str, subunits_only: bool) -> Vec<
     for w in 0..words.len() {
         // A subunit name after "<unit> <connector> <one to four words>".
         if named[w].as_ref().is_some_and(|m| m.word.sub) {
+            // The connector right after the unit name, not one inside the
+            // count: fr_BE "dollars et vingt et un cents" (#1010).
             let conn = (1..=4usize)
                 .take_while(|&back| back + 2 <= w)
-                .find(|&back| conns.contains(&keys[w - back - 1].as_str()));
+                .find(|&back| conns.contains(&keys[w - back - 1].as_str()) && unit_ends_at(w - back - 2));
             // Only a subunit name the walker would read as a number (fr
             // "cents") needs this. "<2-9> cents" is also a real hundreds
             // multiple ("mille euros et deux cents personnes" is 200 people),
