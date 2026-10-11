@@ -3692,7 +3692,10 @@ fn words2num_sentence_walk(
         // en "oh" / "o": the interjection, a number only next to another digit
         // word ("room oh seven"), which the digit run reads (#79).
         let head_is_oh = en_grammar && matches!(head.as_str(), "oh" | "o");
+        // Nor does a piece opening on a glued mark ("，五" of "二十，五"): the
+        // mark would be lost (#1028).
         let starts = starts_run(&converter, &head, decimal_heads)
+            && !piece.starts_with(tokens::is_trailing_punct)
             && !(head_is_oh && !(en_cardinal && en_digit_run(&parts, i).is_some()));
         // kn "ನೂರ", he "שני", mn "дөчин": a number only with what follows, so it
         // opens a run only in front of another number word, and alone stays a word.
@@ -3845,6 +3848,9 @@ fn words2num_sentence_walk(
             let clean = rstrip_punct(tok).to_lowercase();
             if clean.is_empty()
                 || opens_with_punct(tok)
+                // A piece the segmenter left opening on a glued mark ("，五" of
+                // "二十，五"): the run never crosses the mark (#1028).
+                || (j > i && tok.starts_with(tokens::is_trailing_punct))
                 || tokens::is_punct_part(&clean)
                 // The raw part too: "\u{200b})" cleans to a bare format
                 // character, still a mark part (#1006).
@@ -7169,17 +7175,23 @@ mod script_mark_tests {
         assert_eq!(s("\u{767E}\u{FF0C}\u{5341}\u{4E8C}", "ja"), "100\u{FF0C}12");
         assert_eq!(s("\u{5343}\u{FF1A}\u{5341}\u{4E8C}", "ja"), "1000\u{FF1A}12");
         assert_eq!(s("ร้อย\u{FF0C}สิบสอง", "th"), "100\u{FF0C}12");
-        // A lone numeral after a glued mark is its own number (#1028).
-        assert_eq!(s("二十，五", "zh"), "20，5");
-        assert_eq!(s("一千，五", "zh"), "1000，5");
-        assert_eq!(s("二千，五", "ja"), "2000，5");
-        assert_eq!(s("ยี่สิบ，ห้า", "th"), "20，5");
-        assert_eq!(s("x 二十,五 y", "zh"), "x 20,5 y");
-        // A word that opens with a numeral stays a word.
-        assert_eq!(s("二十，一样", "zh"), "20，一样");
+        // A run never crosses a glued mark into a lone numeral, nor opens on
+        // one: the mark stays, the numeral stays as written (#1028).
+        assert_eq!(s("二十，五", "zh"), "20，五");
+        assert_eq!(s("一千，五", "zh"), "1000，五");
+        assert_eq!(s("二千，五", "ja"), "2000，五");
+        assert_eq!(s("ยี่สิบ，ห้า", "th"), "20，ห้า");
+        assert_eq!(s("x 二十,五 y", "zh"), "x 20,五 y");
+        assert_eq!(s("二十，五，六", "zh"), "20，五，六");
+        assert_eq!(s("十二，五，三", "zh"), "12，五，三");
+        assert_eq!(s("x .cinco y", "es"), "x .cinco y");
+        // Unchanged: a multi-numeral run after the mark, a counted one.
+        assert_eq!(s("二十，十二", "zh"), "20，12");
+        assert_eq!(s("二十，五个", "zh"), "20，5个");
         assert_eq!(s("好，一样", "zh"), "好，一样");
-        assert_eq!(s("我们，一起去", "zh"), "我们，一起去");
+        assert_eq!(s("每星期一、三、五", "zh"), "每星期一、三、五");
         // Unchanged without the mark.
         assert_eq!(s("တစ်ရာ ငါး", "my"), "105");
     }
 }
+

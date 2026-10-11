@@ -47,7 +47,7 @@ fn is_legacy_trailing(c: char) -> bool {
 /// Punctuation that may close a word. A trailing run made only of the legacy
 /// class stays on the word; one holding anything else ("two)", "forty…",
 /// "vingt-deux»", "पाँच।") is cut off whole and kept verbatim.
-fn is_trailing_punct(c: char) -> bool {
+pub(super) fn is_trailing_punct(c: char) -> bool {
     is_legacy_trailing(c)
         || matches!(
             c,
@@ -281,16 +281,6 @@ const KO_COUNTERS: &[&str] = &[
 ];
 const KO_COUNTERS_AFTER_ONE_SYLLABLE: &[&str] = &["월", "년", "개", "층", "달러", "퍼센트", "유로"];
 
-/// Does `before` end in a numeral and a glued mark, and `after` hold nothing
-/// but marks? Then the lone numeral between them is a number of its own.
-fn between_numbers(before: &str, after: &str, numeral: impl Fn(char) -> bool) -> bool {
-    let mut rev = before.chars().rev();
-    let marked = rev.next().is_some_and(is_trailing_punct);
-    marked
-        && rev.find(|c| !is_trailing_punct(*c)).is_some_and(numeral)
-        && after.chars().all(|c| is_trailing_punct(c) || is_format(c))
-}
-
 /// Cut the numeral substrings out of a zh / ja / th word, or the glued Sino
 /// number off a ko word. `None` for other languages, or when nothing is cut.
 fn segment<'a>(
@@ -322,12 +312,8 @@ fn segment<'a>(
                 let after = &piece[b1..];
                 let counted = CJK_COUNTERS.iter().any(|c| after.starts_with(c));
                 let ordinal = piece[..b0].ends_with('第');
-                // A lone numeral between a numeral and its mark and the end of
-                // the word (or a mark) is its own number: "二十，五" is 20, then
-                // 5, never 25; "好，一样" stays a word (#1028).
-                let after_mark = between_numbers(&piece[..b0], after, is_cjk_numeral);
                 let ok = !cjk_idiom(seg, after)
-                    && (if k - start >= 2 { true } else { counted || ordinal || after_mark })
+                    && (if k - start >= 2 { true } else { counted || ordinal })
                     && parses(seg);
                 if ok {
                     cuts.push((b0, b1));
@@ -362,9 +348,7 @@ fn segment<'a>(
                 let ok = !whole
                     && !glued_before
                     && !glued_after
-                    && (morphemes >= 2
-                        || counted
-                        || between_numbers(&piece[..p], after, |c| TH_MORPHEMES.iter().any(|m| m.ends_with(c))))
+                    && (morphemes >= 2 || counted)
                     && parses(seg);
                 if ok {
                     cuts.push((p, q));
