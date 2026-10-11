@@ -15,6 +15,7 @@ with no value that parsed before parsing differently now.
 ### Added
 
 - `words2num_sentence(..., date=True)`: a day + month (+ year) is written the way the language writes a date: "on march twelfth twenty twenty six" → "on March 12, 2026", `en_GB` → "12 March 2026", de "am zwölften märz" → "am 12. März", es "el primero de mayo" → "el 1 de mayo" (en, fr, de, es, pt, it, nl). Off by default.
+- `date=True` also writes a date spoken all in numbers in figures, in the region's order ("three twelve twenty twenty six" → "3/12/2026" in en, "03/12/2026" in en_GB, "12.03.2026" in de); `region=` overrides the region of `lang`, and `date_format="iso"` writes every date with a year as "2026-03-12".
 
 ### Changed (behaviour callers will notice)
 

@@ -3388,12 +3388,17 @@ pub fn words2num_sentence_opts(
     has_kwargs: bool,
     currency: bool,
 ) -> Result<String, W2nError> {
-    words2num_sentence_full(sentence, lang, to, has_kwargs, currency, false)
+    words2num_sentence_full(sentence, lang, to, has_kwargs, currency, false, None, "written")
 }
 
 /// [`words2num_sentence_opts`] with the date pass: day + month (+ year) spans
 /// written the way the language writes a date ("March 12, 2026", "12 March
 /// 2026", "am 12. März 2026"). See [`crate::w2n_date`].
+///
+/// `region` ("US", "GB"...) overrides the language code's region for the
+/// date order; `date_format` is `"written"` (default) or `"iso"`
+/// ("2026-03-12" for every date with a year).
+#[allow(clippy::too_many_arguments)]
 pub fn words2num_sentence_full(
     sentence: &str,
     lang: &str,
@@ -3401,9 +3406,21 @@ pub fn words2num_sentence_full(
     has_kwargs: bool,
     currency: bool,
     date: bool,
+    region: Option<&str>,
+    date_format: &str,
 ) -> Result<String, W2nError> {
+    let iso = match date_format {
+        "written" => false,
+        "iso" => true,
+        other => {
+            return Err(W2nError::NotImplemented(format!(
+                "date_format must be 'written' or 'iso', not {}",
+                py_repr_str(other)
+            )))
+        }
+    };
     let out = words2num_sentence_folded(sentence, lang, to, has_kwargs, currency)?;
-    Ok(if date { crate::w2n_date::fold_dates(&out, lang) } else { out })
+    Ok(if date { crate::w2n_date::fold_dates_with(&out, lang, region, iso) } else { out })
 }
 
 fn words2num_sentence_folded(

@@ -78,3 +78,55 @@ def test_date_and_currency_together():
         "on march twelfth I paid ten dollars and fifty cents", currency=True, date=True
     )
     assert out == "on March 12 I paid $10.50"
+
+
+@pytest.mark.parametrize(
+    "lang,text,expected",
+    [
+        # All in numbers: the region's order and separator.
+        ("en", "born on three twelve twenty twenty six", "born on 3/12/2026"),
+        ("en_GB", "three twelve twenty twenty six", "03/12/2026"),
+        ("en", "oh three slash twelve slash twenty twenty six.", "3/12/2026."),
+        ("fr", "né le douze trois deux mille vingt-six", "né le 12/03/2026"),
+        ("de", "am zwölften dritten zweitausendsechsundzwanzig", "am 12.03.2026"),
+        ("es", "el doce del tres de dos mil veintiséis", "el 12/03/2026"),
+        ("en", "two twenty nine twenty twenty four", "2/29/2024"),
+        # Not a calendar date, no year: left as it is.
+        ("en", "thirteen twelve twenty twenty six", "13 12 2026"),
+        ("en", "two twenty nine twenty twenty five", "2 29 2025"),
+        ("en", "three twelve", "3 12"),
+    ],
+)
+def test_numeric_date(lang, text, expected):
+    assert dates(text, lang) == expected
+
+
+def test_region_overrides_the_language_code():
+    text = "three twelve twenty twenty six"
+    assert words2num_sentence(text, date=True, region="GB") == "03/12/2026"
+    assert (
+        words2num_sentence("on march twelfth", date=True, region="AU") == "on 12 March"
+    )
+    assert (
+        words2num_sentence("on march twelfth", lang="en_GB", date=True, region="US")
+        == "on March 12"
+    )
+
+
+@pytest.mark.parametrize(
+    "lang,text,expected",
+    [
+        ("en", "on march twelfth twenty twenty six", "on 2026-03-12"),
+        ("en", "three twelve twenty twenty six", "2026-03-12"),
+        ("fr", "le premier avril deux mille vingt-six", "le 2026-04-01"),
+        ("es", "el doce de setiembre de dos mil veintiséis", "el 2026-09-12"),
+        ("en", "the first of march", "March 1"),  # no year: written
+    ],
+)
+def test_iso(lang, text, expected):
+    assert words2num_sentence(text, lang=lang, date=True, date_format="iso") == expected
+
+
+def test_unknown_date_format():
+    with pytest.raises(NotImplementedError):
+        words2num_sentence("march twelfth", date=True, date_format="roman")
