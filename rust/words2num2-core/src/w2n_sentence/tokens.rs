@@ -34,9 +34,18 @@ fn is_leading_punct(c: char) -> bool {
         c,
         '(' | '[' | '{' | '"' | '\'' | '`' | '«' | '‹' | '“' | '”' | '„' | '‟' | '‘' | '’' | '‚'
             | '‛' | '¿' | '¡' | '（' | '「' | '『' | '【' | '〈' | '《' | '〔' | '…' | '—' | '–'
-            // A clause mark glued to the next word (",deux cents", "।पाँच सौ")
-            // is cut off and kept, so the number opens after it (#1041, #1044).
-            | ',' | '.' | ';' | ':' | '!' | '?' | '।' | '॥' | '،' | '؛' | '؟' | '።' | '፣' | '፤'
+    )
+}
+
+/// A clause mark glued to the next word (",deux cents", "।पाँच सौ"): cut off
+/// and kept in a spaced language, so the number opens after it (#1041,
+/// #1044, #1049). Not in zh / ja / th, where a lone numeral after a mark
+/// stays as written (#1028, #1048).
+fn is_leading_clause_mark(c: char) -> bool {
+    matches!(
+        c,
+        ',' | '.' | ';' | ':' | '!' | '?' | '।' | '॥' | '،' | '؛' | '؟' | '۔' | '։' | '።' | '፣' | '፤'
+            | '，' | '．' | '！' | '？' | '；' | '：'
     )
 }
 
@@ -66,9 +75,13 @@ pub(super) fn is_trailing_punct(c: char) -> bool {
 /// `«vingt-deux»` -> `«`, `vingt-deux`, `»`. A token made only of
 /// punctuation stays whole.
 fn split_punct(tok: &str) -> Vec<&str> {
+    split_punct_with(tok, false)
+}
+
+fn split_punct_with(tok: &str, clause_lead: bool) -> Vec<&str> {
     let lead_end = tok
         .char_indices()
-        .find(|&(_, c)| !is_leading_punct(c))
+        .find(|&(_, c)| !(is_leading_punct(c) || (clause_lead && is_leading_clause_mark(c))))
         .map_or(tok.len(), |(k, _)| k);
     if lead_end == tok.len() {
         return vec![tok];
@@ -118,7 +131,7 @@ pub(crate) fn has_interior_punct(part: &str) -> bool {
 pub(super) fn is_punct_part(part: &str) -> bool {
     !part.is_empty()
         && part.chars().any(|c| !is_format(c))
-        && part.chars().all(|c| is_leading_punct(c) || is_trailing_punct(c) || is_format(c))
+        && part.chars().all(|c| is_leading_punct(c) || is_trailing_punct(c) || is_leading_clause_mark(c) || is_format(c))
 }
 
 /// An invisible format character (ZWSP, ZWNJ, ZWJ, word joiner, BOM, soft
@@ -145,7 +158,8 @@ pub(super) fn split_parts(
             glue.push(Glue::Free);
             continue;
         }
-        for piece in split_punct(&tok) {
+        let clause_lead = !matches!(base(resolved), "zh" | "cn" | "ja" | "jp" | "th");
+        for piece in split_punct_with(&tok, clause_lead) {
             if is_punct_part(piece) {
                 parts.push(piece.to_string());
                 glue.push(Glue::Free);
