@@ -499,12 +499,8 @@ fn rstrip_punct(s: &str) -> &str {
     // Format characters ride with a mark before them ("twenty,\u{200b}"),
     // and only then: a bare ZWSP is a word-break hint, as inside unspaced
     // th/zh/ja numbers (#870, #998).
-    // Only after a mark that ends a run: a closing bracket or quote is split
-    // off by the tokenizer instead, and "twenty)\u{200b} one" must not read
-    // as "twenty" running on into 21 (#1004).
-    let terminal = |c: char| matches!(c, '.' | ',' | ';' | ':' | '!' | '?');
     let bare = s.trim_end_matches(is_format_char);
-    if bare.len() < s.len() && bare.ends_with(terminal) {
+    if bare.len() < s.len() && bare.ends_with(mark) {
         return bare.trim_end_matches(|c: char| mark(c) || is_format_char(c));
     }
     s.trim_end_matches(mark)
@@ -6807,9 +6803,14 @@ mod format_char_punct_tests {
         assert_eq!(s("สองร้อย\u{200B}ห้าสิบ", "th"), "250");
         assert_eq!(s("one\u{200B} twenty-one", "en"), "1 21");
         assert_eq!(s("twenty one", "en"), "21");
-        // A closing bracket or quote with a format character still ends the run.
-        assert_eq!(s("twenty)\u{200B} one", "en"), "twenty)\u{200B} one");
-        assert_eq!(s("I counted twenty.)\u{200B} One more", "en"), "I counted twenty.)\u{200B} One more");
+        // A closing bracket, quote or script mark with a format character is
+        // cut off whole, as without it (#1004).
+        assert_eq!(s("twenty)\u{200B} one", "en"), "20)\u{200B} one");
+        assert_eq!(s("I counted twenty.)\u{200B} One more", "en"), "I counted 20.)\u{200B} One more");
+        assert_eq!(s("one hundred)\u{200B}", "en"), "100)\u{200B}");
+        assert_eq!(s("twenty\u{201D}\u{200B} one", "en"), "20\u{201D}\u{200B} one");
+        assert_eq!(s("\u{0639}\u{0634}\u{0631}\u{0648}\u{0646}\u{060C}\u{200B} \u{0648}\u{0627}\u{062D}\u{062F}", "ar"), "20\u{060C}\u{200B} 1");
+        assert_eq!(s("x zwanzig tausend\u{3002}\u{200B} drei", "de"), "x 20000\u{3002}\u{200B} 3");
     }
 }
 
