@@ -3747,10 +3747,15 @@ fn words2num_sentence_walk(
                     .find(|p| !py_str_isspace(p))
                     .map(|p| crate::normalize(&rstrip_punct(p).to_lowercase()))
                     .unwrap_or_default();
-                let prev_unit = matches!(converter.to_cardinal(&prev), Ok(W2nValue::Int(v)) if v >= BigInt::from(1) && v <= BigInt::from(9));
                 let prev_trailing = crate::w2n_forms::morpheme_follows_unit(key, &prev) == Some(true);
                 let leads = crate::w2n_forms::morpheme_follows_unit(key, &crate::normalize(&clean)) == Some(false);
-                if (leads && prev_unit) || (prev_trailing && unit_of_next_morpheme(key, &parts, j, &clean)) {
+                let next_glues = !leads && unit_of_next_morpheme(key, &parts, j, &clean);
+                // The parse only when a morpheme is in play (cheap checks first).
+                let prev_unit = (leads || next_glues)
+                    && matches!(converter.to_cardinal(&prev), Ok(W2nValue::Int(v)) if v >= BigInt::from(1) && v <= BigInt::from(9));
+                // A unit then "unit + trailing morpheme" is two numbers too: fi
+                // "kolme kymmentä viisi | kolme kymmentä viisi" (#999).
+                if (leads && prev_unit) || ((prev_trailing || prev_unit) && next_glues) {
                     break;
                 }
             }
@@ -6712,13 +6717,10 @@ mod glued_morpheme_tests {
         assert_eq!(s("pět desát šest desát", "cs"), "5 desát 6 desát");
         assert_eq!(s("sata kymmentä", "fi"), "100 kymmentä");
         assert_eq!(s("zece zeci de ani", "ro"), "10 zeci de ani");
-        // #990: a new tens group ends the run, so long texts stay linear.
+        // #990: a new tens group ends the run.
         assert_eq!(s("veinti uno veinti dos veinti tres", "es"), "21 22 23");
         assert_eq!(s("kolme kymmentä kolme kymmentä", "fi"), "30 30");
-        let long = ["veinti tres"; 800].join(" ");
-        let start = std::time::Instant::now();
-        let _ = s(&long, "es");
-        assert!(start.elapsed().as_secs_f64() < 2.0, "es 1600 tokens took {:?}", start.elapsed());
+        assert_eq!(s("kolme kymmentä viisi kolme kymmentä viisi", "fi"), "35 35");
     }
 }
 
@@ -6816,5 +6818,33 @@ mod auto_sentence_mark_tests {
         let ts = |t: &str| super::auto_parse_sentence(t, "de", &p, Some(","), None, false).unwrap();
         assert_eq!(ts("3.125 kg"), "3.125 kg");
         assert_eq!(ts(&ts("3.125 kg")), "3.125 kg");
+    }
+}
+
+#[cfg(test)]
+mod morpheme_perf_tests {
+    /// #990, #994: spaced morphemes cost about what the glued words cost.
+    /// A ratio against the glued text, not wall-clock, so a slow runner does
+    /// not matter; before the fix the spaced text took ~8-10x.
+    #[test]
+    fn spaced_morphemes_cost_like_glued_issue_990() {
+        let time = |t: &str, l: &str| {
+            let mut best = f64::MAX;
+            for _ in 0..3 {
+                let start = std::time::Instant::now();
+                let _ = super::words2num_sentence(t, l, "cardinal", false);
+                best = best.min(start.elapsed().as_secs_f64());
+            }
+            best
+        };
+        for (spaced, glued, l) in [
+            ("veinti tres", "veintitrés", "es"),
+            ("kolme kymmentä viisi", "kolmekymmentäviisi", "fi"),
+            ("kaks kümmend kolm", "kakskümmend kolm", "et"),
+        ] {
+            let a = time(&[spaced; 600].join(" "), l);
+            let b = time(&[glued; 600].join(" "), l);
+            assert!(a / b.max(1e-3) < 4.0, "{l}: spaced {a:.3}s vs glued {b:.3}s");
+        }
     }
 }
