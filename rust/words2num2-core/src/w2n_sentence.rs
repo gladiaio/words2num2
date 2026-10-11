@@ -3606,6 +3606,29 @@ fn words2num_sentence_walk(
             if holds_digit(&clean) {
                 break;
             }
+            // A morpheme that leads its unit (es "veinti", it "trent") opens a
+            // new number once this run has one: "veinti tres veinti tres" is 23
+            // 23, so the run stops rather than re-parse ever longer spans (#990).
+            // Likewise a unit the next suffix morpheme glues onto (fi "kolme
+            // kymmentä kolme kymmentä" is 30 30).
+            // Only right after a complete group: a unit before a leading
+            // morpheme, a trailing morpheme before a unit. kn writes its tens
+            // spaced inside a larger number ("ಸಾವಿರದ ಇಪ್ಪತ್ತ್ ಐದು"), no break.
+            if best_value.is_some() && j > i {
+                let key = converter.n2w_key();
+                let prev = parts[i..j]
+                    .iter()
+                    .rev()
+                    .find(|p| !py_str_isspace(p))
+                    .map(|p| crate::normalize(&rstrip_punct(p).to_lowercase()))
+                    .unwrap_or_default();
+                let prev_unit = matches!(converter.to_cardinal(&prev), Ok(W2nValue::Int(v)) if v >= BigInt::from(1) && v <= BigInt::from(9));
+                let prev_trailing = crate::w2n_forms::morpheme_follows_unit(key, &prev) == Some(true);
+                let leads = crate::w2n_forms::morpheme_follows_unit(key, &crate::normalize(&clean)) == Some(false);
+                if (leads && prev_unit) || (prev_trailing && unit_of_next_morpheme(key, &parts, j, &clean)) {
+                    break;
+                }
+            }
             words += 1;
             if words > MAX_RUN_WORDS || failed >= MAX_FAILED_EXTENSIONS {
                 break; // #186
@@ -6472,6 +6495,13 @@ mod glued_morpheme_tests {
         assert_eq!(s("pět desát šest desát", "cs"), "5 desát 6 desát");
         assert_eq!(s("sata kymmentä", "fi"), "100 kymmentä");
         assert_eq!(s("zece zeci de ani", "ro"), "10 zeci de ani");
+        // #990: a new tens group ends the run, so long texts stay linear.
+        assert_eq!(s("veinti uno veinti dos veinti tres", "es"), "21 22 23");
+        assert_eq!(s("kolme kymmentä kolme kymmentä", "fi"), "30 30");
+        let long = ["veinti tres"; 800].join(" ");
+        let start = std::time::Instant::now();
+        let _ = s(&long, "es");
+        assert!(start.elapsed().as_secs_f64() < 2.0, "es 1600 tokens took {:?}", start.elapsed());
     }
 }
 
