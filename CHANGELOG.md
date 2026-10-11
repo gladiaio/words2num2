@@ -6,6 +6,10 @@ follows [Semantic Versioning](https://semver.org/) and uses
 
 ## [Unreleased]
 
+### Fixed
+
+- fr / fr_BE / fr_CH / fr_CA, `currency=True`: after "<unit> et", a subunit count of 100 or more in words (up to four words) keeps "cents" as written instead of multiplying it: "douze dollars et cent cinquante cents" is "12 $ et 150 cents" (was "12 $ et 150 100"), and so does a lone symbol ("Ⅻ cents"). A count ending on the 2-9 that multiplies "cents" is still hundreds ("mille deux cents personnes" is 1200), and a singular "cent" that continues the number stays in it ("deux mille cent personnes" is 2100). Longer counts are still multiplied, as before (#1025, #1029).
+
 ## [0.4.0] — 2026-10-11
 
 **Breaking:** numerical symbols (`½` `①` `⑩` `²` `₃` `Ⅻ` `㊀` …) are no longer read as numbers or folded by default, in every entry point including `normalize()` (#958, #960, #971); pass `convert_numerical_symbols=True` to get the old behaviour. From this release on, a release is cut automatically every day at noon (Paris) when `main` has unreleased changes (`scheduled-release.yml`).
