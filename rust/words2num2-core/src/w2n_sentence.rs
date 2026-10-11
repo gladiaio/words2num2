@@ -2329,7 +2329,16 @@ fn my_years_shape(converter: &Converter, resolved: &str, parts: &[String], k: us
     let year = |t: &str| crate::normalize(rstrip_punct(t)) == crate::normalize("နှစ်");
     let words: Vec<usize> = (k..parts.len()).filter(|&j| !py_str_isspace(&parts[j])).take(5).collect();
     let w = |n: usize| words.get(n).map(|&j| parts[j].as_str());
-    if prev_word_index(parts, k).is_some_and(|p| digit(&parts[p]) && !has_trailing_mark(&parts[p])) {
+    // No digit word before; and a နှစ် right after any number word or figure
+    // is that number's year, which the walker's guard claims (#1016).
+    if prev_word_index(parts, k).is_some_and(|p| {
+        let raw = &parts[p];
+        let clean = rstrip_punct(raw).to_lowercase();
+        !has_trailing_mark(raw)
+            && (digit(raw)
+                || (year(&parts[k])
+                    && (converter.to_cardinal(&clean).is_ok() || (!clean.is_empty() && clean.chars().all(is_unicode_digit)))))
+    }) {
         return false;
     }
     let unmarked = |n: usize| words[..n].iter().all(|&j| !has_trailing_mark(&parts[j]));
@@ -2338,7 +2347,10 @@ fn my_years_shape(converter: &Converter, resolved: &str, parts: &[String], k: us
         return false;
     }
     let three = unmarked(2) && my_counter(w(3).map(|t| rstrip_punct(t).to_lowercase()).as_deref());
+    // Not "<d> နှစ် သုည နှစ်": the walker reads no "သုည နှစ်" as years.
+    let zero = matches!(converter.to_cardinal(&rstrip_punct(w2).to_lowercase()), Ok(W2nValue::Int(v)) if v == BigInt::from(0));
     let four = !year(w2)
+        && !zero
         && w(3).is_some_and(year)
         && unmarked(3)
         && (has_trailing_mark(&parts[words[3]])
@@ -7187,6 +7199,9 @@ mod my_year_counter_tests {
         assert_eq!(s("09 နှစ် ငါး သုံး လေး ငါး ခြောက် ခုနစ် ရှစ်"), "09 25345678");
         assert_eq!(s("တစ် နှစ် နှစ် နှစ်"), "1222");
         assert_eq!(s("5 နှစ် နှစ် နှစ်"), "5 222");
+        assert_eq!(s("တစ်ဆယ် နှစ် နှစ် လေး ယောက်"), "10 224 ယောက်");
+        assert_eq!(s("ငါးရာ နှစ် နှစ် ငါး နှစ်"), "500 2252");
+        assert_eq!(s("ငါး နှစ် သုည နှစ်"), "5202");
         // A compatibility digit is no figure.
         assert_eq!(s("\u{B2} နှစ်"), "\u{B2} 2");
         // A digit after the point is no year (#1018).
