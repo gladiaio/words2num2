@@ -104,7 +104,14 @@ def words2num(text, lang="en", to="cardinal", convert_numerical_symbols=False):
 
 
 def words2num_sentence(
-    sentence, lang="en", to="cardinal", currency=False, convert_numerical_symbols=False
+    sentence,
+    lang="en",
+    to="cardinal",
+    currency=False,
+    convert_numerical_symbols=False,
+    date=False,
+    region=None,
+    date_format="written",
 ):
     """Convert every word-number in ``sentence`` to numeric form.
 
@@ -123,6 +130,17 @@ def words2num_sentence(
     digits (``"the ⑤ million"`` -> ``"the 5000000"``), other languages leave
     them as written either way.
 
+    With ``date=True`` a day + month (+ year) is written the way the language
+    writes a date: ``"march twelfth twenty twenty six"`` -> ``"March 12,
+    2026"``, ``lang="en_GB"`` -> ``"12 March 2026"``, de ``"am zwölften märz"``
+    -> ``"am 12. März"``, es ``"el primero de mayo"`` -> ``"el 1 de mayo"``
+    (en, fr, de, es, pt, it, nl). Off by default. A date spoken all in
+    numbers is written in figures in the region's order: ``"three twelve
+    twenty twenty six"`` -> ``"3/12/2026"`` (en), ``"03/12/2026"`` (en_GB),
+    ``"12.03.2026"`` (de). ``region`` (``"US"``, ``"GB"``...) overrides the
+    region of ``lang``; ``date_format="iso"`` writes every date with a year
+    as ``"2026-03-12"``.
+
     ``lang`` and ``to`` are validated before the walk and raise
     ``NotImplementedError`` like :func:`words2num`.
     """
@@ -133,6 +151,9 @@ def words2num_sentence(
         None,
         currency,
         convert_numerical_symbols=convert_numerical_symbols,
+        date=date,
+        region=region,
+        date_format=date_format,
     )
 
 

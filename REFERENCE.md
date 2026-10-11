@@ -81,7 +81,7 @@ Decimal('3.14')
 
 ### `words2num_sentence`
 
-`words2num_sentence(sentence, lang="en", to="cardinal", currency=False, convert_numerical_symbols=False)`
+`words2num_sentence(sentence, lang="en", to="cardinal", currency=False, convert_numerical_symbols=False, date=False, region=None, date_format="written")`
 
 Walk a sentence and replace every word-number with its numeric form.
 Non-number tokens pass through unchanged. Punctuation is preserved.
@@ -92,7 +92,20 @@ Non-number tokens pass through unchanged. Punctuation is preserved.
 walk (an unsupported value raises `NotImplementedError`, it does not
 return the sentence unchanged). `currency=True` writes an amount spoken as
 number + currency word (+ subunit) the way the language writes it
-(`"twelve dollars and fifty cents"` → `"$12.50"`).
+(`"twelve dollars and fifty cents"` → `"$12.50"`). `date=True` writes a
+day + month (+ year) the way the language writes a date: en `"March 12,
+2026"` (`en_GB`, `en_AU`, `en_NZ`, `en_IE`, `en_IN`, `en_ZA`: `"12 March
+2026"`), fr `"le 1er avril 2026"`, de `"am 12. März 2026"`, es `"el 1 de
+mayo de 2026"`, pt `"1º de maio de 2026"`, it `"il 1º maggio"`, nl `"12
+maart 2026"`. Other languages pass through. In English, "may", "march" and
+the abbreviations count as a month only with an ordinal day ("march
+twelfth"), "the" ("may the fourth") or a year; "they march twelve miles"
+stays as it is. A date spoken all in numbers (day, month,
+four-digit year, a real calendar date) is written in figures in the region's
+order: en `"3/12/2026"`, en_GB / fr / es / it / pt `"12/03/2026"`, de
+`"12.03.2026"`, nl `"12-03-2026"`. `region` (`"US"`, `"GB"`...) overrides
+the region of `lang`; `date_format="iso"` writes every date that has a year
+as `"2026-03-12"` (`"written"`, the default, otherwise).
 
 **Returns** — `str`.
 
@@ -107,6 +120,8 @@ number + currency word (+ subunit) the way the language writes it
 'In 1999, 2000 people came.'
 >>> words2num_sentence("my code is zero seven")
 'my code is 07'
+>>> words2num_sentence("on march twelfth twenty twenty six", date=True)
+'on March 12, 2026'
 ```
 
 ---
