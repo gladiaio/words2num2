@@ -110,6 +110,28 @@ def test_date_and_currency_together():
             "il faut 3 12 2000 personnes",
         ),
         ("en", "on three twelve twenty twenty six", "on 3/12/2026"),
+        (
+            "de",
+            "wir treffen uns zwölften dritten zweitausendsechsundzwanzig",
+            "wir treffen uns 12.03.2026",
+        ),
+        (
+            "en",
+            "from three twelve twenty twenty six to four one twenty twenty seven",
+            "from 3/12/2026 to 4/1/2027",
+        ),
+        (
+            "es",
+            "del doce tres dos mil veintiséis al quince tres dos mil veintiséis",
+            "del 12/03/2026 al 15/03/2026",
+        ),
+        ("en", "Date: three twelve twenty twenty six", "Date: 3/12/2026"),
+        (
+            "en",
+            "Meeting moved. three twelve twenty twenty six.",
+            "Meeting moved. 3/12/2026.",
+        ),
+        ("en", "three twelve twenty twenty six at three thirty", "3/12/2026 at 3:30"),
     ],
 )
 def test_numeric_date(lang, text, expected):

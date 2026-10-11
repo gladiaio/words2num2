@@ -24,7 +24,12 @@
 //! 2026", es "12 del 3 de 2026"), is written in figures, in the order and
 //! with the separator of the region: en (US) month first "3/12/2026"; en_GB,
 //! fr, es, it, pt day first "12/03/2026"; de "12.03.2026"; nl "12-03-2026".
-//! It needs a four-digit year and a real calendar date.
+//! It needs a four-digit year and a real calendar date. With no separator
+//! (no "slash", no de dots, no es/pt "de … de") it also needs a date cue
+//! right before it (en "on", fr "le", de "am", es "el" ...), a date it is the
+//! second end of ("from … to …"), or to stand alone (only punctuation around
+//! it, or a clock time after it): "we need three twelve two thousand
+//! people" is three quantities (#1031).
 //!
 //! `region` ("US", "GB"...) overrides the region of the language code;
 //! `iso` writes every date that has a year as "2026-03-12".
@@ -238,21 +243,49 @@ fn open(trail: &str) -> bool {
 /// A word that announces a date: "on", "born", "le", "am", "el" ...
 fn date_cue(st: Style, w: &str) -> bool {
     let cues: &[&str] = match st {
-        Style::EnUs | Style::EnGb => &["on", "born", "dated", "date", "since", "until", "till", "from", "by", "before", "after"],
-        Style::Fr => &["le", "du", "au", "depuis", "jusqu'au", "né", "née", "daté", "datée", "date"],
-        Style::De => &["am", "vom", "bis", "seit", "ab", "datum", "geboren"],
-        Style::Es => &["el", "desde", "hasta", "fecha", "nació", "nacido", "nacida"],
-        Style::Pt => &["em", "no", "dia", "desde", "até", "data", "nasceu", "nascido", "nascida"],
-        Style::It => &["il", "dal", "al", "nato", "nata", "data", "fino"],
-        Style::Nl => &["op", "van", "tot", "sinds", "datum", "geboren"],
+        Style::EnUs | Style::EnGb => &["on", "born", "dated", "date", "since", "until", "till", "from", "by", "before", "after", "between"],
+        Style::Fr => &["le", "du", "au", "depuis", "jusqu'au", "entre", "né", "née", "daté", "datée", "date"],
+        Style::De => &["am", "vom", "bis", "seit", "ab", "zwischen", "datum", "geboren"],
+        Style::Es => &["el", "del", "al", "desde", "hasta", "entre", "fecha", "nació", "nacido", "nacida"],
+        Style::Pt => &["em", "no", "dia", "desde", "até", "entre", "data", "nasceu", "nascido", "nascida"],
+        Style::It => &["il", "dal", "al", "tra", "fra", "nato", "nata", "data", "fino"],
+        Style::Nl => &["op", "van", "tot", "sinds", "tussen", "datum", "geboren"],
     };
     cues.contains(&w)
+}
+
+/// A word that joins the two ends of a date range: "from … to …".
+fn range_word(st: Style, w: &str) -> bool {
+    let words: &[&str] = match st {
+        Style::EnUs | Style::EnGb => &["to", "and", "through", "till", "until"],
+        Style::Fr => &["au", "et", "jusqu'au"],
+        Style::De => &["bis", "und"],
+        Style::Es => &["al", "y", "hasta"],
+        Style::Pt => &["a", "e", "até"],
+        Style::It => &["al", "e"],
+        Style::Nl => &["tot", "en"],
+    };
+    words.contains(&w)
+}
+
+/// A word that introduces a clock time after a date ("… at 3:30").
+fn clock_cue(st: Style, w: &str) -> bool {
+    let words: &[&str] = match st {
+        Style::EnUs | Style::EnGb => &["at"],
+        Style::Fr => &["à"],
+        Style::De => &["um"],
+        Style::Es => &["a"],
+        Style::Pt => &["às"],
+        Style::It => &["alle"],
+        Style::Nl => &["om"],
+    };
+    words.contains(&w)
 }
 
 /// A date spoken all in numbers at token `i`: N1 [sep] N2 [sep] YEAR, with
 /// sep "slash" or "/" (both or none), de "12. 3. 2026", es / pt "12 del 3
 /// de 2026". N1 is the month in en (US), the day elsewhere.
-fn numeric_at(st: Style, toks: &[&str], i: usize) -> Option<Span> {
+fn numeric_at(st: Style, toks: &[&str], i: usize, chained: bool) -> Option<Span> {
     let at = |k: usize| toks.get(k).copied().filter(|t| !t.is_empty());
     let low = |k: usize| at(k).map(|t| split_trail(t).0.to_lowercase());
     let (a, a_trail) = small(st, at(i)?)?;
@@ -281,17 +314,24 @@ fn numeric_at(st: Style, toks: &[&str], i: usize) -> Option<Span> {
     // 3 12 2026", "le 12 3 2026") or as the whole text: "we need 3 12 2000
     // people" is three quantities (#1031).
     let len = 3 + s1 + s2;
-    if s1 == 0 {
-        let cued = i > 0 && {
-            let (prev, prev_trail) = split_trail(toks[i - 1]);
-            prev_trail.is_empty() && date_cue(st, &prev.to_lowercase())
-        };
-        // Nothing but punctuation after it: "three twelve twenty twenty six ."
-        let whole = i == 0
-            && toks[(i + len).min(toks.len())..]
-                .iter()
-                .all(|t| t.chars().all(|c| !c.is_alphanumeric()));
-        if !cued && !whole {
+    // de "12. 3. 2026": the ordinal dots are a separator too.
+    let de_dots = st == Style::De && [i, i + 1].iter().all(|&k| at(k).is_some_and(|t| t.ends_with('.')));
+    if s1 == 0 && !de_dots && !chained {
+        let word = |t: &str| t.chars().any(char::is_alphanumeric);
+        let before = toks[..i].iter().rev().find(|t| !t.is_empty());
+        // A cue, with a ":" or "," after it, a bracket before it ("(on").
+        let cued = before.is_some_and(|t| {
+            let (prev, prev_trail) = split_trail(t);
+            let prev = prev.trim_start_matches(|c: char| !c.is_alphanumeric());
+            matches!(prev_trail, "" | ":" | ",") && date_cue(st, &prev.to_lowercase())
+        });
+        // Alone: only punctuation before it, or a sentence end ("Moved. 3 12
+        // 2026"); only punctuation after it, or a clock time ("at 3:30").
+        let starts = before.is_none_or(|t| !word(t) || t.ends_with(['.', '!', '?', ':']));
+        let after = toks[(i + len).min(toks.len())..].iter().find(|t| !t.is_empty());
+        let ends = !open(&trail)
+            || after.is_none_or(|t| !word(t) || clock_cue(st, &split_trail(t).0.to_lowercase()));
+        if !cued && !(starts && ends) {
             return None;
         }
     }
@@ -304,8 +344,8 @@ fn numeric_at(st: Style, toks: &[&str], i: usize) -> Option<Span> {
 }
 
 /// The date span starting at token `i`, if any.
-fn span_at(lang: &str, st: Style, toks: &[&str], i: usize) -> Option<Span> {
-    if let Some(s) = numeric_at(st, toks, i) {
+fn span_at(lang: &str, st: Style, toks: &[&str], i: usize, chained: bool) -> Option<Span> {
+    if let Some(s) = numeric_at(st, toks, i, chained) {
         return Some(s);
     }
     let at = |k: usize| toks.get(k).copied().filter(|t| !t.is_empty());
@@ -382,11 +422,21 @@ pub fn fold_dates_with(text: &str, lang: &str, region: Option<&str>, iso: bool) 
     let toks: Vec<&str> = text.split(' ').collect();
     let mut out: Vec<String> = Vec::with_capacity(toks.len());
     let mut i = 0;
+    // The token right after the last date folded: a range word there makes
+    // the next span the second end of a range ("from 3/12/2026 to 4 1 2027").
+    let mut after_date: Option<usize> = None;
     while i < toks.len() {
-        match span_at(lang, st, &toks, i) {
+        let chained = after_date.is_some_and(|k| {
+            k + 1 == i && {
+                let (w, trail) = split_trail(toks[k]);
+                trail.is_empty() && range_word(st, &w.to_lowercase())
+            }
+        });
+        match span_at(lang, st, &toks, i, chained) {
             Some(s) => {
                 out.push(render(st, &s, iso));
                 i += s.len;
+                after_date = open(&s.trail).then_some(i);
             }
             None => {
                 out.push(toks[i].to_string());

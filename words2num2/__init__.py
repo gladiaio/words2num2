@@ -138,7 +138,10 @@ def words2num_sentence(
     (en, fr, de, es, pt, it, nl). Off by default. A date spoken all in
     numbers is written in figures in the region's order: ``"three twelve
     twenty twenty six"`` -> ``"3/12/2026"`` (en), ``"03/12/2026"`` (en_GB),
-    ``"12.03.2026"`` (de). ``region`` (``"US"``, ``"GB"``...) overrides the
+    ``"12.03.2026"`` (de). With no separator it needs a date cue before it
+    (``"on"``, ``"from"``, fr ``"le"``, de ``"am"``...), or to stand alone:
+    ``"we need three twelve two thousand people"`` stays as it is.
+    ``region`` (``"US"``, ``"GB"``...) overrides the
     region of ``lang``; ``date_format="iso"`` writes every date with a year
     as ``"2026-03-12"``.
 
