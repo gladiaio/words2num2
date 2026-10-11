@@ -233,3 +233,42 @@ def test_comma_before_the_subunit(lang, text, expected):
 )
 def test_audit_fold(lang, text, expected):
     assert fold(text, lang) == expected
+
+
+@pytest.mark.parametrize(
+    "lang,text,to,expected",
+    [
+        # The plain walk reads the US cent as cents too (#868).
+        (
+            "fr",
+            "douze dollars et cinquante cents",
+            "cardinal",
+            "12 dollars et 50 cents",
+        ),
+        (
+            "fr_BE",
+            "mille deux cent trente-quatre dollars et septante-six cents",
+            "cardinal",
+            "1234 dollars et 76 cents",
+        ),
+        (
+            "fr_CH",
+            "zéro dollar et nonante-neuf cents",
+            "cardinal",
+            "0 dollar et 99 cents",
+        ),
+        (
+            "fr_DZ",
+            "douze dollars et cinquante cents",
+            "currency",
+            "12 dollars et 50 cents",
+        ),
+        # Guards: hundreds stay hundreds; a non-multiplier subunit is untouched
+        # (#1001).
+        ("fr", "deux cents personnes", "cardinal", "200 personnes"),
+        ("fr", "un euro et un centime", "cardinal", "1 euro et 1 centime"),
+        ("ca", "un euro amb un cèntim", "cardinal", "1 euro amb 1 cèntim"),
+    ],
+)
+def test_plain_walk_subunit(lang, text, to, expected):
+    assert words2num_sentence(text, lang=lang, to=to) == expected

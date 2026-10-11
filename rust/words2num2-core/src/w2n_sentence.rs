@@ -3462,7 +3462,7 @@ fn words2num_sentence_folded(
 ) -> Result<String, W2nError> {
     // Validate up front (#201): the walk swallows every per-run error, so an
     // unsupported `lang` or `to` would otherwise come back as the input text.
-    resolve_lang(lang)?;
+    let resolved_lang = resolve_lang(lang)?;
     check_converter_type(to)?;
     // fr / de / es clock times, read on the words before the walk ("à neuf
     // heures quinze" -> "à 9h15"); the walk leaves the figures alone.
@@ -3474,7 +3474,7 @@ fn words2num_sentence_folded(
         sentence
     };
     if currency {
-        let resolved = resolve_lang(lang)?;
+        let resolved = resolved_lang.clone();
         // Walked piece by piece: fr "trente-quatre cents" after "dollars et"
         // is 34 US cents, not 3400 (see `pieces_for_walk`).
         let mut out = String::new();
@@ -3487,7 +3487,43 @@ fn words2num_sentence_folded(
         }
         return Ok(crate::w2n_currency::fold_currency(&out, &resolved));
     }
-    words2num_sentence_walk(sentence, lang, to, has_kwargs)
+    // The plain walk cuts the same subunit off: fr "douze dollars et
+    // cinquante cents" is "12 dollars et 50 cents", not "… 5000" (#868).
+    // The subunit is swapped for a placeholder word, not cut off, so the
+    // words before it keep their right-hand context: "un euro et un centime"
+    // stays "1 euro et 1 centime" (#1001).
+    let resolved = resolved_lang;
+    let pieces = crate::w2n_currency::subunit_pieces(sentence, &resolved);
+    if pieces.len() == 1 {
+        return words2num_sentence_walk(sentence, lang, to, has_kwargs);
+    }
+    // Private-use characters, unlikely in a transcript; a text that holds
+    // the mark anyway takes the unmasked walk below.
+    const MARK: &str = "\u{F8FF}wnsub\u{F8FF}";
+    let mut masked = String::new();
+    let mut kept: Vec<String> = Vec::new();
+    for (piece, walk) in pieces {
+        if walk {
+            masked.push_str(&piece);
+        } else {
+            masked.push_str(MARK);
+            kept.push(piece);
+        }
+    }
+    if sentence.contains(MARK) {
+        return words2num_sentence_walk(sentence, lang, to, has_kwargs);
+    }
+    let walked = words2num_sentence_walk(&masked, lang, to, has_kwargs)?;
+    let mut out = String::new();
+    let mut rest = walked.as_str();
+    for word in kept {
+        let Some(at) = rest.find(MARK) else { return words2num_sentence_walk(sentence, lang, to, has_kwargs) };
+        out.push_str(&rest[..at]);
+        out.push_str(&word);
+        rest = &rest[at + MARK.len()..];
+    }
+    out.push_str(rest);
+    Ok(out)
 }
 
 fn words2num_sentence_walk(
@@ -6841,6 +6877,29 @@ mod auto_sentence_mark_tests {
         let ts = |t: &str| super::auto_parse_sentence(t, "de", &p, Some(","), None, false).unwrap();
         assert_eq!(ts("3.125 kg"), "3.125 kg");
         assert_eq!(ts(&ts("3.125 kg")), "3.125 kg");
+    }
+}
+
+#[cfg(test)]
+mod plain_walk_subunit_tests {
+    /// #868: the plain walk reads a fr US-cent subunit as cents, not hundreds.
+    #[test]
+    fn subunit_after_unit_issue_868() {
+        let s = |t: &str, l: &str, to: &str| super::words2num_sentence(t, l, to, false).unwrap();
+        assert_eq!(s("douze dollars et cinquante cents", "fr", "cardinal"), "12 dollars et 50 cents");
+        assert_eq!(s("zéro dollar et nonante-neuf cents", "fr_CH", "cardinal"), "0 dollar et 99 cents");
+        assert_eq!(s("douze dollars et cinquante cents", "fr_DZ", "currency"), "12 dollars et 50 cents");
+        // A real hundreds multiple stays one.
+        assert_eq!(s("mille euros et deux cents personnes", "fr", "cardinal"), "1000 euros et 200 personnes");
+        // A subunit no multiplier is not cut, so "un" before it reads (#1001).
+        assert_eq!(s("un euro et un centime", "fr", "cardinal"), "1 euro et 1 centime");
+        assert_eq!(s("un euro amb un cèntim", "ca", "cardinal"), "1 euro amb 1 cèntim");
+        // Hundreds stay hundreds after a unit and a connector (#1002, #1003).
+        assert_eq!(s("vingt euros et mille deux cent cinquante personnes", "fr", "cardinal"), "20 euros et 1250 personnes");
+        assert_eq!(s("le billet coûte cinq dollars et la salle compte quatre cents places", "fr", "cardinal"), "le billet coûte 5 dollars et la salle compte 400 places");
+        assert_eq!(s("vingt dollars et douze cents personnes", "fr", "cardinal"), "20 dollars et 1200 personnes");
+        assert_eq!(s("dix dollars et cinq. Trois cents personnes", "fr", "cardinal"), "10 dollars et 5. 300 personnes");
+        assert_eq!(s("douze dollars et douze cents", "fr", "cardinal"), "12 dollars et 12 cents");
     }
 }
 
