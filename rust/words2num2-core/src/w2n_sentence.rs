@@ -495,7 +495,12 @@ fn py_rstrip_char(s: &str, ch: char) -> &str {
 /// Also the script-native marks and closing brackets/quotes `normalize` folds
 /// to a space (#121): "पाँच।" reads 5 and keeps its danda, "five)" its bracket.
 fn rstrip_punct(s: &str) -> &str {
-    let mark = |c: char| matches!(c, '.' | ',' | ';' | ':' | '!' | '?' | '"' | '\'' | '\u{2019}') || crate::is_clause_punctuation(c);
+    // The fullwidth marks too, which end a run as their ASCII forms do (#1026).
+    let mark = |c: char| {
+        matches!(c, '.' | ',' | ';' | ':' | '!' | '?' | '"' | '\'' | '\u{2019}')
+            || matches!(c, '\u{FF0C}' | '\u{FF01}' | '\u{FF1F}' | '\u{FF1B}' | '\u{FF1A}')
+            || crate::is_clause_punctuation(c)
+    };
     // Format characters ride with a mark before them ("twenty,\u{200b}"),
     // and only then: a bare ZWSP is a word-break hint, as inside unspaced
     // th/zh/ja numbers (#870, #998).
@@ -567,10 +572,21 @@ fn with_bare_format<R>(on: bool, f: impl FnOnce() -> R) -> R {
 
 /// `re.search(r"[\.,;:!\?]$", tok)` — note this class has **no** quote
 /// characters, unlike the strip above: `forty-two"` does not close a run.
+///
+/// Also the script-native sentence and clause marks, which end a run as "."
+/// and "," do: my "တစ်ရာ။ ငါး" is 100, then 5, never 105 (#1023).
 fn ends_with_terminal_punct(s: &str) -> bool {
     matches!(
         s.trim_end_matches(is_format_char).chars().next_back(),
-        Some('.') | Some(',') | Some(';') | Some(':') | Some('!') | Some('?')
+        Some(
+            '.' | ',' | ';' | ':' | '!' | '?'
+                | '\u{104B}' | '\u{104A}' // my ။ ၊
+                | '\u{0964}' | '\u{0965}' // । ॥
+                | '\u{060C}' | '\u{061B}' | '\u{061F}' | '\u{06D4}' // ، ؛ ؟ ۔
+                | '\u{3002}' | '\u{3001}' | '\u{FF0C}' | '\u{FF01}' | '\u{FF1F}' | '\u{FF1B}' | '\u{FF1A}' // 。、，！？；：
+                | '\u{1362}' | '\u{1363}' | '\u{1364}' // ። ፣ ፤
+                | '\u{17D4}' | '\u{17D5}' // ។ ៕
+        )
     )
 }
 
@@ -7140,5 +7156,29 @@ mod my_year_counter_tests {
         assert_eq!(s("천삼십육 이", "ko"), "1036 2");
         assert_eq!(s("ezerháromszáznegyvenhárom kettő", "hu"), "1343 2");
         assert!(crate::words2num("ezerötszáz száz", "hu", "cardinal").is_err());
+    }
+}
+
+#[cfg(test)]
+mod script_mark_tests {
+    /// #1023: a script's sentence or clause mark ends the run, as "." does.
+    #[test]
+    fn script_mark_ends_run_issue_1023() {
+        let s = |t: &str, l: &str| super::words2num_sentence(t, l, "cardinal", false).unwrap();
+        assert_eq!(s("တစ်ရာ။ ငါး ယောက်", "my"), "100။ 5 ယောက်");
+        assert_eq!(s("တစ်ရာ၊ ငါး ယောက်", "my"), "100၊ 5 ယောက်");
+        assert_eq!(s("တစ်ထောင်။ ငါး", "my"), "1000။ 5");
+        assert_eq!(s("ငါး။ ငါး", "my"), "5။ 5");
+        assert_eq!(s("x ایک سو۔ پانچ y", "ur"), "x 100۔ 5 y");
+        assert_eq!(s("x មួយរយ។ ប្រាំ y", "km"), "x 100។ 5 y");
+        assert_eq!(s("x መቶ። አምስት y", "am"), "x 100። 5 y");
+        // A glued fullwidth mark is kept between the two (#1026).
+        assert_eq!(s("\u{4E94}\u{FF0C}\u{5341}\u{4E8C}", "zh"), "5\u{FF0C}12");
+        assert_eq!(s("x \u{4E94}\u{FF01}\u{5341}\u{4E8C} y", "zh"), "x 5\u{FF01}12 y");
+        assert_eq!(s("\u{767E}\u{FF0C}\u{5341}\u{4E8C}", "ja"), "100\u{FF0C}12");
+        assert_eq!(s("\u{5343}\u{FF1A}\u{5341}\u{4E8C}", "ja"), "1000\u{FF1A}12");
+        assert_eq!(s("ร้อย\u{FF0C}สิบสอง", "th"), "100\u{FF0C}12");
+        // Unchanged without the mark.
+        assert_eq!(s("တစ်ရာ ငါး", "my"), "105");
     }
 }
