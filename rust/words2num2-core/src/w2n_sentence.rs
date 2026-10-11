@@ -3285,6 +3285,62 @@ fn en_decade(word: Option<&str>) -> bool {
     })
 }
 
+/// Words before a clock time: "at nine fifteen", "until ten thirty".
+const EN_TIME_CUES: &[&str] = &[
+    "at", "around", "about", "by", "until", "till", "til", "from", "before", "after", "since",
+    "between",
+];
+
+/// en "nine fifteen" -> "9:15": an hour (1..=12) then its minutes (10..=59,
+/// or "oh" + a digit), read as a clock time only after a cue word ("at",
+/// "until"...) or before am/pm. Without one it stays two numbers ("five
+/// twenty", "nine fifteen year olds"), and an hour over twelve is no time
+/// ("at nineteen fifty" is the year). Returns the time and its last part.
+fn en_time_run(parts: &[String], i: usize) -> Option<(String, usize)> {
+    use crate::w2n_lang_en::{tens_value, unit_value};
+    let words = en_number_words(parts, i);
+    let word = |k: usize| words.get(k).map(|w| w.word.as_str());
+    let hour = unit_value(word(0)?).filter(|h| (1..=12).contains(h))?;
+    if !words[0].last {
+        return None; // "nine-fifteen" is one part: not split here
+    }
+    let digit = |k: usize| word(k).and_then(unit_value).filter(|v| (1..=9).contains(v));
+    let mut readings: Vec<(usize, i64)> = Vec::new();
+    match word(1)? {
+        "oh" | "o" => readings.extend(digit(2).map(|d| (3, d))),
+        m => {
+            if let Some(v) = unit_value(m).filter(|v| (10..=19).contains(v)) {
+                readings.push((2, v));
+            } else if let Some(v) = tens_value(m).filter(|v| (20..=50).contains(v)) {
+                readings.push((2, v));
+                readings.extend(digit(2).map(|d| (3, v + d)));
+            }
+        }
+    }
+    let (n, minutes) = readings.into_iter().rev().find(|&(n, _)| words[n - 1].last)?;
+    if words.len() > n {
+        return None; // more number words follow: not a time ("nine fifteen twenty")
+    }
+    let end = words[n - 1].part;
+    let cue = prev_word(parts, i).is_some_and(|p| EN_TIME_CUES.contains(&p.as_str()));
+    let meridiem =
+        next_word(parts, end).is_some_and(|w| matches!(w.as_str(), "am" | "pm" | "a.m" | "p.m"));
+    (cue || meridiem).then(|| (format!("{hour}:{minutes:02}"), end))
+}
+
+/// en "nineties" -> 9: the decade a decade word names, for `to="year"`.
+fn en_decade_value(word: &str) -> Option<i64> {
+    "twenties thirties forties fifties sixties seventies eighties nineties"
+        .split_whitespace()
+        .position(|d| d == word)
+        .map(|p| p as i64 + 2)
+}
+
+/// The index of the next part that is not blank.
+fn next_word_index(parts: &[String], i: usize) -> Option<usize> {
+    (i + 1..parts.len()).find(|&k| !py_str_isspace(&parts[k]))
+}
+
 /// The `to=` modes [`words2num`] and [`words2num_sentence`] accept.
 pub const CONVERTER_TYPES: [&str; 6] =
     ["cardinal", "ordinal", "ordinal_num", "year", "currency", "digits"];
@@ -3413,6 +3469,9 @@ fn words2num_sentence_walk(
     // to the cardinal walk: `to="year"` keeps its own pair reading, and any
     // extra keyword argument fails every conversion (see `has_kwargs`).
     let en_cardinal = en_grammar && to == "cardinal" && !has_kwargs;
+    // `to="year"` on a sentence: decades ("the nineteen nineties" -> "the
+    // 1990s") and no year out of a time ("at nine fifteen" stays "at 9 15").
+    let en_year = en_grammar && to == "year" && !has_kwargs;
     // `to="digits"` writes a digit run as its digit string too, leading zeros
     // and "double"/"triple" included ("call double zero seven" -> "call
     // 007"), where the single-token `to_digits` can only return an int (#190, #195).
@@ -3790,6 +3849,18 @@ fn words2num_sentence_walk(
             j += 1;
         }
 
+        // "at nine fifteen", "nine thirty pm": a clock time, "9:15".
+        if en_cardinal || en_year {
+            if let Some((time, end)) = en_time_run(&parts, i) {
+                out.push_str(sep_before(i));
+                out.push_str(&time);
+                out.push_str(trailing_punct(&parts[end]));
+                out.push_str(sep_after(end));
+                i = end + 1;
+                continue;
+            }
+        }
+
         // A spoken year outgrows the cardinal reading: "twenty twenty five"
         // is the cardinal "twenty" and then a dangling "twenty five", but the
         // year 2025.
@@ -3874,6 +3945,36 @@ fn words2num_sentence_walk(
             out.push_str(&parts[i..=end].concat());
             i = end + 1;
             continue;
+        }
+
+        if en_year {
+            // "the nineteen nineties", "the twenty twenties": the decade of that
+            // century, one token ("1990s"); the cardinal walk keeps it in words.
+            let century = match &best_value {
+                Some(W2nValue::Int(c)) => i64::try_from(c).ok().filter(|c| (10..=99).contains(c)),
+                _ => None,
+            };
+            let decade = next_word_index(&parts, best_end)
+                .and_then(|k| en_decade_value(&rstrip_punct(&parts[k]).to_lowercase()).map(|d| (k, d)));
+            if let (Some(c), Some((k, d))) = (century, decade) {
+                out.push_str(sep_before(i));
+                out.push_str(&format!("{c}{d}0s"));
+                out.push_str(trailing_punct(&parts[k]));
+                out.push_str(sep_after(k));
+                i = k + 1;
+                continue;
+            }
+            // "at nine fifteen" is a time: a year read in running text needs a
+            // two-digit first half ("nineteen oh five", "twenty twenty six").
+            // The single-token `words2num(..., to="year")` still reads "nine
+            // eleven" as 911, the way num2words2 spells 100..999 (#111).
+            let three_digit = matches!(&best_value, Some(W2nValue::Int(v)) if (BigInt::from(100)..BigInt::from(1000)).contains(v));
+            if three_digit && best_end > i && crate::w2n_lang_en::unit_value(&head).is_some_and(|u| (1..=9).contains(&u)) {
+                if let Ok(v) = converter.to_cardinal(&head) {
+                    best_value = Some(v);
+                    best_end = i;
+                }
+            }
         }
 
         // ru "двадцать первый", pl "dwadzieścia pierwszy": a cardinal followed
@@ -5445,6 +5546,56 @@ mod digits_tests {
         // The old cardinal behaviour that motivated this was "two seven five"
         // -> 14; the cardinal walk now reads the digit string itself.
         assert_eq!(s("Two seven five", "en", "cardinal", false).unwrap(), "275");
+    }
+
+    #[test]
+    fn year_mode_reads_decades_and_leaves_times() {
+        let y = |t: &str| s(t, "en", "year", false).unwrap();
+        // A century and a decade word: one decade token.
+        assert_eq!(y("the nineteen nineties"), "the 1990s");
+        assert_eq!(y("back in the nineteen eighties, we"), "back in the 1980s, we");
+        assert_eq!(y("the twenty twenties."), "the 2020s.");
+        assert_eq!(y("nineteen sixties music"), "1960s music");
+        // The cardinal walk still keeps it in words.
+        assert_eq!(s("the nineteen nineties", "en", "cardinal", false).unwrap(), "the nineteen nineties");
+        // A bare decade word is no number.
+        assert_eq!(y("in the eighties"), "in the eighties");
+        // A time is a clock time, not a three-digit year.
+        assert_eq!(y("call me at nine fifteen"), "call me at 9:15");
+        // Without a cue, two numbers.
+        assert_eq!(y("open five thirty to six"), "open 5 30 to 6");
+        // Years with a two-digit first half are untouched.
+        assert_eq!(y("born in nineteen eighty four"), "born in 1984");
+        assert_eq!(y("in nineteen oh five"), "in 1905");
+        assert_eq!(y("twenty twenty six"), "2026");
+        assert_eq!(y("in two thousand and five"), "in 2005");
+        assert_eq!(y("open twenty four seven"), "open 24 7");
+        // The single-token reading keeps num2words2's 100..999 spelling (#111).
+        assert!(matches!(crate::en_to_year("nine eleven"), Ok(crate::w2n_lang_en::W2nValue::Int(v)) if v == num_bigint::BigInt::from(911)));
+    }
+
+    #[test]
+    fn clock_times() {
+        let c = |t: &str| s(t, "en", "cardinal", false).unwrap();
+        assert_eq!(c("call me at nine fifteen"), "call me at 9:15");
+        assert_eq!(c("at nine fifteen pm"), "at 9:15 pm");
+        assert_eq!(c("nine thirty am"), "9:30 am");
+        assert_eq!(c("at ten oh five"), "at 10:05");
+        assert_eq!(c("meet at twelve thirty."), "meet at 12:30.");
+        assert_eq!(c("around five forty five"), "around 5:45");
+        assert_eq!(c("by eleven forty five p.m."), "by 11:45 p.m.");
+        assert_eq!(c("from nine fifteen until ten thirty"), "from 9:15 until 10:30");
+        assert_eq!(c("at nine fifteen tomorrow"), "at 9:15 tomorrow");
+        // No cue, no time.
+        assert_eq!(c("five twenty"), "5 20");
+        assert_eq!(c("I have nine fifteen year olds"), "I have 9 15 year olds");
+        // No minutes, an hour over twelve, or more numbers after: no time.
+        assert_eq!(c("from nine to five"), "from 9 to 5");
+        assert_eq!(c("at seven o'clock"), "at 7 o'clock");
+        assert_eq!(c("at nineteen fifty"), "at 1950");
+        assert!(!c("at nine fifteen twenty").contains(':'));
+        // Year mode reads them the same way.
+        assert_eq!(s("at nine fifteen pm", "en", "year", false).unwrap(), "at 9:15 pm");
     }
 
     #[test]
