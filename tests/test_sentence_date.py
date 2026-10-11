@@ -174,6 +174,18 @@ def test_date_and_currency_together():
             "van 12-03-2000 tot en met 13-03-2000",
         ),
         ("it", "il dodici tre duemilaventisei", "il 12/03/2026"),
+        ("de", "vom 12 3 2000 zum 13 3 2000", "vom 12.03.2000 zum 13.03.2000"),
+        # A bare article is no range link (#1076).
+        (
+            "en",
+            "on March fifth twenty twenty six the three twelve two thousand people voted",
+            "on March 5, 2026 the 3 12 2000 people voted",
+        ),
+        (
+            "en",
+            "on 3 12 2026 the 4 5 2000 votes were counted",
+            "on 3/12/2026 the 4 5 2000 votes were counted",
+        ),
         # Two-word range links (#1066).
         (
             "de",
