@@ -1339,20 +1339,22 @@ fn pieces_for_walk_with(sentence: &str, lang: &str, subunits_only: bool) -> Vec<
                 let unnamed = (w - back..w).all(|v| named[v].is_none());
                 // The regional table: fr_CH "nonante-neuf", fr_BE "septante".
                 let all_numbers = keys[w - back..w].iter().all(|k| crate::token_may_be_number(lang, k) || conns.contains(&k.as_str()));
+                // Zero too: "douze dollars et zéro cent" is the renderer's
+                // spelling of 12.00 (#1019).
                 let v = match crate::lookup_norm(lang, &keys[w - back..w].join(" "), false, &[]) {
                     Ok(Some(v)) => v,
-                    _ => 0,
+                    _ => -1,
                 };
                 // "<2-9> cents" is also a hundreds multiple; the plain walk
                 // also takes 11-19 for one ("douze cents personnes" is 1200
                 // people), so there it must end the clause. "dix cents" is no
                 // 1000 ("mille"), so 10 is no hundreds multiple.
-                let hundreds = if subunits_only { (2..=19).contains(&v) && v != 10 } else { v < 10 };
+                let hundreds = if subunits_only { (2..=19).contains(&v) && v != 10 } else { (1..10).contains(&v) };
                 unit_ends_at(w - back - 2)
                     && unpunct
                     && unnamed
                     && all_numbers
-                    && (1..=99).contains(&v)
+                    && (0..=99).contains(&v)
                     && (!hundreds || ends_clause)
             });
             if numeric_sub && ok {

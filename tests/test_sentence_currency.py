@@ -288,6 +288,7 @@ def test_plain_walk_subunit(lang, text, to, expected):
             "fr",
             "10 $ et 5 et 200 personnes",
         ),
+        ("douze dollars et zéro cent", "fr", "12,00 $"),
     ],
 )
 def test_subunit_count_is_one_plain_number_issue_1017(text, lang, expected):

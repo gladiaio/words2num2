@@ -6922,6 +6922,12 @@ mod plain_walk_subunit_tests {
         assert_eq!(c("mille euros et cinq et trois cents personnes", "fr"), "1 000 € et 5 et 300 personnes");
         assert_eq!(c("dix dollars et deux cents", "fr"), "10,02 $");
         assert_eq!(c("dix dollars et quinze cents chacun", "fr"), "10,15 $ chacun");
+        // The renderer's x.00: "et zéro cent" is a subunit amount (#1019).
+        assert_eq!(c("douze dollars et zéro cent", "fr"), "12,00 $");
+        assert_eq!(c("un dollar et zéro cent", "fr"), "1,00 $");
+        assert_eq!(c("douze dollars et zéro cent", "fr_CH"), "12,00 $");
+        assert_eq!(c("cent dollars et zéro cent", "fr_BE"), "100,00 $");
+        assert_eq!(c("douze dollars et zéro cents", "fr"), "12,00 $");
     }
 }
 
