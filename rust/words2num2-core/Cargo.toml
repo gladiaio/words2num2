@@ -18,3 +18,6 @@ num-bigint = "0.4"
 bigdecimal = "0.4"
 # NFKD normalisation + combining-mark detection, matching Python's unicodedata.
 unicode-normalization = "0.1"
+# Phone numbers (`phone=True`): Google libphonenumber's numbering plans, compiled
+# in (Apache-2.0), so the package keeps no runtime dependency.
+phonenumber = "0.3.10"
