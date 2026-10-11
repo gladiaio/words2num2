@@ -17,6 +17,7 @@ with no value that parsed before parsing differently now.
 - `words2num_sentence(..., date=True)`: a day + month (+ year) is written the way the language writes a date: "on march twelfth twenty twenty six" → "on March 12, 2026", `en_GB` → "12 March 2026", de "am zwölften märz" → "am 12. März", es "el primero de mayo" → "el 1 de mayo" (en, fr, de, es, pt, it, nl). Off by default.
 - `date=True` also writes a date spoken all in numbers in figures, in the region's order ("three twelve twenty twenty six" → "3/12/2026" in en, "03/12/2026" in en_GB, "12.03.2026" in de); `region=` overrides the region of `lang`, and `date_format="iso"` writes every date with a year as "2026-03-12".
 - `words2num_sentence(..., phone=True)`: each phone number is written the way its country writes it ("06 12 34 56 78", "(212) 456-7890", "+33 6 12 34 56 78"), from Google libphonenumber's numbering plans compiled in (`phonenumber` crate, Apache-2.0; no runtime dependency). The country comes from a spoken country code, else `region`, the region of `lang`, or the language's regions.
+- French, German and Spanish sentence mode write clock times in figures: fr "à neuf heures quinze" → "à 9h15", "et quart" / "et demie" / "moins le quart" → "9h15" / "9h30" / "8h45"; de "um neun Uhr fünfzehn" → "um 9:15 Uhr", "um halb zehn" → "um 9:30"; es "a las nueve y cuarto" → "a las 9:15". An hour alone is a time only after a time cue ("à neuf heures" → "à 9h"); a duration stays ("trois heures de route" → "3 heures de route").
 
 ### Changed (behaviour callers will notice)
 

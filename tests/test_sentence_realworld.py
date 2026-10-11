@@ -377,7 +377,7 @@ def test_fractions_stay_words(lang, text, expected):
         ("es", "millones de personas", "millones de personas"),
         ("es", "medio millón", "medio millón"),
         ("es", "dos coma cinco millones", "2,5 millones"),
-        ("es", "a las catorce treinta", "a las 14 30"),
+        ("es", "a las catorce treinta", "a las 14:30"),  # a clock time
         ("es", "mil", "1000"),
         ("de", "dreiundzwanzigtausend", "23000"),
         ("de", "zweihunderttausend euro", "200000 euro"),
