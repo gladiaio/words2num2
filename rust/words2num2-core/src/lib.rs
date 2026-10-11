@@ -41,9 +41,37 @@ pub fn words2num(
     lang: &str,
     to: &str,
 ) -> Result<w2n_lang_en::W2nValue, w2n_sentence::W2nError> {
+    // "10²" is no 102, "①" no 1: a compatibility digit is no number (#869,
+    // #955).
+    if holds_compat_digit(text) {
+        return Err(w2n_sentence::W2nError::Words2Num(format!(
+            "cannot parse {} as a number",
+            w2n_sentence::py_repr_str(text)
+        )));
+    }
+    // es "1º", pt "1ª", "1.º": a figure with its ordinal indicator is that
+    // figure (NFKD would make it "1o", #896).
+    // Only a whole number takes one: "1,5º" is no number (#899).
+    if let Some(figure) = ordinal_indicator_figure(text) {
+        return match words2num(figure, lang, to)? {
+            v @ w2n_lang_en::W2nValue::Int(_) => Ok(v),
+            _ => Err(w2n_sentence::W2nError::Words2Num(format!(
+                "cannot parse {} as a number",
+                w2n_sentence::py_repr_str(text)
+            ))),
+        };
+    }
+    // de "minus 1.234": a sign word before a figure, read with the same
+    // separators as "-1.234" (#309); th "ติดลบ1999" a year too (#950).
+    if matches!(to, "cardinal" | "currency" | "year") {
+        if let Some(signed) = signed_figure_in(text, lang) {
+            return words2num(&signed, lang, to);
+        }
+    }
     if matches!(to, "cardinal" | "ordinal" | "year" | "currency") && is_digit_literal(text) {
         let resolved = w2n_sentence::resolve_lang(lang)?;
-        return match w2n_formats::parse_number_string(text, None, None, Some(&resolved)) {
+        let key = w2n_formats::format_key(lang, &resolved);
+        return match w2n_formats::parse_number_string(text, None, None, Some(&key)) {
             Ok(w2n_formats::W2nValue::Int(i)) => Ok(w2n_lang_en::W2nValue::Int(i)),
             Ok(w2n_formats::W2nValue::Dec(d)) => {
                 Ok(w2n_lang_en::W2nValue::Dec(w2n_lang_en::PyDec::from_bigdecimal(&d)))
@@ -55,6 +83,112 @@ pub fn words2num(
     w2n_sentence::words2num(text, lang, to)
 }
 
+/// A numerical symbol, no digit of a figure: a superscript or subscript
+/// ("²", "₂"), a circled or parenthesized digit ("①", "⑩", "⒈"), a vulgar
+/// fraction ("½"), a circled or parenthesized ideograph ("㊀", "㈩", "〸",
+/// #965), a Roman numeral ("Ⅻ") — any `Nl`/`No` character NFKD rewrites.
+/// A CJK compatibility ideograph ("零" at U+F9B2) is `Lo`, no numeric
+/// character, so it reads as its ideograph does.
+pub fn is_compat_digit(c: char) -> bool {
+    use unicode_normalization::UnicodeNormalization;
+    let one = || std::iter::once(c);
+    !c.is_ascii() && c.is_numeric() && !w2n_sentence::is_unicode_digit(c) && !one().nfkd().eq(one())
+}
+
+thread_local! {
+    static NUMERICAL_SYMBOLS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Run `f` with numerical symbols ("①", "²") read as their digits, or not
+/// (the default). The binder sets this per call from the caller's
+/// `convert_numerical_symbols`; it is restored on return, panic included.
+/// The setting is per thread: work `f` spawns on other threads does not see
+/// it.
+pub fn with_numerical_symbols<R>(on: bool, f: impl FnOnce() -> R) -> R {
+    struct Restore(bool);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            NUMERICAL_SYMBOLS.with(|c| c.set(self.0));
+        }
+    }
+    let _restore = Restore(NUMERICAL_SYMBOLS.with(|c| c.replace(on)));
+    f()
+}
+
+/// Are numerical symbols read as their digits in this call?
+pub(crate) fn numerical_symbols() -> bool {
+    NUMERICAL_SYMBOLS.with(|c| c.get())
+}
+
+/// Does `text` hold a compatibility digit ([`is_compat_digit`]) that keeps it
+/// from being a number? By default any does: "²", "①", "½", "10²", "1①" stay
+/// symbols (#869, #955). With numerical symbols on, a run of them alone reads
+/// as its digits ("①" is 1), but one glued to a figure still does not: NFKD
+/// would fold "10²" into 102. A power after a unit's letters ("m²", "km³") is
+/// the unit's.
+pub(crate) fn holds_compat_digit(text: &str) -> bool {
+    let unit_power = |prev: Option<char>, c: char| matches!(c, '\u{00B2}' | '\u{00B3}') && prev.is_some_and(|p| p.is_alphabetic());
+    let chars: Vec<char> = text.chars().collect();
+    let symbol = |k: usize| is_compat_digit(chars[k]) && !unit_power(k.checked_sub(1).map(|j| chars[j]), chars[k]);
+    if !numerical_symbols() {
+        return (0..chars.len()).any(symbol);
+    }
+    let figure = |k: usize| (chars[k].is_numeric() && !is_compat_digit(chars[k])) || matches!(chars[k], '.' | ',');
+    (1..chars.len()).any(|k| (symbol(k) && figure(k - 1)) || (symbol(k - 1) && figure(k)))
+}
+
+/// `text` as "-<figure>" when it is a sign (word or dash) before a number in
+/// figures: de "minus 1.234", fr "moins, 1.234", "moins , 1.234". A comma
+/// between them is punctuation, except a "،" where it is the decimal mark
+/// (ar "-، 50" is -0.50). The caller reads the result with the locale's
+/// separators (#309, #896).
+pub(crate) fn signed_figure_in(text: &str, lang: &str) -> Option<String> {
+    let resolved = w2n_sentence::resolve_lang(lang).ok()?;
+    let mark_is_decimal = w2n_decimal::has_hundredths_mark(&resolved);
+    let t = text.trim();
+    // The figure starts at the first digit; the sign is everything before it,
+    // one word or several, spaced or glued: zh "负1234", ja "マイナス2.75", zu
+    // "ngaphansi kwe 1.5" (#950).
+    let at = t.char_indices().find(|(_, c)| w2n_sentence::is_unicode_digit(*c)).map(|(i, _)| i)?;
+    let (h, figure) = (t[..at].trim_end(), &t[at..]);
+    let comma = |c: char| c == ',' || (c == '\u{060C}' && !mark_is_decimal);
+    let head = h.strip_suffix(comma).map(str::trim_end).unwrap_or(h);
+    if head.is_empty() || head.contains([',', '\u{060C}']) {
+        return None;
+    }
+    // A glued head needs a sign the renderer glues (zh "负七"), and spaced
+    // text a space or comma between them ("moins 1.234", "moins, 1.234").
+    // "-5" itself is a plain figure, and so is "-,5": a bare dash needs a
+    // space before the figure (#984).
+    let spaced = t[..at].ends_with(|c: char| c.is_whitespace() || comma(c));
+    if !t[..at].contains(char::is_whitespace) && head.chars().all(|c| c == '+' || w2n_formats::is_minus(c)) {
+        return None;
+    }
+    // What touches the figure is a space, a comma, or the sign itself: "-.5"
+    // is -0.5, its point no part of the sign, and "-(5" no number (#984).
+    let signs = sign_prefixes(&resolved);
+    // The last mark before the figure other than a comma or a space: "-.,5"
+    // keeps its point out of the sign too.
+    // A closing bracket ends a sign too (kn "(-) 1 234"), and a tsheg a
+    // Tibetan word (bo "མེད་ཆ་ 1 234").
+    let touches = |c: char| {
+        c.is_alphabetic() || matches!(c, '+' | ')' | '\u{0F0B}') || w2n_formats::is_minus(c) || unicode_mark(c)
+    };
+    if !t[..at].chars().rev().find(|c| !c.is_whitespace() && !comma(*c)).is_some_and(touches) {
+        return None;
+    }
+    let word = normalize(head);
+    let is_sign = (spaced && ["minus", "negative"].contains(&word.as_str()))
+        || signs.iter().any(|p| p.text == word && (spaced || p.glued));
+    (is_sign && is_digit_literal(figure)).then(|| format!("-{figure}"))
+}
+
+/// A combining mark (Thai, Devanagari, ... vowel signs), part of a word.
+fn unicode_mark(c: char) -> bool {
+    use unicode_normalization::char::is_combining_mark;
+    is_combining_mark(c)
+}
+
 /// Is `text` a number in figures and nothing else: an optional sign, then
 /// digits and the separators a number is written with (`.`, `,`, `'`, `’`,
 /// `_`, spaces), starting and ending on a digit? Space-separated groups must
@@ -62,7 +196,7 @@ pub fn words2num(
 /// numbers side by side — is not one and is left to the word grammar.
 fn is_digit_literal(text: &str) -> bool {
     let t = text.trim();
-    let body = t.strip_prefix(['-', '+']).map(str::trim_start).unwrap_or(t);
+    let body = t.strip_prefix(|c| c == '+' || w2n_formats::is_minus(c)).map(str::trim_start).unwrap_or(t);
     let is_digit = |c: char| c.is_numeric() && w2n_sentence::digit_value(c).is_some();
     let is_sep = |c: char| matches!(c, '.' | ',' | '\'' | '\u{2019}' | '_') || c.is_whitespace();
     let (Some(first), Some(last)) = (body.chars().next(), body.chars().last()) else {
@@ -204,6 +338,28 @@ pub fn is_clause_punctuation(c: char) -> bool {
         | '\u{3008}'..='\u{3011}'                   // CJK angle / corner / lenticular brackets
         | '\u{3014}'..='\u{301B}'
     )
+}
+
+/// [`normalize`] as the public `normalize()` gives it: numerical symbols
+/// ([`is_compat_digit`]: "①", "²", "½", "㊀") stay as written, unless the
+/// caller asks for them to fold like the rest (#958, #972). The lookup
+/// tables keep the folding [`normalize`].
+pub fn normalize_public(s: &str, convert_numerical_symbols: bool) -> String {
+    if convert_numerical_symbols || !s.chars().any(is_compat_digit) {
+        return normalize(s);
+    }
+    // Each symbol rides through as a private-use placeholder the input does
+    // not hold, then comes back in order.
+    let Some(mark) = ('\u{E000}'..='\u{F8FF}').find(|m| !s.contains(*m)) else {
+        return normalize(s);
+    };
+    let symbols: Vec<char> = s.chars().filter(|&c| is_compat_digit(c)).collect();
+    let masked: String = s.chars().map(|c| if is_compat_digit(c) { mark } else { c }).collect();
+    let mut kept = symbols.into_iter();
+    normalize(&masked)
+        .chars()
+        .map(|c| if c == mark { kept.next().unwrap_or(c) } else { c })
+        .collect()
 }
 
 /// Pure-Rust port of `Words2Num_Base._normalize`.
@@ -1222,6 +1378,120 @@ pub fn parse_scaled(lang: &str, text: &str) -> Option<i64> {
 
 /// [`parse_scaled`] on normalized text.
 pub fn parse_scaled_norm(lang: &str, norm: &str) -> Option<i64> {
+    match scaled_reading(lang, norm) {
+        Scaled::Value(v) => Some(v),
+        Scaled::Ambiguous | Scaled::None => None,
+    }
+}
+
+/// A scaled reading: one value, a spelling the renderer gives two values, or
+/// none.
+enum Scaled {
+    Value(i64),
+    Ambiguous,
+    None,
+}
+
+/// Does the renderer write `norm` for two different values, so that it is
+/// no one number (ha "miliyan goma": 1 000 010 and 10 000 000)? The sentence
+/// walker then leaves the words alone rather than reading them as two
+/// numbers (#348).
+pub fn is_ambiguous_number(lang: &str, norm: &str) -> bool {
+    matches!(scaled_reading(lang, norm), Scaled::Ambiguous)
+}
+
+/// th / lo / km: a number ending in a scale word from a thousand up and then
+/// one bare digit, as spoken prices and salaries elide the place of that
+/// digit: "หมื่นห้า" is 15 000, "ล้านสอง" 1 200 000 (#875). Returns whether
+/// words lead the scale word, and the value with the digit one place down.
+/// With a multiplier the renderer writes the same words for the digit as
+/// units ("สองพันห้า": 2005, spoken 2500), so that reading is the caller's
+/// to weigh; a bare scale word it never writes, which leaves one reading.
+pub fn elided_place(lang: &str, norm: &str) -> Option<(bool, i64)> {
+    let (scales, digits): (&[(&str, i64)], &[&str]) = match lang.split(&['_', '-'][..]).next()? {
+        "th" => (
+            &[("พัน", 1_000), ("หมื่น", 10_000), ("แสน", 100_000), ("ล้าน", 1_000_000)],
+            &["หนึ่ง", "สอง", "สาม", "สี่", "ห้า", "หก", "เจ็ด", "แปด", "เก้า"],
+        ),
+        "lo" => (
+            &[("ພັນ", 1_000), ("ໝື່ນ", 10_000), ("ແສນ", 100_000), ("ລ້ານ", 1_000_000)],
+            &["ໜຶ່ງ", "ສອງ", "ສາມ", "ສີ່", "ຫ້າ", "ຫົກ", "ເຈັດ", "ແປດ", "ເກົ້າ"],
+        ),
+        "km" => (
+            &[("ពាន់", 1_000), ("ម៉ឺន", 10_000), ("សែន", 100_000), ("លាន", 1_000_000)],
+            &["មួយ", "ពីរ", "បី", "បួន", "ប្រាំ", "ប្រាំមួយ", "ប្រាំពីរ", "ប្រាំបី", "ប្រាំបួន"],
+        ),
+        _ => return None,
+    };
+    let glued: String = norm.chars().filter(|c| !c.is_whitespace()).collect();
+    digits.iter().enumerate().find_map(|(d, w)| {
+        let rest = glued.strip_suffix(normalize(w).as_str())?;
+        scales.iter().find_map(|(s, mag)| {
+            let head = rest.strip_suffix(normalize(s).as_str())?;
+            Some((!head.is_empty(), mag + (d as i64 + 1) * mag / 10))
+        })
+    })
+}
+
+/// es "1º", pt "1ª", "1.º", "1.000º": the figure before an ordinal indicator,
+/// in any language and mode, as de "1." is its figure. `None` for anything
+/// else; the degree sign "°" is no indicator.
+pub(crate) fn ordinal_indicator_figure(text: &str) -> Option<&str> {
+    let f = text.trim().strip_suffix(['\u{00BA}', '\u{00AA}'])?;
+    let f = f.strip_suffix('.').unwrap_or(f);
+    let digit_ends = f.starts_with(|c: char| c.is_ascii_digit()) && f.ends_with(|c: char| c.is_ascii_digit());
+    (digit_ends && f.chars().all(|c| c.is_ascii_digit() || ".,'".contains(c))).then_some(f)
+}
+
+/// Whether `lang` puts a multiplier after its scale word (ha, bm, sw, ...),
+/// the only languages [`is_ambiguous_number`] can answer yes for.
+pub fn has_postfix_scales(lang: &str) -> bool {
+    is_supported_lang(lang) && {
+        let sc = scales_of(lang);
+        !sc.postfix.is_empty() || !sc.one_after.is_empty()
+    }
+}
+
+fn scaled_reading(lang: &str, norm: &str) -> Scaled {
+    let Some(v) = scaled_value(lang, norm) else { return Scaled::None };
+    let sc = scales_of(lang);
+    let v = match postfix_rival(lang, v, norm, &sc) {
+        Rival::None => v,
+        Rival::Prefer(m) => m,
+        Rival::Ambiguous => return Scaled::Ambiguous,
+    };
+    if w2n_forms::has_rival_reading(lang, v, norm) {
+        return Scaled::Ambiguous; // bm "ba tan ni kelen": 10001 and 11000 render alike
+    }
+    // Where the multiplier may follow the scale word (ha, ff, sw, sn, bm, tet,
+    // eu), a spelling can split several ways and num2words2 sometimes renders
+    // two values alike. Only a reading the renderer spells this way is kept:
+    // a raise beats a wrong number.
+    if (!sc.postfix.is_empty() || !sc.one_after.is_empty())
+        && !renders_as(lang, v, norm)
+        && !renders_as(lang, v, &drop_postfix_connector(norm, &sc, connector_words(lang)))
+    {
+        return Scaled::None;
+    }
+    Scaled::Value(v)
+}
+
+/// ha "miliyan da talatin": the sum written with the "da" the renderer drops
+/// before a 10-999 remainder ("miliyan talatin" reads as the product, #882),
+/// as the renderer would write it without.
+fn drop_postfix_connector(norm: &str, sc: &Scales, conns: &[&str]) -> String {
+    let toks: Vec<&str> = norm.split_whitespace().collect();
+    let mut out: Vec<&str> = Vec::new();
+    for (k, t) in toks.iter().enumerate() {
+        let after_scale = k > 0 && sc.postfix.iter().any(|w| w == toks[k - 1]);
+        if !(after_scale && conns.contains(t)) {
+            out.push(t);
+        }
+    }
+    out.join(" ")
+}
+
+fn scaled_value(lang: &str, norm: &str) -> Option<i64> {
     if !is_supported_lang(lang) {
         return None;
     }
@@ -1245,17 +1515,66 @@ pub fn parse_scaled_norm(lang: &str, norm: &str) -> Option<i64> {
             (None, None) => return None,
         },
     };
-    if w2n_forms::has_rival_reading(lang, v, norm) {
-        return None; // bm "ba tan ni kelen": 10001 and 11000 render alike
-    }
-    // Where the multiplier may follow the scale word (ha, ff, sw, sn, bm, tet,
-    // eu), a spelling can split several ways and num2words2 sometimes renders
-    // two values alike. Only a reading the renderer spells this way is kept:
-    // a raise beats a wrong number.
-    if (!sc.postfix.is_empty() || !sc.one_after.is_empty()) && !renders_as(lang, v, norm) {
-        return None;
-    }
     Some(v)
+}
+
+/// ha "miliyan dubu ɗari" is 1 001 100 and 1 100 000 alike: a postfix scale
+/// word followed by a multiplier below 1000 ("dubu ɗari" = 1000 × 100) is a
+/// rival reading of a number read additively. True when such a rival differs
+/// from `v` and the renderer writes it as `norm` too (#348).
+fn postfix_rival(lang: &str, v: i64, norm: &str, sc: &Scales) -> Rival {
+    if sc.postfix.is_empty() {
+        return Rival::None;
+    }
+    let toks: Vec<&str> = norm.split_whitespace().collect();
+    // A "da" after a scale word the renderer drops: compare without it too,
+    // so "miliyan da dubu goma" is as ambiguous as "miliyan dubu goma".
+    let undropped = drop_postfix_connector(norm, sc, connector_words(lang));
+    let rendered = |x: i64| renders_as(lang, x, norm) || renders_as(lang, x, &undropped);
+    for i in 0..toks.len().saturating_sub(1) {
+        if !sc.postfix.iter().any(|w| w == toks[i]) {
+            continue;
+        }
+        let Some(unit) = sc.words.iter().find(|(w, _)| w == toks[i]).map(|(_, m)| *m) else {
+            continue;
+        };
+        let Some(m) = lookup_plain(lang, &toks[i + 1..].join(" ")).filter(|m| (2..1000).contains(m)) else {
+            continue;
+        };
+        let Some(h) = (if i == 0 { Some(0) } else { parse_scaled_norm_unchecked(lang, &toks[..i].join(" ")) })
+        else {
+            continue;
+        };
+        // The renderer writes "miliyan talatin" for 30·10^6 and for 10^6 + 30
+        // alike: it drops the "da" a sum takes. A reader takes the multiplier
+        // after the scale word, so that reading wins (#882).
+        // Only for a million and above: the thousands keep the reading the
+        // table gives ("dubu goma" is 1 010) and stay ambiguous to the
+        // ordinal and sentence guards, as before.
+        let mult = unit.checked_mul(m).and_then(|x| h.checked_add(x));
+        if let Some(mult) = mult.filter(|&x| rendered(x)) {
+            if unit >= 1_000_000 {
+                return if mult == v { Rival::None } else { Rival::Prefer(mult) };
+            }
+            if mult != v {
+                return Rival::Ambiguous;
+            }
+        }
+        let add = h.checked_add(unit).and_then(|x| x.checked_add(m));
+        if add.is_some_and(|x| x != v && rendered(x)) {
+            return Rival::Ambiguous;
+        }
+    }
+    Rival::None
+}
+
+/// What [`postfix_rival`] makes of a reading.
+enum Rival {
+    None,
+    /// The renderer writes the text for this other value, which reads first.
+    Prefer(i64),
+    /// Two values alike, neither preferred.
+    Ambiguous,
 }
 
 /// [`parse_scaled_norm`] without its ambiguity checks, for a fragment.
@@ -1395,7 +1714,10 @@ fn split_glued_scale(lang: &str, tok: &str, sc: &Scales) -> Option<i64> {
 
 /// `tok` read as head × `mag` + tail around the morpheme at `pos..pos + len`.
 fn glued_at(lang: &str, tok: &str, pos: usize, len: usize, mag: i64, sc: &Scales) -> Option<i64> {
-    let (pre, suf) = (&tok[..pos], &tok[pos + len..]);
+    // bo: the tsheg ending the syllable before the morpheme, or opening the
+    // tail, belongs to neither part ("དགུ་ཁྲི་" + "དུང་ཕྱུར").
+    let tsheg = ['\u{0F0B}', '\u{0F0C}'];
+    let (pre, suf) = (tok[..pos].trim_matches(tsheg), tok[pos + len..].trim_matches(tsheg));
     if pre.is_empty() && suf.is_empty() {
         return None; // the bare morpheme: the table's business
     }
@@ -1446,8 +1768,17 @@ fn glued_at(lang: &str, tok: &str, pos: usize, len: usize, mag: i64, sc: &Scales
         return None;
     }
     let v = high.checked_mul(mag)?.checked_add(low)?;
+    // bo "ཁྲི་དུང་ཕྱུར" (10^4 · 10^8) is one scale word, but in "གཅིག་འབུམ་
+    // གཅིག་ཁྲི་དུང་ཕྱུར" its ཁྲི belongs to the multiplier of དུང་ཕྱུར: 11·10^12,
+    // not 100001·10^12 (#349). A compound scale after a multiplier that holds
+    // a scale of its own only where the renderer spells this very number so.
+    let morpheme = &tok[pos..pos + len];
+    let compound = || {
+        let inner = |g: &str| sc.glue.iter().any(|(w, m)| *m >= 1000 && *m < mag && g.contains(w.as_str()));
+        inner(morpheme) && inner(pre)
+    };
     // A stacked reading only where the renderer spells this very number so.
-    (!stacked || renders_as(lang, v, tok)).then_some(v)
+    (!(stacked || compound()) || renders_as(lang, v, tok)).then_some(v)
 }
 
 /// en_AERO "wun zero zero zero zero zero" = 100000: every token one digit. An i64
@@ -1635,7 +1966,11 @@ fn parse_scaled_inner(lang: &str, text: &str, sc: &Scales, conns: &[&str]) -> Op
                     else {
                         continue;
                     };
-                    if let Some(v) = rest(&after[j..], mag).and_then(|r| compose(m, r)) {
+                    // A multiplier of 1000 or more only where the renderer spells
+                    // the product so: ha "miliyan dubu" is 10^6 + 1000 (read
+                    // below), not 1000 × 10^6, which is "biliyan" (#348).
+                    let v = rest(&after[j..], mag).and_then(|r| compose(m, r));
+                    if let Some(v) = v.filter(|&v| m < 1000 || renders_as(lang, v, text)) {
                         return Some(v);
                     }
                 }
@@ -1674,7 +2009,10 @@ fn parse_scaled_inner(lang: &str, text: &str, sc: &Scales, conns: &[&str]) -> Op
             // when the renderer says so: tet "miliaun rihun atus sia rihun ida" is
             // no 1 × 10^6 + 901001.
             let postfix_one = left_trim.is_empty() && sc.postfix.iter().any(|w| w == word);
-            if let Some(v) = v.filter(|&v| !(postfix_one || stacked) || renders_as(lang, v, text)) {
+            let rendered = |v: i64| {
+                renders_as(lang, v, text) || renders_as(lang, v, &drop_postfix_connector(text, sc, conns))
+            };
+            if let Some(v) = v.filter(|&v| !(postfix_one || stacked) || rendered(v)) {
                 return Some(v);
             }
             if postfix_one && v.is_some() {
@@ -2379,6 +2717,28 @@ mod tests {
         // ha / ff put every multiplier after the scale word.
         assert_eq!(parse_scaled("ha", "dubu biyu"), Some(2_000));
         assert_eq!(parse_scaled("ha", "miliyan biyu"), Some(2_000_000));
+        // #348: the additive reading when 1000 × 10^6 is not how the renderer
+        // writes the product.
+        assert_eq!(parse_scaled("ha", "miliyan dubu"), Some(1_001_000));
+        assert_eq!(parse_scaled("ha", "miliyan dubu biyu"), Some(1_002_000));
+        assert_eq!(parse_scaled("ha", "miliyan dubu uku ɗari huɗu hamsin da shida"), Some(1_003_456));
+        assert_eq!(parse_scaled("ha", "biliyan dubu"), Some(1_000_001_000));
+        // #882: the renderer writes "<scale> <M>" for the product and for the
+        // sum without "da" alike; a reader takes the multiplier.
+        assert_eq!(parse_scaled("ha", "miliyan goma"), Some(10_000_000));
+        assert_eq!(parse_scaled("ha", "miliyan talatin"), Some(30_000_000));
+        assert_eq!(parse_scaled("ha", "miliyan sha biyu"), Some(12_000_000));
+        assert_eq!(parse_scaled("ha", "miliyan ɗari biyar"), Some(500_000_000));
+        // The thousands stay ambiguous, as before (1 001 100 and 1 100 000).
+        assert_eq!(parse_scaled("ha", "miliyan dubu ɗari"), None);
+        assert_eq!(parse_scaled("ha", "miliyan biyu dubu ɗari uku sha biyar"), None);
+        // The sum is written with "da".
+        assert_eq!(parse_scaled("ha", "miliyan da biyu"), Some(1_000_002));
+        assert_eq!(parse_scaled("ha", "miliyan da talatin"), Some(1_000_030));
+        assert_eq!(parse_scaled("ha", "miliyan da ɗari biyar tamanin"), Some(1_000_580));
+        // "da" does not lift the thousands' ambiguity.
+        assert_eq!(parse_scaled("ha", "miliyan da dubu goma"), None);
+        assert_eq!(parse_scaled("ha", "miliyan da dubu ɗari biyar"), None);
         assert_eq!(parse_scaled("ff", "ujunere teemerre"), Some(100_000));
         // km myriad and hundred-thousand glued to their multiplier.
         assert_eq!(parse_scaled("km", "មួយម៉ឺន ពីរពាន់ បីរយ សែសិបប្រាំ"), Some(12_345));
@@ -2524,6 +2884,12 @@ mod tests {
         assert_eq!(parse_scaled("ko", "일억 이천삼백사십오만 육천칠백팔십구"), Some(123_456_789));
         assert_eq!(parse_scaled("zh", "九千九百九十九万"), Some(99_990_000));
         assert_eq!(parse_scaled("bo", "གཅིག་འབུམ་གཅིག་ཁྲི་དྲུག་བརྒྱ་དགུ་བཅུ་བདུན་"), Some(110_697));
+        // #349: a compound scale (ཁྲི་དུང་ཕྱུར) does not swallow the ཁྲི of the
+        // multiplier before དུང་ཕྱུར.
+        assert_eq!(parse_scaled("bo", "གཅིག་འབུམ་གཅིག་ཁྲི་དུང་ཕྱུར་"), Some(11_000_000_000_000));
+        assert_eq!(parse_scaled("bo", "དགུ་འབུམ་དགུ་ཁྲི་དུང་ཕྱུར་"), Some(99_000_000_000_000));
+        assert_eq!(parse_scaled("bo", "གཅིག་ས་ཡ་གཅིག་ཁྲི་དུང་ཕྱུར་"), Some(101_000_000_000_000));
+        assert_eq!(parse_scaled("bo", "གཅིག་ཁྲི་དུང་ཕྱུར་"), Some(1_000_000_000_000));
         assert_eq!(parse_scaled("th", "หนึ่งแสนสองหมื่นสามพันสี่ร้อยห้าสิบหก"), Some(123_456));
         // zh 零 fills a skipped place.
         assert_eq!(parse_scaled("zh", "一万零一"), Some(10_001));

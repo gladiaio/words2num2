@@ -315,7 +315,8 @@ def test_digit_strings(lang, text, expected):
         ("fr", "trois virgule", "3 virgule"),
         ("fr", "virgule cinq", "virgule 5"),
         ("es", "tres coma cinco", "3,5"),
-        ("es", "tres punto cinco", "3.5"),
+        # The region's mark, whatever the word: es reads "3.141" as 3141 (#951).
+        ("es", "tres punto cinco", "3,5"),
         ("es", "dos coma cero cinco", "2,05"),
         ("de", "drei komma fünf", "3,5"),
         ("it", "tre virgola cinque", "3,5"),
