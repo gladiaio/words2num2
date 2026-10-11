@@ -293,6 +293,11 @@ def test_plain_walk_subunit(lang, text, to, expected):
         ("douze dollars et deux virgule cinq cents", "fr", "12 $ et 2,5 cents"),
         ("douze dollars et cent cinquante cents", "fr", "12 $ et 150 cents"),
         ("dix dollars et mille deux cents personnes", "fr", "10 $ et 1200 personnes"),
+        (
+            "vingt euros et mille cent cinquante personnes",
+            "fr",
+            "20 € et 1150 personnes",
+        ),
     ],
 )
 def test_subunit_count_is_one_plain_number_issue_1017(text, lang, expected):

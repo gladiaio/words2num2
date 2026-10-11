@@ -1384,7 +1384,12 @@ fn pieces_for_walk_with(sentence: &str, lang: &str, subunits_only: bool) -> Vec<
                 // "cents" ("mille deux cents personnes" is 1200), and a symbol
                 // the table does not read ("Ⅻ cents") (#1025).
                 let last_multiplies = matches!(crate::lookup_norm(lang, &keys[w - 1], false, &[]), Ok(Some(2..=9)));
-                let unread = v == -1 || !all_numbers || (v >= 100 && !last_multiplies);
+                // Never when the subunit word extends the count into one
+                // number: "deux mille cent personnes" is 2100 (#1029).
+                // Only the singular: "mille cents" is no 1100.
+                let extends = keys[w] == "cent"
+                    && crate::words2num(&format!("{} {}", keys[w - back..w].join(" "), keys[w]), lang, "cardinal").is_ok();
+                let unread = !extends && (v == -1 || !all_numbers || (v >= 100 && !last_multiplies));
                 let opaque = !subunits_only
                     && unread
                     && (w - back..w).all(numberish)
