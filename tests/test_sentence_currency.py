@@ -316,6 +316,9 @@ def test_subunit_count_is_one_plain_number_issue_1017(text, lang, expected):
 )
 def test_one_word_subunit_count_issue_1009(text, currency, expected):
     assert words2num_sentence(text, lang="fr", currency=currency) == expected
+
+
+@pytest.mark.parametrize(
     "text, lang, expected",
     [
         ("x cinq euros， y", "fr", "x 5 €， y"),

@@ -7171,7 +7171,7 @@ mod plain_walk_subunit_tests {
         assert_eq!(s("deux dollars et neuf cents de plus", "fr", "cardinal"), "2 dollars et 900 de plus");
         assert_eq!(s("douze dollars et (vingt cents)", "fr", "cardinal"), "12 dollars et (20 cents)");
         assert_eq!(s("un dollar et (un cent)", "fr", "cardinal"), "1 dollar et (un cent)");
-        assert_eq!(s("douze dollars et neuf\u{2026} cents", "fr", "cardinal"), "12 dollars et neuf\u{2026} cents");
+        assert_eq!(s("douze dollars et neuf\u{2026} cents", "fr", "cardinal"), "12 dollars et 9\u{2026} cents");
         assert_eq!(s("douze dollars et vingt( cents", "fr", "cardinal"), "12 dollars et 20( cents");
         assert_eq!(s("douze dollars et vingt cents", "fr", "ordinal"), "douze dollars et vingt cents");
         assert_eq!(s("douze dollars et vingt cents", "fr", "digits"), "douze dollars et vingt cents");
