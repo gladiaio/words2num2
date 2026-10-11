@@ -106,7 +106,7 @@ order: en `"3/12/2026"`, en_GB / fr / es / it / pt `"12/03/2026"`, de
 `"12.03.2026"`, nl `"12-03-2026"`. Without a separator ("slash", de
 ordinal dots, es / pt "de … de") it needs a date cue before it (en "on",
 "from", "date:", fr "le", de "am", es "el" ...), to be the second end of a
-range ("… to …"), or to stand alone as a sentence, so "we need three
+range ("… to …"), or to stand alone (a whole sentence, or before a clock time), so "we need three
 twelve two thousand people" stays three numbers. After a preposition cue
 ("by", "from", de "ab" ...) a round year with a word after it is a quantity
 ("by three twelve two thousand people"). `region` (`"US"`, `"GB"`...) overrides

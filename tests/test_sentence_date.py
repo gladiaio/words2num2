@@ -174,6 +174,22 @@ def test_date_and_currency_together():
             "van 12-03-2000 tot en met 13-03-2000",
         ),
         ("it", "il dodici tre duemilaventisei", "il 12/03/2026"),
+        # The second end in any date form (#1051 N4).
+        (
+            "en",
+            "from three twelve two thousand to four slash twelve slash two thousand",
+            "from 3/12/2000 to 4/12/2000",
+        ),
+        (
+            "en",
+            "from three twelve two thousand to december fourth two thousand",
+            "from 3/12/2000 to December 4, 2000",
+        ),
+        (
+            "es",
+            "del tres doce dos mil al cuatro de doce de dos mil",
+            "del 03/12/2000 al 04/12/2000",
+        ),
         ("en", "the deadline is 3/12/2026 and", "the deadline is 3/12/2026 and"),
     ],
 )

@@ -317,7 +317,7 @@ fn clock_cue(st: Style, w: &str) -> bool {
 /// A date spoken all in numbers at token `i`: N1 [sep] N2 [sep] YEAR, with
 /// sep "slash" or "/" (both or none), de "12. 3. 2026", es / pt "12 del 3
 /// de 2026". N1 is the month in en (US), the day elsewhere.
-fn numeric_at(st: Style, toks: &[&str], i: usize, chained: bool) -> Option<Span> {
+fn numeric_at(lang: &str, st: Style, toks: &[&str], i: usize, chained: bool) -> Option<Span> {
     let at = |k: usize| toks.get(k).copied().filter(|t| !t.is_empty());
     let low = |k: usize| at(k).map(|t| split_trail(t).0.to_lowercase());
     let (a, a_trail) = small(st, at(i)?)?;
@@ -414,16 +414,20 @@ fn numeric_at(st: Style, toks: &[&str], i: usize, chained: bool) -> Option<Span>
                 trail.is_empty() && range_word(st, &w.to_lowercase())
             })
             .count();
-        let figure_date = |t: &str| {
-            let core = split_trail(t).0;
-            let parts: Vec<&str> = core.split(['/', '.', '-']).collect();
-            parts.len() == 3 && parts.iter().all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit())) && parts[2].len() == 4
-        };
+        // The second end in any date form the pass reads ("4/12/2000", "4
+        // slash 12 slash 2000", "december fourth 2000", es "cuatro de
+        // diciembre de …"): the same span lookup, as a chained span.
+        let second_at = (i + len..toks.len()).filter(|&k| !toks[k].is_empty()).nth(r);
         let range_next = r > 0
-            && (after.get(r).is_some_and(|t| figure_date(t))
-                || (after.get(r).is_some_and(|t| small(st, t).is_some())
-                    && after.get(r + 1).is_some_and(|t| small(st, t).is_some())
-                    && after.get(r + 2).is_some_and(|t| year(t).is_some())));
+            && second_at.is_some_and(|k| {
+                let t = toks[k];
+                let core = split_trail(t).0;
+                let parts: Vec<&str> = core.split(['/', '.', '-']).collect();
+                let figure_date = parts.len() == 3
+                    && parts.iter().all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
+                    && parts.iter().any(|p| p.len() == 4);
+                figure_date || span_at(lang, st, toks, k, true).is_some()
+            });
         let word_after = !ends && !range_next;
         match cue {
             Some(1) if y.ends_with("00") && word_after => return None,
@@ -442,7 +446,7 @@ fn numeric_at(st: Style, toks: &[&str], i: usize, chained: bool) -> Option<Span>
 
 /// The date span starting at token `i`, if any.
 fn span_at(lang: &str, st: Style, toks: &[&str], i: usize, chained: bool) -> Option<Span> {
-    if let Some(s) = numeric_at(st, toks, i, chained) {
+    if let Some(s) = numeric_at(lang, st, toks, i, chained) {
         return Some(s);
     }
     let at = |k: usize| toks.get(k).copied().filter(|t| !t.is_empty());
