@@ -143,6 +143,11 @@ def test_date_and_currency_together():
         ("en", "by three twelve two thousand people", "by 3 12 2000 people"),
         ("de", "ab drei zwölf zweitausend Euro", "ab 3 12 2000 Euro"),
         ("en", "on three twelve twenty twenty six I paid", "on 3/12/2026 I paid"),
+        # "Alone" needs a sentence end or a real clock time (#1057, #1058).
+        ("en", "three twelve two thousand at most", "3 12 2000 at most"),
+        ("en", "3 12 2000, 4 5 1999, 7 8 2001", "3 12 2000, 4 5 1999, 7 8 2001"),
+        ("fr", "Résultat : 3 12 2000.", "Résultat : 3 12 2000."),
+        ("en", "three twelve twenty twenty six at noon", "3/12/2026 at noon"),
     ],
 )
 def test_numeric_date(lang, text, expected):

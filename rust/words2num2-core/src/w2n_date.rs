@@ -268,6 +268,15 @@ fn range_word(st: Style, w: &str) -> bool {
     words.contains(&w)
 }
 
+/// A clock time spoken as a word ("at noon").
+fn time_word(w: &str) -> bool {
+    matches!(
+        w,
+        "noon" | "midnight" | "midi" | "minuit" | "mittag" | "mitternacht" | "mediodía" | "medianoche"
+            | "meio-dia" | "meia-noite" | "mezzogiorno" | "mezzanotte" | "middernacht"
+    )
+}
+
 /// A word that introduces a clock time after a date ("… at 3:30").
 fn clock_cue(st: Style, w: &str) -> bool {
     let words: &[&str] = match st {
@@ -318,19 +327,41 @@ fn numeric_at(st: Style, toks: &[&str], i: usize, chained: bool) -> Option<Span>
     let de_dots = st == Style::De && [i, i + 1].iter().all(|&k| at(k).is_some_and(|t| t.ends_with('.')));
     if s1 == 0 && !de_dots && !chained {
         let word = |t: &str| t.chars().any(char::is_alphanumeric);
-        let before = toks[..i].iter().rev().find(|t| !t.is_empty());
-        // A cue, with a ":" or "," after it, a bracket before it ("(on").
-        let cued = before.is_some_and(|t| {
-            let (prev, prev_trail) = split_trail(t);
-            let prev = prev.trim_start_matches(|c: char| !c.is_alphanumeric());
-            matches!(prev_trail, "" | ":" | ",") && date_cue(st, &prev.to_lowercase())
+        let sentence_end = |t: &str| t.trim_end_matches(['"', '\'', ')', '»', '”']).ends_with(['.', '!', '?']);
+        let back: Vec<&str> = toks[..i].iter().rev().copied().filter(|t| !t.is_empty()).collect();
+        // A cue, with ":" or "," after it (also spaced: "Date : …"), a bracket
+        // before it ("(on").
+        let cue_at = back.iter().position(|t| word(t));
+        let cued = cue_at.is_some_and(|n| {
+            back[..n].iter().all(|t| matches!(*t, ":" | ","))
+                && {
+                    let (prev, prev_trail) = split_trail(back[n]);
+                    let prev = prev.trim_start_matches(|c: char| !c.is_alphanumeric());
+                    matches!(prev_trail, "" | ":" | ",") && date_cue(st, &prev.to_lowercase())
+                }
         });
-        // Alone: only punctuation before it, or a sentence end ("Moved. 3 12
-        // 2026"); only punctuation after it, or a clock time ("at 3:30").
-        let starts = before.is_none_or(|t| !word(t) || t.ends_with(['.', '!', '?', ':']));
-        let after = toks[(i + len).min(toks.len())..].iter().find(|t| !t.is_empty());
-        let ends = !open(&trail)
-            || after.is_none_or(|t| !word(t) || clock_cue(st, &split_trail(t).0.to_lowercase()));
+        // Alone: at the start of the text or of a sentence (punctuation-only
+        // tokens such as a bullet may come between), and up to the end of it,
+        // or before a clock time ("at 3:30") (#1057, #1058).
+        let starts = match cue_at {
+            None => true,
+            Some(n) => sentence_end(back[n]) && back[..n].iter().all(|t| !word(t)),
+        };
+        let after: Vec<&str> = toks[(i + len).min(toks.len())..].iter().copied().filter(|t| !t.is_empty()).collect();
+        let time_next = |k: usize| {
+            after.get(k).is_some_and(|t| clock_cue(st, &split_trail(t).0.to_lowercase()))
+                && after.get(k + 1).is_some_and(|t| {
+                    t.starts_with(|c: char| c.is_ascii_digit()) || time_word(&split_trail(t).0.to_lowercase())
+                })
+        };
+        let ends = if trail.is_empty() {
+            match after.iter().position(|t| word(t)) {
+                None => after.iter().all(|t| t.chars().all(|c| matches!(c, '.' | '!' | '?' | '"' | ')' | '»' | '”'))),
+                Some(k) => after[..k].is_empty() && time_next(0),
+            }
+        } else {
+            sentence_end(&trail)
+        };
         if !cued && !(starts && ends) {
             return None;
         }
