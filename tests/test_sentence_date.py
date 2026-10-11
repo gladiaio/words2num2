@@ -157,6 +157,24 @@ def test_date_and_currency_together():
         ("en", "DOB: 3 12 2000, male", "DOB: 3/12/2000, male"),
         ("en", "from 3 12 2000 to 4 12 2000", "from 3/12/2000 to 4/12/2000"),
         ("pt", "um grupo de três doze dois mil e dez", "um grupo de 3 12 2010"),
+        # A range word needs a second date after it (#1051 N1).
+        (
+            "pt",
+            "precisamos de três doze dois mil a cada mês",
+            "precisamos de 3 12 2000 a cada mês",
+        ),
+        (
+            "en",
+            "from three twelve two thousand to five thousand people",
+            "from 3 12 2000 to 5000 people",
+        ),
+        (
+            "nl",
+            "van 12 3 2000 tot en met 13 3 2000",
+            "van 12-03-2000 tot en met 13-03-2000",
+        ),
+        ("it", "il dodici tre duemilaventisei", "il 12/03/2026"),
+        ("en", "the deadline is 3/12/2026 and", "the deadline is 3/12/2026 and"),
     ],
 )
 def test_numeric_date(lang, text, expected):

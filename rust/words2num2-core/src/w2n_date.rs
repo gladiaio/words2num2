@@ -27,9 +27,10 @@
 //! It needs a four-digit year and a real calendar date. With no separator
 //! (no "slash", no de dots, no es/pt "de … de") it also needs a date cue
 //! right before it (en "on", fr "le", de "am", es "el" ...), a date it is the
-//! second end of ("from … to …"), or to stand alone (only punctuation around
-//! it, or a clock time after it): "we need three twelve two thousand
-//! people" is three quantities (#1031).
+//! second end of ("from … to …"), or to stand alone (a whole sentence, or
+//! a clock time after it): "we need three twelve two thousand people" is
+//! three quantities (#1031). After a preposition cue ("by", "from", de "ab")
+//! a round year with a word after it stays a quantity.
 //!
 //! `region` ("US", "GB"...) overrides the region of the language code;
 //! `iso` writes every date that has a year as "2026-03-12".
@@ -403,10 +404,26 @@ fn numeric_at(st: Style, toks: &[&str], i: usize, chained: bool) -> Option<Span>
         // very common word (pt "de", de "dem"), any year is. A range word
         // after it ("from … to …") is no such word; a date word ("born on",
         // "am") always gives a date.
-        let range_next = after.first().is_some_and(|t| {
-            let (w, trail) = split_trail(t);
-            trail.is_empty() && range_word(st, &w.to_lowercase())
-        });
+        // Range words, then a second date: three numbers or one in figures
+        // ("to 4 12 2000", "tot en met 13 3 2000", "to 4/12/2000") (#1051 N1).
+        let r = after
+            .iter()
+            .take(3)
+            .take_while(|t| {
+                let (w, trail) = split_trail(t);
+                trail.is_empty() && range_word(st, &w.to_lowercase())
+            })
+            .count();
+        let figure_date = |t: &str| {
+            let core = split_trail(t).0;
+            let parts: Vec<&str> = core.split(['/', '.', '-']).collect();
+            parts.len() == 3 && parts.iter().all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit())) && parts[2].len() == 4
+        };
+        let range_next = r > 0
+            && (after.get(r).is_some_and(|t| figure_date(t))
+                || (after.get(r).is_some_and(|t| small(st, t).is_some())
+                    && after.get(r + 1).is_some_and(|t| small(st, t).is_some())
+                    && after.get(r + 2).is_some_and(|t| year(t).is_some())));
         let word_after = !ends && !range_next;
         match cue {
             Some(1) if y.ends_with("00") && word_after => return None,
