@@ -148,6 +148,15 @@ def test_date_and_currency_together():
         ("en", "3 12 2000, 4 5 1999, 7 8 2001", "3 12 2000, 4 5 1999, 7 8 2001"),
         ("fr", "Résultat : 3 12 2000.", "Résultat : 3 12 2000."),
         ("en", "three twelve twenty twenty six at noon", "3/12/2026 at noon"),
+        # A date word always gives a date; pt "de" alone only opens a range.
+        (
+            "en",
+            "born on three twelve two thousand in Paris",
+            "born on 3/12/2000 in Paris",
+        ),
+        ("en", "DOB: 3 12 2000, male", "DOB: 3/12/2000, male"),
+        ("en", "from 3 12 2000 to 4 12 2000", "from 3/12/2000 to 4/12/2000"),
+        ("pt", "um grupo de três doze dois mil e dez", "um grupo de 3 12 2010"),
     ],
 )
 def test_numeric_date(lang, text, expected):

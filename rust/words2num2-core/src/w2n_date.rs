@@ -254,6 +254,28 @@ fn date_cue(st: Style, w: &str) -> bool {
     cues.contains(&w)
 }
 
+/// How strongly a cue announces a date: 2 for a date word ("on", "born",
+/// fr "le", de "am"), 1 for a preposition that also takes quantities ("by",
+/// "from", de "ab"), 0 for a very common word (pt "de", de "dem" / "zum").
+fn cue_strength(st: Style, w: &str) -> u8 {
+    let (weak, very_weak): (&[&str], &[&str]) = match st {
+        Style::EnUs | Style::EnGb => (&["by", "from", "after", "before", "since", "until", "till"], &[]),
+        Style::Fr => (&["au", "du", "depuis", "jusqu'au"], &[]),
+        Style::De => (&["ab", "bis", "seit", "vom"], &["dem", "zum"]),
+        Style::Es => (&["hasta", "desde", "al", "del"], &[]),
+        Style::Pt => (&["em", "no", "desde", "até"], &["de"]),
+        Style::It => (&["al", "dal", "fino"], &[]),
+        Style::Nl => (&["op", "van", "tot", "sinds"], &[]),
+    };
+    if very_weak.contains(&w) {
+        0
+    } else if weak.contains(&w) {
+        1
+    } else {
+        2
+    }
+}
+
 /// A word that joins the two ends of a date range: "from … to …".
 fn range_word(st: Style, w: &str) -> bool {
     let words: &[&str] = match st {
@@ -332,14 +354,25 @@ fn numeric_at(st: Style, toks: &[&str], i: usize, chained: bool) -> Option<Span>
         // A cue, with ":" or "," after it (also spaced: "Date : …"), a bracket
         // before it ("(on").
         let cue_at = back.iter().position(|t| word(t));
-        let cued = cue_at.is_some_and(|n| {
-            back[..n].iter().all(|t| matches!(*t, ":" | ","))
-                && {
-                    let (prev, prev_trail) = split_trail(back[n]);
-                    let prev = prev.trim_start_matches(|c: char| !c.is_alphanumeric());
-                    matches!(prev_trail, "" | ":" | ",") && date_cue(st, &prev.to_lowercase())
-                }
-        });
+        let cue = cue_at
+            .filter(|&n| back[..n].iter().all(|t| matches!(*t, ":" | ",")))
+            .and_then(|n| {
+                let (prev, prev_trail) = split_trail(back[n]);
+                let prev = prev.trim_start_matches(|c: char| !c.is_alphanumeric()).to_lowercase();
+                let strength = cue_strength(st, &prev);
+                // A very common word counts behind a real cue ("ab dem", "bis
+                // zum"), taking its strength.
+                let strength = if strength == 0 {
+                    back.get(n + 1).map_or(0, |t| {
+                        let w = split_trail(t).0.to_lowercase();
+                        if date_cue(st, &w) { cue_strength(st, &w).max(1) } else { 0 }
+                    })
+                } else {
+                    strength
+                };
+                (matches!(prev_trail, "" | ":" | ",") && date_cue(st, &prev)).then_some(strength)
+            });
+        let cued = cue.is_some();
         // Alone: at the start of the text or of a sentence (punctuation-only
         // tokens such as a bullet may come between), and up to the end of it,
         // or before a clock time ("at 3:30") (#1057, #1058).
@@ -365,10 +398,21 @@ fn numeric_at(st: Style, toks: &[&str], i: usize, chained: bool) -> Option<Span>
         if !cued && !(starts && ends) {
             return None;
         }
-        // A round year with a word after it is a quantity, even after a cue:
-        // "by three twelve two thousand people" (#1055).
-        if y.ends_with("00") && !ends {
-            return None;
+        // After a preposition cue, a round year with a word after it is a
+        // quantity: "by three twelve two thousand people" (#1055); after a
+        // very common word (pt "de", de "dem"), any year is. A range word
+        // after it ("from … to …") is no such word; a date word ("born on",
+        // "am") always gives a date.
+        let range_next = after.first().is_some_and(|t| {
+            let (w, trail) = split_trail(t);
+            trail.is_empty() && range_word(st, &w.to_lowercase())
+        });
+        let word_after = !ends && !range_next;
+        match cue {
+            Some(1) if y.ends_with("00") && word_after => return None,
+            // pt "de" alone only opens a range: "de 12 3 2026 a 13 3 2026".
+            Some(0) if !range_next => return None,
+            _ => {}
         }
     }
     let (d, m) = if st == Style::EnUs { (b, a) } else { (a, b) };
