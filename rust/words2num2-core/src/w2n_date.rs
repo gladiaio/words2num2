@@ -18,6 +18,16 @@
 //!
 //! Only a span with a month name next to a day (or a month and a year) is
 //! touched; the words around it stay. Other languages pass through unchanged.
+//!
+//! A date spoken all in numbers, day / month / year ("three twelve twenty
+//! twenty six", "oh three slash twelve slash twenty twenty six", de "12. 3.
+//! 2026", es "12 del 3 de 2026"), is written in figures, in the order and
+//! with the separator of the region: en (US) month first "3/12/2026"; en_GB,
+//! fr, es, it, pt day first "12/03/2026"; de "12.03.2026"; nl "12-03-2026".
+//! It needs a four-digit year and a real calendar date.
+//!
+//! `region` ("US", "GB"...) overrides the region of the language code;
+//! `iso` writes every date that has a year as "2026-03-12".
 
 /// The language a date is written for, from the code ("en_GB" -> day first).
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -32,10 +42,10 @@ enum Style {
     Nl,
 }
 
-fn style(lang: &str) -> Option<Style> {
+fn style(lang: &str, region: Option<&str>) -> Option<Style> {
     let mut it = lang.split(&['_', '-'][..]);
     let base = it.next().unwrap_or(lang).to_lowercase();
-    let region = it.next().unwrap_or("").to_uppercase();
+    let region = region.unwrap_or_else(|| it.next().unwrap_or("")).to_uppercase();
     Some(match base.as_str() {
         "en" if matches!(region.as_str(), "GB" | "UK" | "AU" | "NZ" | "IE" | "IN" | "ZA") => Style::EnGb,
         "en" => Style::EnUs,
@@ -94,6 +104,49 @@ fn month(lang: &str, tok: &str) -> Option<(String, String)> {
         .then(|| (core.to_string(), trail.to_string()))
 }
 
+/// The number of a month name of `lang` (1..=12): its place among the
+/// language's names, abbreviations and regional spellings folded in (en
+/// "sept", es "setiembre", de "jänner").
+fn month_number(lang: &str, name: &str) -> Option<u32> {
+    let norm = crate::normalize(name);
+    let base = lang.split(&['_', '-'][..]).next().unwrap_or(lang).to_lowercase();
+    match (base.as_str(), norm.as_str()) {
+        ("es", "setiembre") => return Some(9),
+        ("de", "janner") => return Some(1),
+        ("en", "sept") => return Some(9),
+        _ => {}
+    }
+    let names: Vec<&str> = crate::w2n_sentence::months(lang)
+        .split_whitespace()
+        .filter(|m| !matches!(*m, "setiembre" | "janner" | "sept"))
+        .collect();
+    let full = &names[..names.len().min(12)];
+    if let Some(k) = full.iter().position(|m| *m == norm) {
+        return u32::try_from(k + 1).ok();
+    }
+    // en abbreviations: the first three letters of a full name.
+    full.iter().position(|m| m.len() > 3 && m[..3] == norm[..]).and_then(|k| u32::try_from(k + 1).ok())
+}
+
+/// A number token in figures, 1..=99, with its trailing punctuation; de
+/// "3." is the ordinal (the dot is no punctuation there).
+fn small(st: Style, tok: &str) -> Option<(u32, String)> {
+    let (core, trail) = split_trail(tok);
+    let trail = if st == Style::De && trail.starts_with('.') { &trail[1..] } else { trail };
+    let ok = !core.is_empty() && core.len() <= 2 && core.bytes().all(|b| b.is_ascii_digit());
+    ok.then(|| core.parse().ok()).flatten().filter(|v| (1..=99).contains(v)).map(|v| (v, trail.to_string()))
+}
+
+/// Days in `month` of `year` (leap years included).
+fn days_in(month: u32, year: u32) -> u32 {
+    match month {
+        2 if (year % 4 == 0 && year % 100 != 0) || year % 400 == 0 => 29,
+        2 => 28,
+        4 | 6 | 9 | 11 => 30,
+        _ => 31,
+    }
+}
+
 /// A year in figures, 1000..=2999 (what a spoken date names).
 fn year(tok: &str) -> Option<(String, String)> {
     let (core, trail) = split_trail(tok);
@@ -128,16 +181,36 @@ fn written_day(st: Style, d: u32) -> String {
     }
 }
 
-/// One date span: its parts, with the punctuation after its last token.
+/// One date span: its parts, with the punctuation after its last token. A
+/// numeric date has no month name (`month` empty).
 struct Span {
     day: Option<u32>,
     month: String,
+    month_no: Option<u32>,
     year: Option<String>,
     trail: String,
     len: usize,
 }
 
-fn render(st: Style, s: &Span) -> String {
+/// A date in figures: the region's order and separator, or ISO.
+fn numeric(st: Style, d: u32, m: u32, y: &str, iso: bool) -> String {
+    if iso {
+        return format!("{y}-{m:02}-{d:02}");
+    }
+    match st {
+        Style::EnUs => format!("{m}/{d}/{y}"),
+        Style::De => format!("{d:02}.{m:02}.{y}"),
+        Style::Nl => format!("{d:02}-{m:02}-{y}"),
+        _ => format!("{d:02}/{m:02}/{y}"),
+    }
+}
+
+fn render(st: Style, s: &Span, iso: bool) -> String {
+    if let (Some(d), Some(m), Some(y)) = (s.day, s.month_no, &s.year) {
+        if iso || s.month.is_empty() {
+            return format!("{}{}", numeric(st, d, m, y, iso), s.trail);
+        }
+    }
     let m = written_month(st, &s.month);
     let mut out = match (st, s.day) {
         (_, None) => m,
@@ -162,8 +235,47 @@ fn open(trail: &str) -> bool {
     trail.is_empty()
 }
 
+/// A date spoken all in numbers at token `i`: N1 [sep] N2 [sep] YEAR, with
+/// sep "slash" or "/" (both or none), de "12. 3. 2026", es / pt "12 del 3
+/// de 2026". N1 is the month in en (US), the day elsewhere.
+fn numeric_at(st: Style, toks: &[&str], i: usize) -> Option<Span> {
+    let at = |k: usize| toks.get(k).copied().filter(|t| !t.is_empty());
+    let low = |k: usize| at(k).map(|t| split_trail(t).0.to_lowercase());
+    let (a, a_trail) = small(st, at(i)?)?;
+    if !a_trail.is_empty() {
+        return None;
+    }
+    let es = matches!(st, Style::Es | Style::Pt);
+    let sep = |k: usize| -> usize {
+        match low(k).as_deref() {
+            Some("slash" | "/") => 1,
+            Some("del" | "de") if es => 1,
+            _ => 0,
+        }
+    };
+    let s1 = sep(i + 1);
+    let (b, b_trail) = small(st, at(i + 1 + s1)?)?;
+    if !b_trail.is_empty() {
+        return None;
+    }
+    let s2 = sep(i + 2 + s1);
+    if (s1 == 0) != (s2 == 0) && !es {
+        return None; // "3 slash 12 2026": half a date
+    }
+    let (y, trail) = at(i + 2 + s1 + s2).and_then(year)?;
+    let (d, m) = if st == Style::EnUs { (b, a) } else { (a, b) };
+    let yn: u32 = y.parse().ok()?;
+    if !(1..=12).contains(&m) || d == 0 || d > days_in(m, yn) {
+        return None;
+    }
+    Some(Span { day: Some(d), month: String::new(), month_no: Some(m), year: Some(y), trail, len: 3 + s1 + s2 })
+}
+
 /// The date span starting at token `i`, if any.
 fn span_at(lang: &str, st: Style, toks: &[&str], i: usize) -> Option<Span> {
+    if let Some(s) = numeric_at(st, toks, i) {
+        return Some(s);
+    }
     let at = |k: usize| toks.get(k).copied().filter(|t| !t.is_empty());
     let low = |k: usize| at(k).map(|t| split_trail(t).0.to_lowercase());
     let en = matches!(st, Style::EnUs | Style::EnGb);
@@ -192,7 +304,7 @@ fn span_at(lang: &str, st: Style, toks: &[&str], i: usize) -> Option<Span> {
             if let Some((m, m_trail)) = at(m_at).and_then(|t| month(lang, t)) {
                 let (y, trail, n) = with_year(m_at + 1, &m_trail);
                 let trail = if n == 0 { m_trail } else { trail };
-                return Some(Span { day: Some(d), month: m, year: y, trail, len: m_at + 1 + n - i });
+                return Some(Span { day: Some(d), month_no: month_number(lang, &m), month: m, year: y, trail, len: m_at + 1 + n - i });
             }
         }
     }
@@ -211,13 +323,13 @@ fn span_at(lang: &str, st: Style, toks: &[&str], i: usize) -> Option<Span> {
                     return None;
                 }
                 let trail = if n == 0 { d_trail } else { trail };
-                return Some(Span { day: Some(d), month: m, year: y, trail, len: 2 + skip + n });
+                return Some(Span { day: Some(d), month_no: month_number(lang, &m), month: m, year: y, trail, len: 2 + skip + n });
             }
         }
         // A month and a year: "march 2026", "mars 2026", "marzo de 2026".
         let (y, trail, n) = with_year(i + 1, &m_trail);
         if n > 0 {
-            return Some(Span { day: None, month: m, year: y, trail, len: 1 + n });
+            return Some(Span { day: None, month_no: month_number(lang, &m), month: m, year: y, trail, len: 1 + n });
         }
     }
     None
@@ -226,7 +338,13 @@ fn span_at(lang: &str, st: Style, toks: &[&str], i: usize) -> Option<Span> {
 /// Rewrite every date span of `text` (the walk's output) in the written form
 /// of `lang`. Text in a language with no date style comes back unchanged.
 pub fn fold_dates(text: &str, lang: &str) -> String {
-    let Some(st) = style(lang) else {
+    fold_dates_with(text, lang, None, false)
+}
+
+/// [`fold_dates`] with a region overriding the language code's ("GB" for
+/// day first) and ISO output (`iso`: "2026-03-12" for a date with a year).
+pub fn fold_dates_with(text: &str, lang: &str, region: Option<&str>, iso: bool) -> String {
+    let Some(st) = style(lang, region) else {
         return text.to_string();
     };
     let toks: Vec<&str> = text.split(' ').collect();
@@ -235,7 +353,7 @@ pub fn fold_dates(text: &str, lang: &str) -> String {
     while i < toks.len() {
         match span_at(lang, st, &toks, i) {
             Some(s) => {
-                out.push(render(st, &s));
+                out.push(render(st, &s, iso));
                 i += s.len;
             }
             None => {
@@ -252,7 +370,48 @@ mod tests {
     use super::fold_dates;
 
     fn walk(text: &str, lang: &str) -> String {
-        crate::w2n_sentence::words2num_sentence_full(text, lang, "cardinal", false, false, true).unwrap()
+        crate::w2n_sentence::words2num_sentence_full(text, lang, "cardinal", false, false, true, None, "written").unwrap()
+    }
+
+    fn walk_with(text: &str, lang: &str, region: Option<&str>, format: &str) -> String {
+        crate::w2n_sentence::words2num_sentence_full(text, lang, "cardinal", false, false, true, region, format).unwrap()
+    }
+
+    #[test]
+    fn numeric_dates() {
+        assert_eq!(walk("born on three twelve twenty twenty six", "en"), "born on 3/12/2026");
+        assert_eq!(walk("three twelve twenty twenty six", "en_GB"), "03/12/2026");
+        assert_eq!(walk("the date is oh three slash twelve slash twenty twenty six.", "en"), "the date is 3/12/2026.");
+        assert_eq!(walk("né le douze trois deux mille vingt-six", "fr"), "né le 12/03/2026");
+        assert_eq!(walk("am zwölften dritten zweitausendsechsundzwanzig", "de"), "am 12.03.2026");
+        assert_eq!(walk("el doce del tres de dos mil veintiséis", "es"), "el 12/03/2026");
+        // nl "twaalf drie" is merged by the walk ("1203"): the format on figures.
+        assert_eq!(super::fold_dates("op 12 3 2026", "nl"), "op 12-03-2026");
+        // Not a calendar date, no year, or half a date: left as it is.
+        assert_eq!(walk("thirteen twelve twenty twenty six", "en"), "13 12 2026");
+        assert_eq!(walk("two thirty twenty twenty four", "en"), "2 30 2024");
+        assert_eq!(walk("two twenty nine twenty twenty four", "en"), "2/29/2024");
+        assert_eq!(walk("two twenty nine twenty twenty five", "en"), "2 29 2025");
+        assert_eq!(walk("three twelve", "en"), "3 12");
+    }
+
+    #[test]
+    fn region_override() {
+        assert_eq!(walk_with("three twelve twenty twenty six", "en", Some("GB"), "written"), "03/12/2026");
+        assert_eq!(walk_with("on march twelfth", "en", Some("au"), "written"), "on 12 March");
+        assert_eq!(walk_with("on march twelfth", "en_GB", Some("US"), "written"), "on March 12");
+    }
+
+    #[test]
+    fn iso() {
+        let iso = |t: &str, l: &str| walk_with(t, l, None, "iso");
+        assert_eq!(iso("on march twelfth twenty twenty six", "en"), "on 2026-03-12");
+        assert_eq!(iso("three twelve twenty twenty six", "en"), "2026-03-12");
+        assert_eq!(iso("le premier avril deux mille vingt-six", "fr"), "le 2026-04-01");
+        assert_eq!(iso("el doce de setiembre de dos mil veintiséis", "es"), "el 2026-09-12");
+        assert_eq!(iso("on sept twelfth twenty twenty six", "en"), "on 2026-09-12");
+        // No year: the written form.
+        assert_eq!(iso("the first of march", "en"), "March 1");
     }
 
     #[test]
