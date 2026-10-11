@@ -2304,6 +2304,11 @@ fn table_digit_run(
     Some((digits, part))
 }
 
+/// zh / ja / th: written without spaces, cut into pieces by the segmenter.
+fn unspaced_script(resolved: &str) -> bool {
+    matches!(resolved.split(&['_', '-'][..]).next().unwrap_or(resolved), "zh" | "cn" | "ja" | "jp" | "th")
+}
+
 /// Is `run` exactly two words, each a single digit (0-9) on its own, without a
 /// leading zero? Then it is a range ("deux trois minutes"), and the run must
 /// not read it as one number (#51).
@@ -3692,10 +3697,10 @@ fn words2num_sentence_walk(
         // en "oh" / "o": the interjection, a number only next to another digit
         // word ("room oh seven"), which the digit run reads (#79).
         let head_is_oh = en_grammar && matches!(head.as_str(), "oh" | "o");
-        // Nor does a piece opening on a glued mark ("，五" of "二十，五"): the
-        // mark would be lost (#1028).
+        // Nor, in a script written without spaces, does a piece opening on a
+        // glued mark ("，五" of "二十，五"): the mark would be lost (#1028).
         let starts = starts_run(&converter, &head, decimal_heads)
-            && !piece.starts_with(tokens::is_trailing_punct)
+            && !(unspaced_script(&resolved) && piece.starts_with(tokens::is_trailing_punct))
             && !(head_is_oh && !(en_cardinal && en_digit_run(&parts, i).is_some()));
         // kn "ನೂರ", he "שני", mn "дөчин": a number only with what follows, so it
         // opens a run only in front of another number word, and alone stays a word.
@@ -3848,9 +3853,9 @@ fn words2num_sentence_walk(
             let clean = rstrip_punct(tok).to_lowercase();
             if clean.is_empty()
                 || opens_with_punct(tok)
-                // A piece the segmenter left opening on a glued mark ("，五" of
-                // "二十，五"): the run never crosses the mark (#1028).
-                || (j > i && tok.starts_with(tokens::is_trailing_punct))
+                // A piece the zh/ja/th segmenter left opening on a glued mark
+                // ("，五" of "二十，五"): the run never crosses the mark (#1028).
+                || (j > i && unspaced_script(&resolved) && tok.starts_with(tokens::is_trailing_punct))
                 || tokens::is_punct_part(&clean)
                 // The raw part too: "\u{200b})" cleans to a bare format
                 // character, still a mark part (#1006).
@@ -7184,12 +7189,20 @@ mod script_mark_tests {
         assert_eq!(s("x 二十,五 y", "zh"), "x 20,五 y");
         assert_eq!(s("二十，五，六", "zh"), "20，五，六");
         assert_eq!(s("十二，五，三", "zh"), "12，五，三");
-        assert_eq!(s("x .cinco y", "es"), "x .cinco y");
         // Unchanged: a multi-numeral run after the mark, a counted one.
         assert_eq!(s("二十，十二", "zh"), "20，12");
         assert_eq!(s("二十，五个", "zh"), "20，5个");
         assert_eq!(s("好，一样", "zh"), "好，一样");
         assert_eq!(s("每星期一、三、五", "zh"), "每星期一、三、五");
+        assert_eq!(s("一）二", "zh"), "一）二");
+        assert_eq!(s("五…五", "zh"), "五…五");
+        assert_eq!(s("万一、五", "ja"), "万一、五");
+        assert_eq!(s("比分三：二", "zh"), "比分三：二");
+        assert_eq!(s("บ้าน,ห้า", "th"), "บ้าน,ห้า");
+        assert_eq!(s("一、二、三", "zh"), "一、二、三");
+        // Spaced languages read a mark-led number as before.
+        assert!(s("x ,deux mille y", "fr").contains("2000"));
+        assert!(s("x ,\u{0434}\u{0432}\u{0430}\u{0434}\u{0446}\u{0430}\u{0442}\u{044C} \u{043E}\u{0434}\u{0438}\u{043D} y", "ru").contains("21"));
         // Unchanged without the mark.
         assert_eq!(s("တစ်ရာ ငါး", "my"), "105");
     }
