@@ -495,10 +495,34 @@ fn py_rstrip_char(s: &str, ch: char) -> &str {
 /// Also the script-native marks and closing brackets/quotes `normalize` folds
 /// to a space (#121): "पाँच।" reads 5 and keeps its danda, "five)" its bracket.
 fn rstrip_punct(s: &str) -> &str {
-    s.trim_end_matches(|c: char| {
-        matches!(c, '.' | ',' | ';' | ':' | '!' | '?' | '"' | '\'' | '\u{2019}')
-            || crate::is_clause_punctuation(c)
-    })
+    let mark = |c: char| matches!(c, '.' | ',' | ';' | ':' | '!' | '?' | '"' | '\'' | '\u{2019}') || crate::is_clause_punctuation(c);
+    // Format characters ride with a mark before them ("twenty,\u{200b}"),
+    // and only then: a bare ZWSP is a word-break hint, as inside unspaced
+    // th/zh/ja numbers (#870, #998).
+    let bare = s.trim_end_matches(is_format_char);
+    if bare.len() < s.len() && bare.ends_with(mark) {
+        return bare.trim_end_matches(|c: char| mark(c) || is_format_char(c));
+    }
+    s.trim_end_matches(mark)
+}
+
+/// The trailing punctuation of `s` without its format characters.
+fn trailing_mark(s: &str) -> String {
+    trailing_punct(s).chars().filter(|c| !is_format_char(*c)).collect()
+}
+
+/// Does the token end in a real mark, not only invisible format characters?
+/// A bare ZWSP is a word-break hint inside unspaced th/zh/ja numbers
+/// ("สองร้อย\u{200b}ห้าสิบ" is 250), no end of the run (#998).
+fn has_trailing_mark(s: &str) -> bool {
+    !trailing_mark(s).is_empty()
+}
+
+/// An invisible format character (ZWSP, ZWNJ, ZWJ, word joiner, BOM, soft
+/// hyphen): it rides with the punctuation around it, so "twenty,\u{200b} one"
+/// still ends its number at the comma and keeps the ZWSP (#870).
+fn is_format_char(c: char) -> bool {
+    matches!(c, '\u{200B}'..='\u{200D}' | '\u{2060}' | '\u{FEFF}' | '\u{00AD}')
 }
 
 /// The piece opens with a bracket, quote or other mark `normalize` drops
@@ -522,7 +546,7 @@ fn trailing_punct(s: &str) -> &str {
 /// characters, unlike the strip above: `forty-two"` does not close a run.
 fn ends_with_terminal_punct(s: &str) -> bool {
     matches!(
-        s.chars().next_back(),
+        s.trim_end_matches(is_format_char).chars().next_back(),
         Some('.') | Some(',') | Some(';') | Some(':') | Some('!') | Some('?')
     )
 }
@@ -1218,7 +1242,7 @@ fn morpheme_glued(lang: &str, norm: &str) -> Option<String> {
 /// that follows its unit (fi "kymmentä"), glues onto?
 fn unit_of_next_morpheme(key: &str, parts: &[String], j: usize, clean: &str) -> bool {
     let norm = crate::normalize(clean);
-    if norm.contains(' ') || crate::w2n_forms::is_glued_morpheme(key, &norm) || !trailing_punct(&parts[j]).is_empty() {
+    if norm.contains(' ') || crate::w2n_forms::is_glued_morpheme(key, &norm) || has_trailing_mark(&parts[j]) {
         return false;
     }
     let Some(next) = parts[j + 1..].iter().find(|p| !py_str_isspace(p)) else { return false };
@@ -1956,7 +1980,7 @@ fn scale_comma_words(key: &str) -> std::sync::Arc<Vec<String>> {
 /// The scale a token closes with a comma: "thousand," -> 1000, "million," ->
 /// 1000000, pt "mil," -> 1000. `None` for any other token or punctuation.
 fn comma_after_scale(converter: &Converter, tok: &str) -> Option<BigInt> {
-    if trailing_punct(tok) != "," {
+    if trailing_mark(tok) != "," {
         return None;
     }
     let clean = rstrip_punct(tok).to_lowercase().replace('-', " ");
@@ -2644,7 +2668,7 @@ fn ordinal_reading(converter: &Converter, parts: &[String], i: usize, run: &str)
     let raw = parts[..i].iter().rev().find(|t| !py_str_isspace(t))?;
     let prev = raw.to_lowercase();
     if prev.is_empty()
-        || !trailing_punct(raw).is_empty()
+        || has_trailing_mark(raw)
         || holds_digit(&prev)
         || converter.is_number_word(&prev)
     {
@@ -3220,7 +3244,7 @@ fn article_is_count(resolved: &str, parts: &[String], i: usize, next_is_number: 
     let labelled = prev.as_deref().is_some_and(|p| {
         label_words(resolved).split_whitespace().any(|l| l == p) || is_month(resolved, Some(p))
     });
-    let punct = trailing_punct(&parts[i]);
+    let punct = trailing_mark(&parts[i]);
     if !punct.is_empty() && punct != "," {
         return labelled;
     }
@@ -3913,7 +3937,7 @@ fn words2num_sentence_walk(
                 .find(|t| !py_str_isspace(t))
                 .is_some_and(|raw| {
                     let p = rstrip_punct(raw).to_lowercase();
-                    trailing_punct(raw).is_empty()
+                    !has_trailing_mark(raw)
                         && (is_scale_word(&converter, &p, 1_000)
                             || (!is_candidate(&converter, &p, includable)
                                 && renderer_vocab(converter.n2w_key(), &crate::normalize(&p))))
@@ -3933,7 +3957,7 @@ fn words2num_sentence_walk(
             let mut prev_unit = unit(&rstrip_punct(&parts[end]).to_lowercase());
             let ends_ordinal = converter.is_ordinal_word(&rstrip_punct(&parts[end]).to_lowercase());
             let mut k = end + 1;
-            while k < n && trailing_punct(&parts[end]).is_empty() && !ends_ordinal {
+            while k < n && !has_trailing_mark(&parts[end]) && !ends_ordinal {
                 let part = &parts[k];
                 if py_str_isspace(part) {
                     k += 1;
@@ -3954,7 +3978,7 @@ fn words2num_sentence_walk(
                 if converter.is_ordinal_word(&clean) {
                     break;
                 }
-                if !trailing_punct(part).is_empty() {
+                if has_trailing_mark(part) {
                     break;
                 }
                 k += 1;
@@ -6714,6 +6738,24 @@ mod glued_sign_figure_tests {
         }
         let p = std::collections::HashMap::new();
         assert!(super::auto_parse("-,5", "fr", &p, None, Some(",")).is_err());
+    }
+}
+
+#[cfg(test)]
+mod format_char_punct_tests {
+    /// #870: an invisible format character after a mark rides with it.
+    #[test]
+    fn format_char_after_mark_issue_870() {
+        let s = |t: &str, l: &str| super::words2num_sentence(t, l, "cardinal", false).unwrap();
+        assert_eq!(s("one hundred.\u{200B} Five people", "en"), "100.\u{200B} 5 people");
+        assert_eq!(s("twenty,\u{200B} one", "en"), "20,\u{200B} one");
+        assert_eq!(s("twenty;\u{00AD} one", "en"), "20;\u{00AD} one");
+        assert_eq!(s("zwanzig.\u{2060} Drei Leute", "de"), "20.\u{2060} 3 Leute");
+        // A bare format character is a word-break hint, no mark (#998).
+        assert_eq!(s("\u{4E8C}\u{767E}\u{200B}\u{4E94}\u{5341}", "zh"), "250");
+        assert_eq!(s("สองร้อย\u{200B}ห้าสิบ", "th"), "250");
+        assert_eq!(s("one\u{200B} twenty-one", "en"), "1 21");
+        assert_eq!(s("twenty one", "en"), "21");
     }
 }
 
