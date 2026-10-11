@@ -3663,7 +3663,7 @@ fn words2num_sentence_folded(
     // words before it keep their right-hand context: "un euro et un centime"
     // stays "1 euro et 1 centime" (#1001).
     let resolved = resolved_lang;
-    let pieces = crate::w2n_currency::subunit_pieces(sentence, &resolved);
+    let pieces = crate::w2n_currency::subunit_pieces(sentence, &resolved, !matches!(to, "ordinal" | "ordinal_num"));
     if pieces.len() == 1 {
         return words2num_sentence_walk(sentence, lang, to, has_kwargs);
     }
@@ -7169,6 +7169,9 @@ mod plain_walk_subunit_tests {
         assert_eq!(s("un dollar et un cent", "fr", "cardinal"), "1 dollar et 1 cent");
         assert_eq!(s("deux dollars et neuf cents", "fr", "cardinal"), "2 dollars et 9 cents");
         assert_eq!(s("deux dollars et neuf cents de plus", "fr", "cardinal"), "2 dollars et 900 de plus");
+        assert_eq!(s("douze dollars et (vingt cents)", "fr", "cardinal"), "12 dollars et (20 cents)");
+        assert_eq!(s("un dollar et (un cent)", "fr", "cardinal"), "1 dollar et (un cent)");
+        assert_eq!(s("douze dollars et vingt cents", "fr", "ordinal"), "douze dollars et vingt cents");
         // currency=True: the count is a plain number naming no currency,
         // not across a sentence or two "et"-joined numbers (#1013, #1017).
         let c = |t: &str, l: &str| super::words2num_sentence_opts(t, l, "cardinal", false, true).unwrap();

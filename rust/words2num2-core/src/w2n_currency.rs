@@ -1266,13 +1266,15 @@ fn article_one(lang: &str, word: &str) -> bool {
 ///   unit says it is money: "a dollar and twenty cents", "une livre et vingt
 ///   pence" ([`subunit_follows`]).
 pub fn pieces_for_walk(sentence: &str, lang: &str) -> Vec<(String, bool)> {
-    pieces_for_walk_with(sentence, lang, false)
+    pieces_for_walk_with(sentence, lang, false, true)
 }
 
 /// [`pieces_for_walk`] with only the subunit cut, no currency rewrites: the
 /// plain walk keeps fr "dollars et cinquante cents" as 50 cents, not 5000
 /// (#868).
-pub fn subunit_pieces(sentence: &str, lang: &str) -> Vec<(String, bool)> {
+/// `counts`: write a one-word count before the subunit as its value (#1009);
+/// off in ordinal mode, which leaves cardinals as words.
+pub fn subunit_pieces(sentence: &str, lang: &str, counts: bool) -> Vec<(String, bool)> {
     // Only a subunit the walk reads as a multiplier needs the cut: fr "cent",
     // "cents" (100). Elsewhere (en, or no such word in the text) the scan is
     // skipped (#1001).
@@ -1281,7 +1283,7 @@ pub fn subunit_pieces(sentence: &str, lang: &str) -> Vec<(String, bool)> {
     if mults.is_empty() || !crate::normalize(sentence).split_whitespace().any(|w| mults.iter().any(|m| m == w)) {
         return vec![(sentence.to_string(), true)];
     }
-    pieces_for_walk_with(sentence, lang, true)
+    pieces_for_walk_with(sentence, lang, true, counts)
 }
 
 /// The subunit names of `base` that are also a multiplier word (>= 100),
@@ -1307,7 +1309,7 @@ fn multiplier_subunits(base: &str) -> std::sync::Arc<Vec<String>> {
     v
 }
 
-fn pieces_for_walk_with(sentence: &str, lang: &str, subunits_only: bool) -> Vec<(String, bool)> {
+fn pieces_for_walk_with(sentence: &str, lang: &str, subunits_only: bool, counts: bool) -> Vec<(String, bool)> {
     let base = lang.split(&['_', '-'][..]).next().unwrap_or(lang);
     if hand_lexicon(base).is_empty() {
         return vec![(sentence.to_string(), true)];
@@ -1421,7 +1423,11 @@ fn pieces_for_walk_with(sentence: &str, lang: &str, subunits_only: bool) -> Vec<
                 // A one-word count is the amount: "et un cent", "et neuf
                 // cents" are 1 and 9 cents, not the article "un" or "neuf"
                 // (new), which a lone homograph would stay (#1009).
-                if conn == Some(1) {
+                // Only a bare word: a mark or format character before it
+                // ("(vingt", "«un") would be lost by the rewrite.
+                let bare = parts[words[w - 1]].text.starts_with(char::is_alphanumeric)
+                    && !parts[words[w - 1]].text.chars().any(crate::w2n_sentence::is_format_char);
+                if counts && conn == Some(1) && bare {
                     if let Ok(Some(v)) = crate::lookup_norm(lang, &keys[w - 1], false, &[]) {
                         count_renames.push((words[w - 1], v.to_string()));
                     }
