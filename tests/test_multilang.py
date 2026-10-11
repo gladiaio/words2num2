@@ -283,6 +283,9 @@ def test_elided_place_cardinal_keeps_renderer_spelling():
         ("my", "တစ်ရာ နှစ် ယောက်", "102 ယောက်"),
         # A digit after the point is no year (#1018).
         ("my", "သုည ဒသမ ငါး နှစ်", "0.52"),
+        # Years then another count; a figure before (#1016).
+        ("my", "သုံး နှစ် လေး လ", "3 နှစ် 4 လ"),
+        ("my", "5 နှစ်", "5 နှစ်"),
         # Spaced groups add only below the lowest place filled.
         ("ko", "칠만 이천팔백삼십팔 삼", "72838 3"),
         ("hu", "ezerháromszáznegyvenhárom kettő", "1343 2"),

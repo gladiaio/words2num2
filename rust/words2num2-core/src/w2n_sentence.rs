@@ -2260,6 +2260,16 @@ fn table_digit_run(
     let mut end: Option<(usize, usize)> = None;
     let mut j = i;
     let mut article_head = false;
+    let mut year_at: Option<(usize, usize)> = None;
+    let mut last_year: Option<usize> = None;
+    // Nor does one open on the year after a number word ("ငါး နှစ် ငါး နှစ်").
+    if resolved.starts_with("my")
+        && crate::normalize(rstrip_punct(&parts[i])) == crate::normalize("နှစ်")
+        && prev_word(parts, i).is_some_and(|p| converter.to_cardinal(&p).is_ok())
+        && parts[..i].iter().rev().find(|t| !py_str_isspace(t)).is_some_and(|raw| !has_trailing_mark(raw))
+    {
+        return None;
+    }
     while j < parts.len() && digits.len() < MAX_DIGIT_RUN_WORDS {
         let tok = &parts[j];
         if py_str_isspace(tok) {
@@ -2289,6 +2299,17 @@ fn table_digit_run(
         if digits.is_empty() {
             article_head = article;
         }
+        // my: a standalone "နှစ်" after a digit, no counter after it, may be
+        // the year ("သုံး နှစ် လေး လ" is 3 years 4 months, #1016).
+        if !digits.is_empty() {
+            let after = if has_trailing_mark(tok) { None } else { next_word(parts, j) };
+            if my_year_counter(resolved, &clean, Some(&W2nValue::Int(BigInt::from(1))), after.as_deref(), &[]) {
+                if year_at.is_none() {
+                    year_at = end;
+                }
+                last_year = Some(digits.len() + 1);
+            }
+        }
         digits.push_str(&d);
         end = Some((digits.len(), j));
         if ends_with_terminal_punct(tok) {
@@ -2296,9 +2317,24 @@ fn table_digit_run(
         }
         j += 1;
     }
+    // "<digit> နှစ် <digit> <counter>" (or another နှစ်) is a count of years
+    // and a count of something else, no dictation: the run stops before the
+    // year. Longer runs stay digit strings (#1016).
+    let counted_after = |(_, k): (usize, usize)| {
+        let after = if has_trailing_mark(&parts[k]) { None } else { next_word(parts, k) };
+        my_counter(after.as_deref()) || after.is_some_and(|a| crate::normalize(&a) == crate::normalize("နှစ်"))
+    };
+    let (end, cut) = match (end, year_at) {
+        (Some(e), Some(year))
+            if year.0 == 1 && ((e.0 == 3 && counted_after(e)) || (e.0 == 4 && last_year == Some(4))) =>
+        {
+            (Some(year), true)
+        }
+        (end, _) => (end, false),
+    };
     let (len, part) = end?;
     digits.truncate(len);
-    if !is_digit_string(&digits) || (article_head && len < 3) {
+    if !is_digit_string(&digits) || (article_head && len < 3) || (cut && len < 2) {
         return None;
     }
     Some((digits, part))
@@ -4255,7 +4291,8 @@ fn words2num_sentence_walk(
             } else if best_end == i
                 && resolved.starts_with("my")
                 && crate::normalize(rstrip_punct(piece)) == crate::normalize("နှစ်")
-                && prev_word(&parts, i).is_some_and(|p| starts_run(&converter, &p, decimal_heads))
+                // A number word or a figure ("5 နှစ်", "၅ နှစ်", #1016).
+                && prev_word(&parts, i).is_some_and(|p| starts_run(&converter, &p, decimal_heads) || (!p.is_empty() && p.chars().all(|c| c.is_numeric())))
                 // Not across a mark: "ငါး။ နှစ် ယောက်" opens a new sentence;
                 // nor after a word with trailing punctuation ("ငါး-").
                 && parts[..i].iter().rev().find(|t| !py_str_isspace(t)).is_some_and(|raw| {
@@ -7130,6 +7167,15 @@ mod my_year_counter_tests {
         assert_eq!(s("တစ်ရာ နှစ် ယောက်"), "102 ယောက်");
         // Not across a mark: "နှစ်။ ကျပ်" ends on the year.
         assert_eq!(s("ငါးရာ နှစ်။ ကျပ်"), "500 နှစ်။ ကျပ်");
+        // Years then another count, not a dictation; a figure before (#1016).
+        assert_eq!(s("သုံး နှစ် လေး လ"), "3 နှစ် 4 လ");
+        assert_eq!(s("ငါး နှစ် ငါး နှစ်"), "5 နှစ် 5 နှစ်");
+        assert_eq!(s("ကိုး နှစ် နှစ် ယောက်"), "9 နှစ် 2 ယောက်");
+        assert_eq!(s("5 နှစ်"), "5 နှစ်");
+        assert_eq!(s("\u{1045} နှစ်"), "\u{1045} နှစ်");
+        // A longer dictation stays one digit string.
+        assert_eq!(s("ရှစ် လေး နှစ် တစ် ကြာ"), "8421 ကြာ");
+        assert_eq!(s("ကိုး ရှစ် နှစ် သုံး လေး ငါး ခြောက်"), "9823456");
         // A digit after the point is no year (#1018).
         assert_eq!(s("ငါး ဒသမ နှစ်"), "5.2");
         assert_eq!(s("တစ် ဒသမ နှစ် ငါး"), "1.25");
