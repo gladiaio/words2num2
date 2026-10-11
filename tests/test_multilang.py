@@ -307,3 +307,19 @@ def test_year_counter_and_spaced_groups_issue_876(lang, text, expected):
 )
 def test_script_mark_ends_run_issue_1023(lang, text, expected):
     assert words2num_sentence(text, lang=lang) == expected
+
+
+@pytest.mark.parametrize(
+    "lang,text,expected",
+    [
+        ("fr", "il reste ,deux cents euros", "il reste ,200 euros"),
+        ("hi", "x ।पाँच सौ y", "x ।500 y"),
+        ("ur", "x ،دو سو y", "x ،200 y"),
+        # A figure, and zh / ja / th, are untouched (#1048).
+        ("en", "x .5 y", "x .5 y"),
+        ("fr", "x ,5 y", "x ,5 y"),
+        ("zh", "二十 ,五", "20 ,五"),
+    ],
+)
+def test_leading_clause_mark_issue_1041(lang, text, expected):
+    assert words2num_sentence(text, lang=lang) == expected

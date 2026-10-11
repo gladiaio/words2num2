@@ -7243,3 +7243,35 @@ mod script_mark_tests {
     }
 }
 
+#[cfg(test)]
+mod leading_mark_tests {
+    /// #1041, #1044: a clause mark glued before a number is cut off and kept;
+    /// the number reads whole after it.
+    #[test]
+    fn leading_clause_mark_issue_1041() {
+        let s = |t: &str, l: &str| super::words2num_sentence(t, l, "cardinal", false).unwrap();
+        assert_eq!(s(",deux cents", "fr"), ",200");
+        assert_eq!(s("il reste ,deux cents euros", "fr"), "il reste ,200 euros");
+        assert_eq!(s("j ai dit ...deux cents", "fr"), "j ai dit ...200");
+        assert_eq!(s("x ,one thousand two hundred y", "en"), "x ,1200 y");
+        assert_eq!(s(",two point five", "en"), ",2.5");
+        assert_eq!(s("x \u{0964}\u{092A}\u{093E}\u{0901}\u{091A} \u{0938}\u{094C} y", "hi"), "x \u{0964}500 y");
+        assert_eq!(s("twenty ,five", "en"), "20 ,5");
+        // More marks (#1049); not in zh / ja / th (#1048).
+        assert_eq!(s("x \u{06D4}\u{062F}\u{0648} \u{0633}\u{0648} y", "ur"), "x \u{06D4}200 y");
+        assert_eq!(s("twenty \u{FF0C}five", "en"), "20 \u{FF0C}5");
+        assert_eq!(s("x \u{3002}two hundred y", "en"), "x \u{3002}200 y");
+        assert_eq!(s("x \u{3001}five y", "en"), "x \u{3001}5 y");
+        assert_eq!(s("二十 ,五", "zh"), "20 ,五");
+        assert_eq!(s("每星期一 ,三 ,五", "zh"), "每星期一 ,三 ,五");
+        // currency=True folds after the mark (#1047).
+        let c = |t: &str, l: &str| super::words2num_sentence_opts(t, l, "cardinal", false, true).unwrap();
+        assert_eq!(c("x ,five dollars y", "en"), "x ,$5 y");
+        assert_eq!(c("il reste ,deux cents euros", "fr"), "il reste ,200 \u{20AC}");
+        assert_eq!(c("x .5 dollars", "en"), "x .5 dollars");
+        // Figures and plain marks are untouched.
+        assert_eq!(s("x .5 y", "en"), "x .5 y");
+        assert_eq!(s("x 3.5 y", "en"), "x 3.5 y");
+        assert_eq!(s("x ...and y", "en"), "x ...and y");
+    }
+}
