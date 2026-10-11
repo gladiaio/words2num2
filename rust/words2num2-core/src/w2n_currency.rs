@@ -893,7 +893,7 @@ fn parse_num(word: &str) -> Option<Num> {
 /// script sentence marks (#1067, #1071). No dash, slash or symbol ("€",
 /// "%", "+", emoji): those stay on the word (#1072, #1074).
 fn trailing_mark(c: char) -> bool {
-    LEGACY_MARKS.contains(c) || "”’›」』】》）］｝〕〉，。．！？；：、…।॥،؛؟۔።፣፤".contains(c)
+    LEGACY_MARKS.contains(c) || "}”’›」』】》）］｝〕〉，。．！？；：、…‥‼⁇⁈⁉｡､।॥،؛؟۔።፣፤፧။၊។៕։՝".contains(c)
 }
 
 /// The marks the currency pass has always split off a word; the subunit
