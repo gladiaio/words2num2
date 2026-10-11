@@ -1271,9 +1271,14 @@ fn my_counter(next: Option<&str>) -> bool {
 }
 
 /// my: is `clean` the standalone "နှစ်" (year) after a number that is not
-/// whole ten-thousands, with no counter after it (see the walker, #876)?
-fn my_year_counter(resolved: &str, clean: &str, so_far: Option<&W2nValue>, next: Option<&str>) -> bool {
+/// whole ten-thousands, with no counter after it and not among the digits
+/// after the point "ဒသမ" ("ငါး ဒသမ နှစ်" is 5.2, #1018) (see the walker, #876)?
+fn my_year_counter(resolved: &str, clean: &str, so_far: Option<&W2nValue>, next: Option<&str>, run: &[String]) -> bool {
     if !resolved.starts_with("my") || crate::normalize(clean) != crate::normalize("နှစ်") || my_counter(next) {
+        return false;
+    }
+    let point = crate::normalize("ဒသမ");
+    if run.iter().any(|t| crate::normalize(rstrip_punct(t)) == point) {
         return false;
     }
     match so_far {
@@ -3821,7 +3826,7 @@ fn words2num_sentence_walk(
             // the two ("တစ်သောင်း နှစ်" is 10002) (#876), or a counter follows
             // ("ငါးရာ နှစ် ကျပ်" is 502 kyat, #1015).
             let after = if has_trailing_mark(tok) { None } else { next_word(&parts, j) };
-            if j > i && my_year_counter(&resolved, &clean, best_value.as_ref(), after.as_deref()) {
+            if j > i && my_year_counter(&resolved, &clean, best_value.as_ref(), after.as_deref(), &parts[i..j]) {
                 break;
             }
             // A morpheme that leads its unit (es "veinti", it "trent") opens a
@@ -7019,6 +7024,12 @@ mod my_year_counter_tests {
         assert_eq!(s("တစ်ရာ နှစ် ယောက်"), "102 ယောက်");
         // Not across a mark: "နှစ်။ ကျပ်" ends on the year.
         assert_eq!(s("ငါးရာ နှစ်။ ကျပ်"), "500 နှစ်။ ကျပ်");
+        // A digit after the point is no year (#1018).
+        assert_eq!(s("ငါး ဒသမ နှစ်"), "5.2");
+        assert_eq!(s("တစ် ဒသမ နှစ် ငါး"), "1.25");
+        assert_eq!(s("သုည ဒသမ ငါး နှစ်"), "0.52");
+        assert_eq!(s("သုည ဒသမ နှစ် နှစ်"), "0.22");
+        assert_eq!(s("ငါး ဒသမ နှစ် ကျပ်"), "5.2 ကျပ်");
     }
 
     /// #876: spaced groups add only below the lowest place filled, in every

@@ -281,6 +281,8 @@ def test_elided_place_cardinal_keeps_renderer_spelling():
         # Before a counter or currency it is the two (#1015).
         ("my", "ငါးရာ နှစ် ကျပ်", "502 ကျပ်"),
         ("my", "တစ်ရာ နှစ် ယောက်", "102 ယောက်"),
+        # A digit after the point is no year (#1018).
+        ("my", "သုည ဒသမ ငါး နှစ်", "0.52"),
         # Spaced groups add only below the lowest place filled.
         ("ko", "칠만 이천팔백삼십팔 삼", "72838 3"),
         ("hu", "ezerháromszáznegyvenhárom kettő", "1343 2"),
