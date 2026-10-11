@@ -7064,6 +7064,8 @@ mod plain_walk_subunit_tests {
         assert_eq!(c("douze dollars et 150 cents", "fr"), "12 $ et 150 cents");
         // A count that is one amount but no integer stays as written (#1022).
         assert_eq!(c("douze dollars et deux virgule cinq cents", "fr"), "12 $ et 2,5 cents");
+        assert_eq!(c("douze dollars et deux virgule cinq cent", "fr"), "12 $ et 2,5 cent");
+        assert_eq!(c("douze dollars et mille virgule cinq cent", "fr"), "12 $ et 1000,5 cent");
         assert_eq!(c("12 dollars et 2,5 cents", "fr"), "12 $ et 2,5 cents");
         assert_eq!(c("12 dollars et 2.5 cents", "fr_CA"), "12 $ et 2.5 cents");
         assert_eq!(c("12 dollars et \u{665}\u{660} cents", "fr"), "12 $ et \u{665}\u{660} cents");

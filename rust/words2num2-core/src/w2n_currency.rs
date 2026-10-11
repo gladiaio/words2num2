@@ -1389,7 +1389,10 @@ fn pieces_for_walk_with(sentence: &str, lang: &str, subunits_only: bool) -> Vec<
                 // Never when the subunit word extends the count into one
                 // number: "deux mille cent personnes" is 2100 (#1029).
                 // Only the singular: "mille cents" is no 1100.
+                // A decimal ("deux virgule cinq cent") is no integer to extend.
                 let extends = keys[w] == "cent"
+                    && all_numbers
+                    && !keys[w - back..w].iter().any(|k| matches!(k.as_str(), "virgule" | "point"))
                     && crate::words2num(&format!("{} {}", keys[w - back..w].join(" "), keys[w]), lang, "cardinal").is_ok();
                 let unread = !extends && (v == -1 || (!all_numbers && back == 1) || (v >= 100 && !last_multiplies));
                 let opaque = !subunits_only

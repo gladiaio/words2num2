@@ -291,6 +291,7 @@ def test_plain_walk_subunit(lang, text, to, expected):
         ("douze dollars et zéro cent", "fr", "12,00 $"),
         ("12 dollars et 50 cents", "fr", "12,50 $"),
         ("douze dollars et deux virgule cinq cents", "fr", "12 $ et 2,5 cents"),
+        ("douze dollars et deux virgule cinq cent", "fr", "12 $ et 2,5 cent"),
         ("douze dollars et cent cinquante cents", "fr", "12 $ et 150 cents"),
         ("dix dollars et mille deux cents personnes", "fr", "10 $ et 1200 personnes"),
         (
