@@ -280,12 +280,12 @@ fn cue_strength(st: Style, w: &str) -> u8 {
 /// A word that joins the two ends of a date range: "from … to …".
 fn range_word(st: Style, w: &str) -> bool {
     let words: &[&str] = match st {
-        Style::EnUs | Style::EnGb => &["to", "and", "through", "till", "until"],
-        Style::Fr => &["au", "et", "jusqu'au"],
+        Style::EnUs | Style::EnGb => &["to", "and", "through", "till", "until", "the"],
+        Style::Fr => &["au", "et", "jusqu'au", "le"],
         Style::De => &["bis", "und", "zum", "dem"],
-        Style::Es => &["al", "y", "hasta"],
+        Style::Es => &["al", "y", "hasta", "el"],
         Style::Pt => &["a", "e", "até", "ao", "o"],
-        Style::It => &["al", "e"],
+        Style::It => &["al", "e", "fino", "il"],
         Style::Nl => &["tot", "en", "met"],
     };
     words.contains(&w)
