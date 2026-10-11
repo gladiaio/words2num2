@@ -1252,7 +1252,38 @@ pub fn pieces_for_walk(sentence: &str, lang: &str) -> Vec<(String, bool)> {
 /// plain walk keeps fr "dollars et cinquante cents" as 50 cents, not 5000
 /// (#868).
 pub fn subunit_pieces(sentence: &str, lang: &str) -> Vec<(String, bool)> {
+    // Only a subunit the walk reads as a multiplier needs the cut: fr "cent",
+    // "cents" (100). Elsewhere (en, or no such word in the text) the scan is
+    // skipped (#1001).
+    let base = lang.split(&['_', '-'][..]).next().unwrap_or(lang);
+    let mults = multiplier_subunits(base);
+    if mults.is_empty() || !crate::normalize(sentence).split_whitespace().any(|w| mults.iter().any(|m| m == w)) {
+        return vec![(sentence.to_string(), true)];
+    }
     pieces_for_walk_with(sentence, lang, true)
+}
+
+/// The subunit names of `base` that are also a multiplier word (>= 100),
+/// built once per language.
+fn multiplier_subunits(base: &str) -> std::sync::Arc<Vec<String>> {
+    static CACHE: std::sync::OnceLock<std::sync::RwLock<std::collections::HashMap<String, std::sync::Arc<Vec<String>>>>> =
+        std::sync::OnceLock::new();
+    let cache = CACHE.get_or_init(Default::default);
+    if let Some(v) = cache.read().ok().and_then(|m| m.get(base).cloned()) {
+        return v;
+    }
+    let v: std::sync::Arc<Vec<String>> = std::sync::Arc::new(
+        hand_lexicon(base)
+            .iter()
+            .filter(|(_, w)| w.sub)
+            .map(|(n, _)| crate::normalize(n))
+            .filter(|n| matches!(crate::lookup_norm(base, n, false, &[]), Ok(Some(v)) if v >= 100))
+            .collect(),
+    );
+    if let Ok(mut m) = cache.write() {
+        m.insert(base.to_string(), v.clone());
+    }
+    v
 }
 
 fn pieces_for_walk_with(sentence: &str, lang: &str, subunits_only: bool) -> Vec<(String, bool)> {
@@ -1287,7 +1318,12 @@ fn pieces_for_walk_with(sentence: &str, lang: &str, subunits_only: bool) -> Vec<
             // multiple ("mille euros et deux cents personnes" is 200 people),
             // so there it must end the clause; "trente-quatre cents" (34 x
             // 100) is not French for a number, so it never is (#49).
-            let numeric_sub = crate::token_may_be_number(base, &keys[w]);
+            let numeric_sub = if subunits_only {
+                // fr "centime", ca "cèntim" are never multiplied (#1001).
+                matches!(crate::lookup_norm(base, &keys[w], false, &[]), Ok(Some(v)) if v >= 100)
+            } else {
+                crate::token_may_be_number(base, &keys[w])
+            };
             let ends_clause = w + 1 == words.len()
                 || matches!(word_key(&parts[words[w]].text).1.as_str(), "." | "!" | "?" | ",");
             let ok = conn.is_some_and(|back| {

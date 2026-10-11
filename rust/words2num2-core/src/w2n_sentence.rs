@@ -3489,19 +3489,38 @@ fn words2num_sentence_folded(
     }
     // The plain walk cuts the same subunit off: fr "douze dollars et
     // cinquante cents" is "12 dollars et 50 cents", not "… 5000" (#868).
+    // The subunit is swapped for a placeholder word, not cut off, so the
+    // words before it keep their right-hand context: "un euro et un cent" is
+    // "1 euro et 1 cent", the "un" no lone article (#1001).
     let resolved = resolve_lang(lang)?;
     let pieces = crate::w2n_currency::subunit_pieces(sentence, &resolved);
     if pieces.len() == 1 {
         return words2num_sentence_walk(sentence, lang, to, has_kwargs);
     }
-    let mut out = String::new();
+    const MARK: &str = "wnsubunitmark";
+    let mut masked = String::new();
+    let mut kept: Vec<String> = Vec::new();
     for (piece, walk) in pieces {
         if walk {
-            out.push_str(&words2num_sentence_walk(&piece, lang, to, has_kwargs)?);
+            masked.push_str(&piece);
         } else {
-            out.push_str(&piece);
+            masked.push_str(MARK);
+            kept.push(piece);
         }
     }
+    if sentence.contains(MARK) {
+        return words2num_sentence_walk(sentence, lang, to, has_kwargs);
+    }
+    let walked = words2num_sentence_walk(&masked, lang, to, has_kwargs)?;
+    let mut out = String::new();
+    let mut rest = walked.as_str();
+    for word in kept {
+        let Some(at) = rest.find(MARK) else { return words2num_sentence_walk(sentence, lang, to, has_kwargs) };
+        out.push_str(&rest[..at]);
+        out.push_str(&word);
+        rest = &rest[at + MARK.len()..];
+    }
+    out.push_str(rest);
     Ok(out)
 }
 
@@ -6862,6 +6881,9 @@ mod plain_walk_subunit_tests {
         assert_eq!(s("douze dollars et cinquante cents", "fr_DZ", "currency"), "12 dollars et 50 cents");
         // A real hundreds multiple stays one.
         assert_eq!(s("mille euros et deux cents personnes", "fr", "cardinal"), "1000 euros et 200 personnes");
+        // A subunit no multiplier is not cut, so "un" before it reads (#1001).
+        assert_eq!(s("un euro et un centime", "fr", "cardinal"), "1 euro et 1 centime");
+        assert_eq!(s("un euro amb un cèntim", "ca", "cardinal"), "1 euro amb 1 cèntim");
     }
 }
 
