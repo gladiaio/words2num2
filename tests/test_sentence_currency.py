@@ -312,6 +312,8 @@ def test_subunit_count_is_one_plain_number_issue_1017(text, lang, expected):
         ("x five dollars。", "en", "x $5。"),
         ("twelve dollars and fifty cents！", "en", "$12.50！"),
         ("x five dollars, y", "en", "x $5, y"),
+        ("x five dollars” y", "en", "x $5” y"),
+        ("x cinq euros． y", "fr", "x 5 €． y"),
     ],
 )
 def test_fold_keeps_cjk_trailing_mark_issue_1067(text, lang, expected):
