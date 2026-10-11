@@ -7260,6 +7260,8 @@ mod leading_mark_tests {
         // More marks (#1049); not in zh / ja / th (#1048).
         assert_eq!(s("x \u{06D4}\u{062F}\u{0648} \u{0633}\u{0648} y", "ur"), "x \u{06D4}200 y");
         assert_eq!(s("twenty \u{FF0C}five", "en"), "20 \u{FF0C}5");
+        assert_eq!(s("x \u{3002}two hundred y", "en"), "x \u{3002}200 y");
+        assert_eq!(s("x \u{3001}five y", "en"), "x \u{3001}5 y");
         assert_eq!(s("二十 ,五", "zh"), "20 ,五");
         assert_eq!(s("每星期一 ,三 ,五", "zh"), "每星期一 ,三 ,五");
         // currency=True folds after the mark (#1047).
