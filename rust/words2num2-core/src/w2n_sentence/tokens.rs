@@ -72,10 +72,14 @@ fn split_punct(tok: &str) -> Vec<&str> {
     }
     let (lead, rest) = tok.split_at(lead_end);
     let mut trail_start = rest.len();
+    // Format characters after a mark ride with it: "twenty)\u{200b}" is cut
+    // like "twenty)" (#1004). The cut is at the first mark, so one before it
+    // stays on the word ("twenty\u{200b})" cuts ")", #1011), and a run of them
+    // alone is no mark at all.
     for (k, c) in rest.char_indices().rev() {
         if is_trailing_punct(c) {
             trail_start = k;
-        } else {
+        } else if !is_format(c) {
             break;
         }
     }
@@ -84,7 +88,7 @@ fn split_punct(tok: &str) -> Vec<&str> {
     if !lead.is_empty() {
         out.push(lead);
     }
-    if !trail.is_empty() && trail.chars().any(|c| !is_legacy_trailing(c)) && !core.is_empty() {
+    if !trail.is_empty() && trail.chars().any(|c| !is_legacy_trailing(c) && !is_format(c)) && !core.is_empty() {
         out.push(core);
         out.push(trail);
     } else {
@@ -109,7 +113,15 @@ pub(crate) fn has_interior_punct(part: &str) -> bool {
 /// Is `part` punctuation split off a word (or a token made only of
 /// punctuation)? It never belongs to a number run.
 pub(super) fn is_punct_part(part: &str) -> bool {
-    !part.is_empty() && part.chars().all(|c| is_leading_punct(c) || is_trailing_punct(c))
+    !part.is_empty()
+        && part.chars().any(|c| !is_format(c))
+        && part.chars().all(|c| is_leading_punct(c) || is_trailing_punct(c) || is_format(c))
+}
+
+/// An invisible format character (ZWSP, ZWNJ, ZWJ, word joiner, BOM, soft
+/// hyphen); see `super::is_format_char`.
+fn is_format(c: char) -> bool {
+    matches!(c, '\u{200B}'..='\u{200D}' | '\u{2060}' | '\u{FEFF}' | '\u{00AD}')
 }
 
 /// [`super::tokenize`], then each word cut at its punctuation, and for the
