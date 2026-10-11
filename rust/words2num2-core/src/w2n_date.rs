@@ -291,6 +291,38 @@ fn range_word(st: Style, w: &str) -> bool {
     words.contains(&w)
 }
 
+/// An article or particle a range link may carry ("to the", de "bis zum",
+/// pt "até o", it "fino al"), but no link on its own: "… 2026 the 3 12 2000
+/// people" is no range (#1076).
+fn range_article(st: Style, w: &str) -> bool {
+    let words: &[&str] = match st {
+        Style::EnUs | Style::EnGb => &["the"],
+        Style::Fr => &["le"],
+        // "zum" (zu dem) links a range on its own: "vom … zum …" (#1079).
+        Style::De => &["dem"],
+        Style::Es => &["el"],
+        Style::Pt => &["o"],
+        Style::It => &["fino", "il"],
+        Style::Nl => &[],
+    };
+    words.contains(&w)
+}
+
+/// Are `links` a range link: range words only, at least one of them more
+/// than an article?
+fn range_link(st: Style, links: &[&str]) -> bool {
+    let words: Vec<String> = links
+        .iter()
+        .map(|t| {
+            let (w, trail) = split_trail(t);
+            if trail.is_empty() { w.to_lowercase() } else { String::new() }
+        })
+        .collect();
+    !words.is_empty()
+        && words.iter().all(|w| range_word(st, w))
+        && words.iter().any(|w| !range_article(st, w))
+}
+
 /// A clock time spoken as a word ("at noon").
 fn time_word(w: &str) -> bool {
     matches!(
@@ -419,6 +451,7 @@ fn numeric_at(lang: &str, st: Style, toks: &[&str], i: usize, chained: bool) -> 
         // diciembre de …"): the same span lookup, as a chained span.
         let second_at = (i + len..toks.len()).filter(|&k| !toks[k].is_empty()).nth(r);
         let range_next = r > 0
+            && range_link(st, &after[..r])
             && second_at.is_some_and(|k| {
                 let t = toks[k];
                 let core = split_trail(t).0;
@@ -528,14 +561,7 @@ pub fn fold_dates_with(text: &str, lang: &str, region: Option<&str>, iso: bool) 
     let mut after_date: Option<usize> = None;
     while i < toks.len() {
         // Up to three range words ("to", nl "tot en met").
-        let chained = after_date.is_some_and(|k| {
-            k < i
-                && i - k <= 3
-                && toks[k..i].iter().all(|t| {
-                    let (w, trail) = split_trail(t);
-                    trail.is_empty() && range_word(st, &w.to_lowercase())
-                })
-        });
+        let chained = after_date.is_some_and(|k| k < i && i - k <= 3 && range_link(st, &toks[k..i]));
         match span_at(lang, st, &toks, i, chained) {
             Some(s) => {
                 out.push(render(st, &s, iso));
