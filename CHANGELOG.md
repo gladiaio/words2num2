@@ -8,7 +8,7 @@ follows [Semantic Versioning](https://semver.org/) and uses
 
 ### Fixed
 
-- Sentence mode: In zh / ja / th a run never crosses a glued mark into the piece after it, nor opens on such a piece, so the two numbers are not merged there and the mark stays: "二十，五" is "20，五" (was 25), "一千，五" "1000，五" (was 10005), th "ยี่สิบ，ห้า" "20，ห้า"; a lone numeral after the mark stays as written, as in a list ("二十，五，六") (#1028).
+- Sentence mode: in zh / ja / th a run never crosses a glued mark into the piece after it, nor opens on such a piece, so the two numbers are not merged there and the mark stays: "二十，五" is "20，五" (was 25), "一千，五" "1000，五" (was 10005), th "ยี่สิบ，ห้า" "20，ห้า"; a lone numeral after the mark stays as written, as in a list ("二十，五，六") (#1028).
 
 ## [0.4.0] — 2026-10-11
 
