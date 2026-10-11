@@ -2260,6 +2260,14 @@ fn table_digit_run(
     let mut end: Option<(usize, usize)> = None;
     let mut j = i;
     let mut article_head = false;
+    // my: years and another count is no dictation; the walker reads it, nor
+    // does a run open on its year (#1016).
+    if my_years_shape(converter, resolved, parts, i)
+        || (crate::normalize(rstrip_punct(&parts[i])) == crate::normalize("နှစ်")
+            && prev_word_index(parts, i).is_some_and(|k| my_years_shape(converter, resolved, parts, k)))
+    {
+        return None;
+    }
     while j < parts.len() && digits.len() < MAX_DIGIT_RUN_WORDS {
         let tok = &parts[j];
         if py_str_isspace(tok) {
@@ -2302,6 +2310,87 @@ fn table_digit_run(
         return None;
     }
     Some((digits, part))
+}
+
+/// my: a figure before နှစ်: digits, with "," or "." between them, and no
+/// leading zero ("01" is a code): "2024", "2,024", "1.5", "၁.၅" (#1039).
+fn my_figure(p: &str) -> bool {
+    // Digits, then ","-groups of three, then one "." and its digits.
+    let (int, frac) = match p.split_once('.') {
+        Some((a, b)) => (a, Some(b)),
+        None => (p, None),
+    };
+    let digits = |t: &str| !t.is_empty() && t.chars().all(is_unicode_digit);
+    let mut groups = int.split(',');
+    let head = groups.next().unwrap_or("");
+    let grouped = groups.all(|g| g.chars().count() == 3 && digits(g));
+    let lead_zero = head.chars().count() > 1 && head.chars().next().and_then(digit_value) == Some(0);
+    digits(head) && grouped && !lead_zero && frac.is_none_or(digits)
+}
+
+/// The index of the word before part `i`, if any.
+fn prev_word_index(parts: &[String], i: usize) -> Option<usize> {
+    (0..i).rev().find(|&k| !py_str_isspace(&parts[k]))
+}
+
+/// my: does part `k` open "<digit> နှစ် <digit> <counter>" or "<digit> နှစ်
+/// <digit> နှစ်" (years, then a count), unmarked and with no digit word
+/// before or after? "သုံး နှစ် လေး လ" is 3 years 4 months, no dictation
+/// (#1016); a longer run ("ရှစ် လေး နှစ် တစ်", a phone number) stays one.
+fn my_years_shape(converter: &Converter, resolved: &str, parts: &[String], k: usize) -> bool {
+    if !resolved.starts_with("my") {
+        return false;
+    }
+    let digit = |t: &str| matches!(converter.to_cardinal(&rstrip_punct(t).to_lowercase()), Ok(W2nValue::Int(v)) if v >= BigInt::from(0) && v <= BigInt::from(9));
+    let year = |t: &str| crate::normalize(rstrip_punct(t)) == crate::normalize("နှစ်");
+    let words: Vec<usize> = (k..parts.len()).filter(|&j| !py_str_isspace(&parts[j])).take(5).collect();
+    let w = |n: usize| words.get(n).map(|&j| parts[j].as_str());
+    // No digit word before; and a နှစ် right after any number word or figure
+    // is that number's year, which the walker's guard claims (#1016).
+    if prev_word_index(parts, k).is_some_and(|p| {
+        let raw = &parts[p];
+        let clean = rstrip_punct(raw).to_lowercase();
+        // A symbol ("²") is no number (#958).
+        !has_trailing_mark(raw)
+            && !raw.chars().any(crate::is_compat_digit)
+            && (digit(raw)
+                || (year(&parts[k])
+                    && (converter.to_cardinal(&clean).is_ok() || my_figure(&clean))))
+    }) {
+        return false;
+    }
+    let unmarked = |n: usize| words[..n].iter().all(|&j| !has_trailing_mark(&parts[j]));
+    let (Some(w0), Some(w1), Some(w2)) = (w(0), w(1), w(2)) else { return false };
+    // A leading zero is a code, no count of years (#1037).
+    let zero = |t: &str| matches!(converter.to_cardinal(&rstrip_punct(t).to_lowercase()), Ok(W2nValue::Int(v)) if v == BigInt::from(0));
+    // w0 is a digit word: no figure ("09"), no symbol ("²") (#1035 audit).
+    if w0.chars().any(char::is_numeric) || !(digit(w0) && !zero(w0) && year(w1) && digit(w2)) {
+        return false;
+    }
+    // A counter, not a currency or a unit of measure: "သုံး နှစ် လေး ကျပ်" is
+    // 324 kyat (#1038).
+    let unit = |t: Option<&str>| {
+        t.is_some_and(|t| {
+            let t = crate::normalize(rstrip_punct(t));
+            ["ကျပ်", "ပြား", "ကျပ်သား", "ဒေါ်လာ", "ယူရို", "ပိဿာ", "ကီလို", "မီတာ", "ပေ", "လက်မ", "မိုင်"]
+                .iter()
+                .any(|u| crate::normalize(u) == t)
+        })
+    };
+    let three = unmarked(2) && !unit(w(3)) && my_counter(w(3).map(|t| rstrip_punct(t).to_lowercase()).as_deref());
+    // Not "<d> နှစ် သုည နှစ်": the walker reads no "သုည နှစ်" as years. Nor
+    // when a number goes on after the last နှစ် ("… နှစ် ဒသမ ငါး", "… နှစ်
+    // ထောင်"): it is a digit there (#1042).
+    let number_after = w(4).is_some_and(|t| {
+        converter.to_cardinal(&rstrip_punct(t).to_lowercase()).is_ok() || crate::normalize(rstrip_punct(t)) == crate::normalize("ဒသမ")
+    });
+    let four = !year(w2)
+        && !zero(w2)
+        && w(3).is_some_and(year)
+        && unmarked(3)
+        && (has_trailing_mark(&parts[words[3]])
+            || !(number_after || my_counter(w(4).map(|t| rstrip_punct(t).to_lowercase()).as_deref())));
+    three || four
 }
 
 /// zh / ja / th: written without spaces, cut into pieces by the segmenter.
@@ -4266,7 +4355,17 @@ fn words2num_sentence_walk(
             } else if best_end == i
                 && resolved.starts_with("my")
                 && crate::normalize(rstrip_punct(piece)) == crate::normalize("နှစ်")
-                && prev_word(&parts, i).is_some_and(|p| starts_run(&converter, &p, decimal_heads))
+                // A number word or a figure ("5 နှစ်", "၅ နှစ်", #1016).
+                && prev_word(&parts, i).is_some_and(|p| starts_run(&converter, &p, decimal_heads) || my_figure(&p))
+                // Not after "<figure> နှစ်", whose နှစ် was the year: "5 နှစ်
+                // နှစ်" is 5 years, then 2 (#1050).
+                && !prev_word_index(&parts, i).is_some_and(|k| {
+                    crate::normalize(rstrip_punct(&parts[k])) == crate::normalize("နှစ်")
+                        && !has_trailing_mark(&parts[k])
+                        && prev_word_index(&parts, k).is_some_and(|f| {
+                            !has_trailing_mark(&parts[f]) && my_figure(rstrip_punct(&parts[f]))
+                        })
+                })
                 // Not across a mark: "ငါး။ နှစ် ယောက်" opens a new sentence;
                 // nor after a word with trailing punctuation ("ငါး-").
                 && parts[..i].iter().rev().find(|t| !py_str_isspace(t)).is_some_and(|raw| {
@@ -7176,6 +7275,46 @@ mod my_year_counter_tests {
         assert_eq!(s("တစ်ရာ နှစ် ယောက်"), "102 ယောက်");
         // Not across a mark: "နှစ်။ ကျပ်" ends on the year.
         assert_eq!(s("ငါးရာ နှစ်။ ကျပ်"), "500 နှစ်။ ကျပ်");
+        // Years then another count, not a dictation; a figure before (#1016).
+        assert_eq!(s("သုံး နှစ် လေး လ"), "3 နှစ် 4 လ");
+        assert_eq!(s("ငါး နှစ် ငါး နှစ်"), "5 နှစ် 5 နှစ်");
+        assert_eq!(s("ကိုး နှစ် နှစ် ယောက်"), "9 နှစ် 2 ယောက်");
+        assert_eq!(s("5 နှစ်"), "5 နှစ်");
+        assert_eq!(s("\u{1045} နှစ်"), "\u{1045} နှစ်");
+        // A longer dictation stays one digit string.
+        assert_eq!(s("ရှစ် လေး နှစ် တစ် ကြာ"), "8421 ကြာ");
+        assert_eq!(s("ကိုး ရှစ် နှစ် သုံး လေး ငါး ခြောက်"), "9823456");
+        // A dictation after a number word or a figure keeps its first 2.
+        assert_eq!(s("ငါးရာ နှစ် သုံး လေး ငါး ခြောက် ခုနစ်"), "500 234567");
+        assert_eq!(s("09 နှစ် ငါး သုံး လေး ငါး ခြောက် ခုနစ် ရှစ်"), "09 25345678");
+        assert_eq!(s("တစ် နှစ် နှစ် နှစ်"), "1222");
+        assert_eq!(s("5 နှစ် နှစ် နှစ်"), "5 222");
+        assert_eq!(s("တစ်ဆယ် နှစ် နှစ် လေး ယောက်"), "10 224 ယောက်");
+        assert_eq!(s("ငါးရာ နှစ် နှစ် ငါး နှစ်"), "500 2252");
+        assert_eq!(s("ငါး နှစ် သုည နှစ်"), "5202");
+        // A leading zero, a currency or unit, a number after the last နှစ်:
+        // no years (#1037, #1038, #1042); separators in a figure (#1039).
+        assert_eq!(s("သုည နှစ် သုံး လ"), "023 လ");
+        assert_eq!(s("01 နှစ် လေး လ"), "01 2 4 လ");
+        assert_eq!(s("သုံး နှစ် လေး ကျပ်"), "324 ကျပ်");
+        assert_eq!(s("လေး နှစ် လေး နှစ် ဒသမ ငါး"), "4242 ဒသမ 5");
+        assert_eq!(s("လေး နှစ် လေး နှစ် ထောင်"), "4242 1000");
+        assert_eq!(s("2,024 နှစ်"), "2,024 နှစ်");
+        assert_eq!(s("\u{1041}.\u{1045} နှစ်"), "\u{1041}.\u{1045} နှစ်");
+        assert_eq!(s("\u{2460} နှစ်"), "\u{2460} 2");
+        assert_eq!(s("ငါးရာ နှစ် နှစ် သုံး လ"), "500 223 လ");
+        assert_eq!(s("ငါး နှစ် နှစ် နှစ်"), "5222");
+        assert_eq!(s("2,024 နှစ် နှစ် လေး ယောက်"), "2,024 224 ယောက်");
+        assert_eq!(s("09 နှစ် ငါး နှစ်"), "09 252");
+        assert_eq!(s("\u{B2} နှစ် ငါး နှစ်"), "\u{B2} 252");
+        assert_eq!(s("1,2,3 နှစ်"), "1,2,3 2");
+        assert_eq!(s("\u{B2} သုံး နှစ် လေး လ"), "\u{B2} 3 နှစ် 4 လ");
+        assert_eq!(s("သုံး နှစ် လေး ပြား"), "324 ပြား");
+        assert_eq!(s("5 နှစ် နှစ်"), "5 နှစ် 2");
+        assert_eq!(s("5\u{104B} နှစ် နှစ်"), "5\u{104B} 2 နှစ်");
+        assert_eq!(s("2024, နှစ် နှစ်"), "2024, 2 နှစ်");
+        // A compatibility digit is no figure.
+        assert_eq!(s("\u{B2} နှစ်"), "\u{B2} 2");
         // A digit after the point is no year (#1018).
         assert_eq!(s("ငါး ဒသမ နှစ်"), "5.2");
         assert_eq!(s("တစ် ဒသမ နှစ် ငါး"), "1.25");
