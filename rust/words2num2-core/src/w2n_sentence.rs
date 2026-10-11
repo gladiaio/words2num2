@@ -6884,6 +6884,12 @@ mod plain_walk_subunit_tests {
         // A subunit no multiplier is not cut, so "un" before it reads (#1001).
         assert_eq!(s("un euro et un centime", "fr", "cardinal"), "1 euro et 1 centime");
         assert_eq!(s("un euro amb un cèntim", "ca", "cardinal"), "1 euro amb 1 cèntim");
+        // Hundreds stay hundreds after a unit and a connector (#1002, #1003).
+        assert_eq!(s("vingt euros et mille deux cent cinquante personnes", "fr", "cardinal"), "20 euros et 1250 personnes");
+        assert_eq!(s("le billet coûte cinq dollars et la salle compte quatre cents places", "fr", "cardinal"), "le billet coûte 5 dollars et la salle compte 400 places");
+        assert_eq!(s("vingt dollars et douze cents personnes", "fr", "cardinal"), "20 dollars et 1200 personnes");
+        assert_eq!(s("dix dollars et cinq. Trois cents personnes", "fr", "cardinal"), "10 dollars et 5. 300 personnes");
+        assert_eq!(s("douze dollars et douze cents", "fr", "cardinal"), "12 dollars et 12 cents");
     }
 }
 
