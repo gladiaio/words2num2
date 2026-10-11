@@ -9,6 +9,7 @@ follows [Semantic Versioning](https://semver.org/) and uses
 ### Fixed
 
 - A sign word with a mark, then a space, before a figure reads with the locale's separators again: fr "moins: 1.234" is -1234 (was -1.234 in 0.4.0), en "minus: 1,234" -1234 (was an error in 0.4.0) (#1032).
+- fr / fr_BE / fr_CH / fr_CA, `currency=True`: after "<unit> et", a subunit count of 100 or more in words (up to four words) keeps "cents" as written instead of multiplying it: "douze dollars et cent cinquante cents" is "12 $ et 150 cents" (was "12 $ et 150 100"), and so does a lone symbol ("Ⅻ cents"). A count ending on the 2-9 that multiplies "cents" is still hundreds ("mille deux cents personnes" is 1200), and a singular "cent" that continues the number stays in it ("deux mille cent personnes" is 2100). Longer counts are still multiplied, as before (#1025, #1029).
 
 ## [0.4.0] — 2026-10-11
 
