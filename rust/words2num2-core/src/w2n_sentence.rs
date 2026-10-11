@@ -2350,7 +2350,9 @@ fn my_years_shape(converter: &Converter, resolved: &str, parts: &[String], k: us
     if prev_word_index(parts, k).is_some_and(|p| {
         let raw = &parts[p];
         let clean = rstrip_punct(raw).to_lowercase();
+        // A symbol ("²") is no number (#958).
         !has_trailing_mark(raw)
+            && !raw.chars().any(crate::is_compat_digit)
             && (digit(raw)
                 || (year(&parts[k])
                     && (converter.to_cardinal(&clean).is_ok() || my_figure(&clean))))
@@ -2370,7 +2372,7 @@ fn my_years_shape(converter: &Converter, resolved: &str, parts: &[String], k: us
     let unit = |t: Option<&str>| {
         t.is_some_and(|t| {
             let t = crate::normalize(rstrip_punct(t));
-            ["ကျပ်", "ကျပ်သား", "ဒေါ်လာ", "ယူရို", "ပိဿာ", "ကီလို", "မီတာ", "ပေ", "လက်မ", "မိုင်"]
+            ["ကျပ်", "ပြား", "ကျပ်သား", "ဒေါ်လာ", "ယူရို", "ပိဿာ", "ကီလို", "မီတာ", "ပေ", "လက်မ", "မိုင်"]
                 .iter()
                 .any(|u| crate::normalize(u) == t)
         })
@@ -4355,6 +4357,12 @@ fn words2num_sentence_walk(
                 && crate::normalize(rstrip_punct(piece)) == crate::normalize("နှစ်")
                 // A number word or a figure ("5 နှစ်", "၅ နှစ်", #1016).
                 && prev_word(&parts, i).is_some_and(|p| starts_run(&converter, &p, decimal_heads) || my_figure(&p))
+                // Not after "<figure> နှစ်", whose နှစ် was the year: "5 နှစ်
+                // နှစ်" is 5 years, then 2 (#1050).
+                && !prev_word_index(&parts, i).is_some_and(|k| {
+                    crate::normalize(rstrip_punct(&parts[k])) == crate::normalize("နှစ်")
+                        && prev_word(&parts, k).is_some_and(|p| my_figure(&p))
+                })
                 // Not across a mark: "ငါး။ နှစ် ယောက်" opens a new sentence;
                 // nor after a word with trailing punctuation ("ငါး-").
                 && parts[..i].iter().rev().find(|t| !py_str_isspace(t)).is_some_and(|raw| {
@@ -7297,6 +7305,9 @@ mod my_year_counter_tests {
         assert_eq!(s("09 နှစ် ငါး နှစ်"), "09 252");
         assert_eq!(s("\u{B2} နှစ် ငါး နှစ်"), "\u{B2} 252");
         assert_eq!(s("1,2,3 နှစ်"), "1,2,3 2");
+        assert_eq!(s("\u{B2} သုံး နှစ် လေး လ"), "\u{B2} 3 နှစ် 4 လ");
+        assert_eq!(s("သုံး နှစ် လေး ပြား"), "324 ပြား");
+        assert_eq!(s("5 နှစ် နှစ်"), "5 နှစ် 2");
         // A compatibility digit is no figure.
         assert_eq!(s("\u{B2} နှစ်"), "\u{B2} 2");
         // A digit after the point is no year (#1018).
