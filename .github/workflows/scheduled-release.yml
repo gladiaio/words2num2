@@ -1,0 +1,134 @@
+name: Scheduled release
+
+# Cuts a patch release every day at noon (Paris) when main has unreleased changes, so merged
+# fixes reach PyPI and crates.io without anyone bumping a version by hand.
+#
+#   1. If the version main declares is not on PyPI yet (a manual bump, or yesterday's release
+#      PR that merged after this job stopped waiting), dispatch auto-release.yml and stop.
+#   2. Otherwise, if main has commits since the tag of that version that touch the package
+#      (rust/, words2num2/, pyproject.toml), bump the patch version with
+#      .github/scripts/bump_version.py (Python X.Y.Z+1, crates patch + 1, CHANGELOG
+#      [Unreleased] -> [X.Y.Z+1]), push it on release/vX.Y.Z+1 and open a PR with auto-merge.
+#   3. main requires a PR and the CI checks, and a push or PR made with GITHUB_TOKEN triggers
+#      no workflow, so the job dispatches ci.yml and lint.yml on the release branch itself and
+#      waits for the PR to merge, then dispatches auto-release.yml (which tags, publishes to
+#      PyPI + GitHub Release, crates.io and AUR). If the merge takes longer than the wait,
+#      step 1 of the next run releases it.
+#
+# Minor and major versions stay manual: bump pyproject.toml / _version.py / rust/Cargo.toml
+# with bump_version.py in a PR; auto-release.yml publishes it on merge.
+#
+# Needs the repository setting "Allow GitHub Actions to create and approve pull requests".
+
+on:
+  schedule:
+    # 10:00 UTC = 12:00 Paris in summer (CEST), 11:00 in winter (CET).
+    - cron: "0 10 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write       # push the release branch
+  pull-requests: write  # open the release PR and enable auto-merge
+  actions: write        # dispatch ci.yml, lint.yml and auto-release.yml
+
+concurrency:
+  group: scheduled-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      # zizmor: ignore[artipacked] this job pushes the release branch with the checkout's token.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Decide what to release
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          ver=$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')
+          code=$(curl -s -o /dev/null -w '%{http_code}' "https://pypi.org/pypi/words2num2/$ver/json")
+          if [ "$code" = "404" ]; then
+            echo "$ver is declared on main but not on PyPI: releasing it."
+            echo "action=publish" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$code" != "200" ]; then
+            echo "::error::PyPI answered HTTP $code for $ver"
+            exit 1
+          fi
+          if ! git rev-parse -q --verify "refs/tags/v$ver" >/dev/null; then
+            echo "::error::$ver is on PyPI but tag v$ver is missing: cannot tell what is unreleased"
+            exit 1
+          fi
+          changes=$(git log --oneline "v$ver..HEAD" -- rust words2num2 pyproject.toml | wc -l | tr -d ' ')
+          if [ "$changes" = "0" ]; then
+            echo "No package change since v$ver: nothing to release."
+            echo "action=none" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          open=$(gh pr list --state open --search "head:release/v" --json number --jq 'length')
+          if [ "$open" != "0" ]; then
+            echo "A release PR is already open: not opening another."
+            echo "action=none" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          IFS=. read -r major minor patch <<< "$ver"
+          next="$major.$minor.$((patch + 1))"
+          echo "$changes package commits since v$ver: releasing $next."
+          { echo "action=bump"; echo "next=$next"; echo "prev=$ver"; } >> "$GITHUB_OUTPUT"
+
+      - name: Bump, push the release branch and open the PR
+        id: pr
+        if: steps.plan.outputs.action == 'bump'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NEXT: ${{ steps.plan.outputs.next }}
+          PREV: ${{ steps.plan.outputs.prev }}
+        run: |
+          set -euo pipefail
+          out=$(python3 .github/scripts/bump_version.py "$NEXT")
+          echo "$out"
+          core=${out##*core=}
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "release/v$NEXT"
+          git commit -am "release: $NEXT (words2num2-core $core)"
+          git push origin "release/v$NEXT"
+          notes=$(git log --no-merges --format='- %s' "v$PREV..HEAD~1" -- rust words2num2 pyproject.toml | head -100)
+          url=$(gh pr create --base main --head "release/v$NEXT" \
+            --title "release: $NEXT" \
+            --body "$(printf 'Scheduled release %s (words2num2-core %s).\n\nChanges since the last release:\n\n%s\n' "$NEXT" "$core" "$notes")")
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          gh workflow run ci.yml --ref "release/v$NEXT"
+          gh workflow run lint.yml --ref "release/v$NEXT"
+          gh pr merge "$url" --auto --squash --delete-branch
+
+      - name: Wait for the release PR to merge
+        id: wait
+        if: steps.plan.outputs.action == 'bump'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          URL: ${{ steps.pr.outputs.url }}
+        run: |
+          set -euo pipefail
+          for _ in $(seq 1 90); do
+            state=$(gh pr view "$URL" --json state --jq .state)
+            if [ "$state" = "MERGED" ]; then echo "merged=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+            if [ "$state" = "CLOSED" ]; then echo "::error::release PR was closed"; exit 1; fi
+            sleep 60
+          done
+          echo "Release PR not merged after 90 min: tomorrow's run publishes it once merged."
+          echo "merged=false" >> "$GITHUB_OUTPUT"
+
+      - name: Dispatch auto-release
+        if: steps.plan.outputs.action == 'publish' || steps.wait.outputs.merged == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run auto-release.yml --ref main
