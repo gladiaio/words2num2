@@ -71,22 +71,39 @@ def test_79_oh_is_an_interjection(text, expected):
 
 # #186: long runs of number words are linear, not cubic.
 @pytest.mark.parametrize(
-    "lang,word",
+    "lang,word,small",
     [
-        ("de", "zweitausend"),
-        ("it", "duemila"),
-        ("fr", "deux mille"),
-        ("es", "mil"),
-        ("en", "twenty first"),
-        ("en", "nineteen ninety"),
+        ("de", "zweitausend", 400),
+        ("it", "duemila", 400),
+        ("fr", "deux mille", 400),
+        ("es", "mil", 400),
+        # en is ~10x cheaper per token: a bigger run keeps the small timing
+        # well above the noise floor, so a quadratic walk shows (#995).
+        ("en", "twenty first", 4000),
+        ("en", "nineteen ninety", 4000),
     ],
 )
-def test_186_long_number_runs_finish_fast(lang, word):
-    text = " ".join([word] * 2000)
+def test_186_long_number_runs_finish_fast(lang, word, small):
+    # Growth, not wall-clock: a loaded CI runner can take 10 s on what is a
+    # 1.5 s workload (#957). 8x the tokens costs ~8x if linear, ~64x if
+    # quadratic, ~512x if cubic (cubic took 16 s for 200 de tokens).
+    # Small and large runs alternate, so a burst of load hits both (#996).
+    texts = {n: " ".join([word] * n) for n in (small, small * 8)}
+    # Fail fast on a real regression: the small run is under 0.6 s on main,
+    # even loaded; a quadratic or cubic walker would take minutes on the
+    # large one before the ratio is checked (#991).
     start = time.perf_counter()
-    s(text, lang)
-    # Cubic growth took 16 s for 200 de tokens; linear is well under a second.
-    assert time.perf_counter() - start < 10
+    s(texts[small], lang)
+    assert time.perf_counter() - start < 5
+    best = {n: float("inf") for n in texts}
+    for _ in range(2):
+        for n, text in texts.items():
+            start = time.perf_counter()
+            s(text, lang)
+            best[n] = min(best[n], time.perf_counter() - start)
+    lo, hi = best[small], best[small * 8]
+    assert hi < 60
+    assert hi / max(lo, 0.02) < 24, (lo, hi)
 
 
 # #186 with the scale composer: ~800 words of multi-scale numbers (the scale
