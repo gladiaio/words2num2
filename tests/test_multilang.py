@@ -303,6 +303,9 @@ def test_year_counter_and_spaced_groups_issue_876(lang, text, expected):
         ("ur", "x ایک سو۔ پانچ y", "x 100۔ 5 y"),
         ("zh", "五，十二", "5，12"),
         ("ja", "千：十二", "1000：12"),
+        ("zh", "二十，五", "20，五"),
+        ("zh", "好，一样", "好，一样"),
+        ("th", "ยี่สิบ，ห้า", "20，ห้า"),
     ],
 )
 def test_script_mark_ends_run_issue_1023(lang, text, expected):

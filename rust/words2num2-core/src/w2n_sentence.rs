@@ -2358,6 +2358,11 @@ fn my_years_shape(converter: &Converter, resolved: &str, parts: &[String], k: us
     three || four
 }
 
+/// zh / ja / th: written without spaces, cut into pieces by the segmenter.
+fn unspaced_script(resolved: &str) -> bool {
+    matches!(resolved.split(&['_', '-'][..]).next().unwrap_or(resolved), "zh" | "cn" | "ja" | "jp" | "th")
+}
+
 /// Is `run` exactly two words, each a single digit (0-9) on its own, without a
 /// leading zero? Then it is a range ("deux trois minutes"), and the run must
 /// not read it as one number (#51).
@@ -3746,7 +3751,10 @@ fn words2num_sentence_walk(
         // en "oh" / "o": the interjection, a number only next to another digit
         // word ("room oh seven"), which the digit run reads (#79).
         let head_is_oh = en_grammar && matches!(head.as_str(), "oh" | "o");
+        // Nor, in a script written without spaces, does a piece opening on a
+        // glued mark ("，五" of "二十，五"): the mark would be lost (#1028).
         let starts = starts_run(&converter, &head, decimal_heads)
+            && !(unspaced_script(&resolved) && piece.starts_with(tokens::is_trailing_punct))
             && !(head_is_oh && !(en_cardinal && en_digit_run(&parts, i).is_some()));
         // kn "ನೂರ", he "שני", mn "дөчин": a number only with what follows, so it
         // opens a run only in front of another number word, and alone stays a word.
@@ -3899,6 +3907,9 @@ fn words2num_sentence_walk(
             let clean = rstrip_punct(tok).to_lowercase();
             if clean.is_empty()
                 || opens_with_punct(tok)
+                // A piece the zh/ja/th segmenter left opening on a glued mark
+                // ("，五" of "二十，五"): the run never crosses the mark (#1028).
+                || (j > i && unspaced_script(&resolved) && tok.starts_with(tokens::is_trailing_punct))
                 || tokens::is_punct_part(&clean)
                 // The raw part too: "\u{200b})" cleans to a bare format
                 // character, still a mark part (#1006).
@@ -7119,10 +7130,29 @@ mod plain_walk_subunit_tests {
         assert_eq!(c("douze dollars et 150 cents", "fr"), "12 $ et 150 cents");
         // A count that is one amount but no integer stays as written (#1022).
         assert_eq!(c("douze dollars et deux virgule cinq cents", "fr"), "12 $ et 2,5 cents");
+        assert_eq!(c("douze dollars et deux virgule cinq cent", "fr"), "12 $ et 2,5 cent");
+        assert_eq!(c("douze dollars et mille virgule cinq cent", "fr"), "12 $ et 1000,5 cent");
         assert_eq!(c("12 dollars et 2,5 cents", "fr"), "12 $ et 2,5 cents");
         assert_eq!(c("12 dollars et 2.5 cents", "fr_CA"), "12 $ et 2.5 cents");
         assert_eq!(c("12 dollars et \u{665}\u{660} cents", "fr"), "12 $ et \u{665}\u{660} cents");
         assert_eq!(c("12 dollars et 99999999999999999999 cents", "fr"), "12 $ et 99999999999999999999 cents");
+        // A count of 100 or more keeps "cents" as written; "mille deux
+        // cents personnes" is still 1200 (#1025).
+        assert_eq!(c("douze dollars et cent cinquante cents", "fr"), "12 $ et 150 cents");
+        assert_eq!(c("douze dollars et quatre cents cinquante cents", "fr"), "12 $ et 450 cents");
+        assert_eq!(c("douze dollars et mille cents", "fr"), "12 $ et 1000 cents");
+        assert_eq!(c("douze dollars et cent un cents", "fr_BE"), "12 $ et 101 cents");
+        assert_eq!(c("douze dollars et cent cinquante cents personnes", "fr"), "12 $ et 150 cents personnes");
+        assert_eq!(c("douze dollars et \u{216B} cents", "fr"), "12 $ et \u{216B} cents");
+        assert_eq!(c("dix dollars et mille deux cents personnes", "fr"), "10 $ et 1200 personnes");
+        // Unless "cent" extends the count into one number (#1029).
+        assert_eq!(c("dix euros et deux mille cent personnes", "fr_BE"), "10 \u{20AC} et 2100 personnes");
+        assert_eq!(c("vingt euros et mille cent cinquante personnes", "fr"), "20 \u{20AC} et 1150 personnes");
+        assert_eq!(c("vingt euros et mille cent un personnes", "fr"), "20 \u{20AC} et 1101 personnes");
+        assert_eq!(c("vingt euros et dix mille cent personnes", "fr"), "20 \u{20AC} et 10100 personnes");
+        assert_eq!(c("quinze euro et mille cent", "fr_CA"), "15 \u{20AC} et 1100");
+        // A symbol is opaque only as the whole count.
+        assert_eq!(c("douze dollars et \u{216B} deux cents personnes", "fr"), "12 $ et \u{216B} 200 personnes");
         // Words that are no count are no amount.
         assert_eq!(c("le billet coûte cinq dollars et la salle compte quatre cents places", "fr"), "le billet coûte 5 $ et la salle compte 400 places");
         // The plain walk leaves a mid-clause "un cent" as written.
@@ -7243,7 +7273,31 @@ mod script_mark_tests {
         assert_eq!(s("\u{767E}\u{FF0C}\u{5341}\u{4E8C}", "ja"), "100\u{FF0C}12");
         assert_eq!(s("\u{5343}\u{FF1A}\u{5341}\u{4E8C}", "ja"), "1000\u{FF1A}12");
         assert_eq!(s("ร้อย\u{FF0C}สิบสอง", "th"), "100\u{FF0C}12");
+        // A run never crosses a glued mark into a lone numeral, nor opens on
+        // one: the mark stays, the numeral stays as written (#1028).
+        assert_eq!(s("二十，五", "zh"), "20，五");
+        assert_eq!(s("一千，五", "zh"), "1000，五");
+        assert_eq!(s("二千，五", "ja"), "2000，五");
+        assert_eq!(s("ยี่สิบ，ห้า", "th"), "20，ห้า");
+        assert_eq!(s("x 二十,五 y", "zh"), "x 20,五 y");
+        assert_eq!(s("二十，五，六", "zh"), "20，五，六");
+        assert_eq!(s("十二，五，三", "zh"), "12，五，三");
+        // Unchanged: a multi-numeral run after the mark, a counted one.
+        assert_eq!(s("二十，十二", "zh"), "20，12");
+        assert_eq!(s("二十，五个", "zh"), "20，5个");
+        assert_eq!(s("好，一样", "zh"), "好，一样");
+        assert_eq!(s("每星期一、三、五", "zh"), "每星期一、三、五");
+        assert_eq!(s("一）二", "zh"), "一）二");
+        assert_eq!(s("五…五", "zh"), "五…五");
+        assert_eq!(s("万一、五", "ja"), "万一、五");
+        assert_eq!(s("比分三：二", "zh"), "比分三：二");
+        assert_eq!(s("บ้าน,ห้า", "th"), "บ้าน,ห้า");
+        assert_eq!(s("一、二、三", "zh"), "一、二、三");
+        // Spaced languages read a mark-led number as before.
+        assert!(s("x ,deux mille y", "fr").contains("2000"));
+        assert!(s("x ,\u{0434}\u{0432}\u{0430}\u{0434}\u{0446}\u{0430}\u{0442}\u{044C} \u{043E}\u{0434}\u{0438}\u{043D} y", "ru").contains("21"));
         // Unchanged without the mark.
         assert_eq!(s("တစ်ရာ ငါး", "my"), "105");
     }
 }
+
