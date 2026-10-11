@@ -521,7 +521,7 @@ fn has_trailing_mark(s: &str) -> bool {
 /// An invisible format character (ZWSP, ZWNJ, ZWJ, word joiner, BOM, soft
 /// hyphen): it rides with the punctuation around it, so "twenty,\u{200b} one"
 /// still ends its number at the comma and keeps the ZWSP (#870).
-fn is_format_char(c: char) -> bool {
+pub(crate) fn is_format_char(c: char) -> bool {
     matches!(c, '\u{200B}'..='\u{200D}' | '\u{2060}' | '\u{FEFF}' | '\u{00AD}')
 }
 
@@ -536,10 +536,33 @@ fn opens_with_punct(s: &str) -> bool {
 
 /// `re.search(r"[\.,;:!\?\"']+$", s)` → `m.group()`, or `""`.
 ///
-/// The leftmost match of `[...]+$` is exactly the maximal trailing run.
+/// The leftmost match of `[...]+$` is exactly the maximal trailing run, plus
+/// the bare format characters the parse ignores: "five\u{200b}" is re-emitted
+/// as "5\u{200b}", not "5" (#1005).
+///
+/// Not when a date or phone pass reads the walked text after: those match
+/// bare figures, so there the characters go as before (#1020).
 fn trailing_punct(s: &str) -> &str {
     let kept = rstrip_punct(s);
+    let kept = if BARE_FORMAT_KEPT.with(|c| c.get()) { kept.trim_end_matches(is_format_char) } else { kept };
     &s[kept.len()..]
+}
+
+thread_local! {
+    static BARE_FORMAT_KEPT: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
+}
+
+/// Run `f` with bare format characters after a value re-emitted, or not;
+/// restored on return, panic included.
+fn with_bare_format<R>(on: bool, f: impl FnOnce() -> R) -> R {
+    struct Restore(bool);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            BARE_FORMAT_KEPT.with(|c| c.set(self.0));
+        }
+    }
+    let _restore = Restore(BARE_FORMAT_KEPT.with(|c| c.replace(on)));
+    f()
 }
 
 /// `re.search(r"[\.,;:!\?]$", tok)` — note this class has **no** quote
@@ -3481,7 +3504,9 @@ pub fn words2num_sentence_full(
             )))
         }
     };
-    let mut out = words2num_sentence_folded(sentence, lang, to, has_kwargs, currency)?;
+    // The currency pass reads a figure with its format character (#1021).
+    let folds = date || phone;
+    let mut out = with_bare_format(!folds, || words2num_sentence_folded(sentence, lang, to, has_kwargs, currency))?;
     if phone {
         out = crate::w2n_phone::fold_phones(&out, lang, region);
     }
@@ -4238,7 +4263,7 @@ fn words2num_sentence_walk(
             };
             match rendered {
                 Some(text) => {
-                    after_decimal = matches!(v, W2nValue::Dec(_)) && trailing.is_empty();
+                    after_decimal = matches!(v, W2nValue::Dec(_)) && trailing.chars().all(is_format_char);
                     out.push_str(sep_before(i));
                     out.push_str(&text);
                     out.push_str(trailing);
@@ -6898,7 +6923,35 @@ mod format_char_punct_tests {
         // A bare format character is a word-break hint, no mark (#998).
         assert_eq!(s("\u{4E8C}\u{767E}\u{200B}\u{4E94}\u{5341}", "zh"), "250");
         assert_eq!(s("สองร้อย\u{200B}ห้าสิบ", "th"), "250");
-        assert_eq!(s("one\u{200B} twenty-one", "en"), "1 21");
+        // It still ends a run that a space ends, and is kept (#1005).
+        assert_eq!(s("one\u{200B} twenty-one", "en"), "1\u{200B} 21");
+        assert_eq!(s("x five\u{200B} y", "en"), "x 5\u{200B} y");
+        assert_eq!(s("x five\u{2060} y", "en"), "x 5\u{2060} y");
+        assert_eq!(s("five\u{00AD} apples", "en"), "5\u{00AD} apples");
+        assert_eq!(s("x f\u{FC}nf\u{200B} y", "de"), "x 5\u{200B} y");
+        assert_eq!(s("x twenty\u{200B} one", "en"), "x 21");
+        // currency=True folds the amount, the character after it (#1021); a
+        // date or phone pass folds as before, without it (#1020).
+        let c = |t: &str, l: &str| super::words2num_sentence_opts(t, l, "cardinal", false, true).unwrap();
+        assert_eq!(c("x twenty\u{200B} dollars", "en"), "x $20\u{200B}");
+        assert_eq!(c("it costs twelve\u{200B} dollars", "en"), "it costs $12\u{200B}");
+        assert_eq!(c("twelve dollars and fifty\u{200B} cents", "en"), "$12.50\u{200B}");
+        assert_eq!(c("twelve dollars fifty\u{200B}", "en"), "$12.50\u{200B}");
+        assert_eq!(c("ninety nine\u{200B} cents", "en"), "$0.99\u{200B}");
+        assert_eq!(c("douze\u{200B} euros", "fr"), "12 \u{20AC}\u{200B}");
+        assert_eq!(c("zw\u{F6}lf Euro f\u{FC}nfzig\u{200B}", "de"), "12,50 \u{20AC}\u{200B}");
+        assert_eq!(c("x 20\u{200B} dollars", "en"), "x $20\u{200B}");
+        let full = |t: &str, date: bool, phone: bool| {
+            super::words2num_sentence_full(t, "en", "cardinal", false, false, date, None, "written", phone).unwrap()
+        };
+        assert_eq!(full("on the fifth\u{200B} of march", true, false), "on March 5");
+        assert_eq!(full("the twelfth of march two thousand twenty six\u{200B}", true, false), "March 12, 2026");
+        assert_eq!(
+            full("call zero six one two three four five six seven eight\u{200B}", false, true),
+            full("call zero six one two three four five six seven eight", false, true)
+        );
+        // Without a fold the character is kept.
+        assert_eq!(full("x five\u{200B} y", false, false), "x 5\u{200B} y");
         assert_eq!(s("twenty one", "en"), "21");
         // A closing bracket, quote or script mark with a format character is
         // cut off whole, as without it (#1004).
@@ -6908,11 +6961,12 @@ mod format_char_punct_tests {
         assert_eq!(s("twenty\u{201D}\u{200B} one", "en"), "20\u{201D}\u{200B} one");
         assert_eq!(s("\u{0639}\u{0634}\u{0631}\u{0648}\u{0646}\u{060C}\u{200B} \u{0648}\u{0627}\u{062D}\u{062F}", "ar"), "20\u{060C}\u{200B} 1");
         assert_eq!(s("x zwanzig tausend\u{3002}\u{200B} drei", "de"), "x 20000\u{3002}\u{200B} 3");
-        assert_eq!(s("twenty\u{2060}) one", "en"), s("twenty) one", "en"));
-        assert_eq!(s("vingt\u{2060}\u{BB} trois", "fr"), s("vingt\u{BB} trois", "fr"));
-        // A format character before the mark stays on the word (#1011).
-        assert_eq!(s("x twenty\u{200B}) one y", "en"), s("x twenty) one y", "en"));
-        assert_eq!(s("x zwanzig\u{200B}) drei y", "de"), s("x zwanzig) drei y", "de"));
+        // A format character before the mark reads as without it (#1011),
+        // and is kept with the mark (#1005).
+        assert_eq!(s("twenty\u{2060}) one", "en"), "20\u{2060}) one");
+        assert_eq!(s("vingt\u{2060}\u{BB} trois", "fr"), "20\u{2060}\u{BB} 3");
+        assert_eq!(s("x twenty\u{200B}) one y", "en"), "x 20\u{200B}) one y");
+        assert_eq!(s("x zwanzig\u{200B}) drei y", "de"), "x 20\u{200B}) 3 y");
     }
 }
 

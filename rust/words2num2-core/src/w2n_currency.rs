@@ -844,17 +844,21 @@ fn split_parts(text: &str) -> Vec<Part> {
 }
 
 /// A number the walker wrote: integer digits and an optional fraction, as
-/// written (`1355`, `3.5`, `2,50`); the trailing punctuation kept apart.
+/// written (`1355`, `3.5`, `2,50`); the trailing punctuation kept apart, and
+/// the invisible format characters after it ("20\u{200b}", #1021).
 #[derive(Debug, Clone)]
 struct Num {
     int: String,
     frac: String,
     trailing: String,
+    invisible: String,
 }
 
 fn parse_num(word: &str) -> Option<Num> {
-    let trimmed = word.trim_end_matches(|c: char| ",.;:!?)]\"'»".contains(c));
-    let trailing = word[trimmed.len()..].to_string();
+    let core = word.trim_end_matches(crate::w2n_sentence::is_format_char);
+    let invisible = word[core.len()..].to_string();
+    let trimmed = core.trim_end_matches(|c: char| ",.;:!?)]\"'»".contains(c));
+    let trailing = core[trimmed.len()..].to_string();
     if trimmed.is_empty() || !trimmed.chars().next().is_some_and(|c| c.is_ascii_digit()) {
         return None;
     }
@@ -872,6 +876,7 @@ fn parse_num(word: &str) -> Option<Num> {
         int: int.to_string(),
         frac: frac.to_string(),
         trailing,
+        invisible,
     })
 }
 
@@ -1069,6 +1074,7 @@ pub fn fold_currency(text: &str, lang: &str) -> String {
             };
             let frac = format!("{:0>width$}", frac, width = d);
             out.push_str(&render(base, cur, int, Some(&frac)));
+            out.push_str(&num.invisible);
             out.push_str(&m.trailing);
             i = m.end + 1;
             continue;
@@ -1088,6 +1094,7 @@ pub fn fold_currency(text: &str, lang: &str) -> String {
             Some(num.frac.clone())
         };
         let mut trailing = m.trailing.clone();
+        let mut sub_invisible = String::new();
         // Subunit after the currency: "[and] twenty eight cents" | "fifty". A comma
         // after the unit is a pause, not the end of the amount, when a spoken
         // subunit follows: "zéro dollar, et cinquante-cinq centimes" (the
@@ -1115,6 +1122,7 @@ pub fn fold_currency(text: &str, lang: &str) -> String {
                             frac = Some(minor);
                             consumed_end = sw.end;
                             trailing = sw.trailing;
+                            sub_invisible = sub_num.invisible.clone();
                         }
                     } else if let Some(minor) = minor.filter(|_| !comma) {
                         // "two euros fifty": bare subunit, only when nothing
@@ -1133,12 +1141,16 @@ pub fn fold_currency(text: &str, lang: &str) -> String {
                             frac = Some(minor);
                             consumed_end = s;
                             trailing = sub_num.trailing.clone();
+                            sub_invisible = sub_num.invisible.clone();
                         }
                     }
                 }
             }
         }
         out.push_str(&render(base, cur, &num.int, frac.as_deref()));
+        // Format characters ride after the amount they followed (#1021).
+        out.push_str(&num.invisible);
+        out.push_str(&sub_invisible);
         out.push_str(&trailing);
         i = consumed_end + 1;
     }
