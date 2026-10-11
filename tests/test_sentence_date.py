@@ -174,6 +174,13 @@ def test_date_and_currency_together():
             "van 12-03-2000 tot en met 13-03-2000",
         ),
         ("it", "il dodici tre duemilaventisei", "il 12/03/2026"),
+        # Two-word range links (#1066).
+        (
+            "de",
+            "ab 12 3 2000 bis zum 13. März 2000 in Berlin",
+            "ab 12.03.2000 bis zum 13. März 2000 in Berlin",
+        ),
+        ("pt", "de 12 3 2026 até o 13 3 2026", "de 12/03/2026 até o 13/03/2026"),
         # The second end in any date form (#1051 N4).
         (
             "en",

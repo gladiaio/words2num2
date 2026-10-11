@@ -282,9 +282,9 @@ fn range_word(st: Style, w: &str) -> bool {
     let words: &[&str] = match st {
         Style::EnUs | Style::EnGb => &["to", "and", "through", "till", "until"],
         Style::Fr => &["au", "et", "jusqu'au"],
-        Style::De => &["bis", "und"],
+        Style::De => &["bis", "und", "zum", "dem"],
         Style::Es => &["al", "y", "hasta"],
-        Style::Pt => &["a", "e", "até"],
+        Style::Pt => &["a", "e", "até", "ao", "o"],
         Style::It => &["al", "e"],
         Style::Nl => &["tot", "en", "met"],
     };
