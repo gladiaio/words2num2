@@ -290,3 +290,15 @@ def test_elided_place_cardinal_keeps_renderer_spelling():
 )
 def test_year_counter_and_spaced_groups_issue_876(lang, text, expected):
     assert words2num_sentence(text, lang=lang) == expected
+
+
+@pytest.mark.parametrize(
+    "lang,text,expected",
+    [
+        ("my", "တစ်ရာ။ ငါး ယောက်", "100။ 5 ယောက်"),
+        ("my", "တစ်ရာ၊ ငါး ယောက်", "100၊ 5 ယောက်"),
+        ("ur", "x ایک سو۔ پانچ y", "x 100۔ 5 y"),
+    ],
+)
+def test_script_mark_ends_run_issue_1023(lang, text, expected):
+    assert words2num_sentence(text, lang=lang) == expected
