@@ -863,7 +863,7 @@ fn parse_num(word: &str) -> Option<Num> {
     let word = body;
     let core = word.trim_end_matches(crate::w2n_sentence::is_format_char);
     let invisible = word[core.len()..].to_string();
-    let trimmed = core.trim_end_matches(|c: char| ",.;:!?)]\"'»".contains(c));
+    let trimmed = core.trim_end_matches(|c: char| TRAILING_MARKS.contains(c));
     let trailing = core[trimmed.len()..].to_string();
     if trimmed.is_empty() || !trimmed.chars().next().is_some_and(|c| c.is_ascii_digit()) {
         return None;
@@ -888,8 +888,12 @@ fn parse_num(word: &str) -> Option<Num> {
 }
 
 /// Lower-cased, diacritics stripped, trailing punctuation kept apart.
+/// The marks a word may end in: ASCII, fullwidth, CJK and script ones, all
+/// kept apart and written back (#1067).
+const TRAILING_MARKS: &str = ",.;:!?)]\"'»，。！？；：、）」』】》…।॥،؛؟۔";
+
 fn word_key(word: &str) -> (String, String) {
-    let trimmed = word.trim_end_matches(|c: char| ",.;:!?)]\"'»".contains(c));
+    let trimmed = word.trim_end_matches(|c: char| TRAILING_MARKS.contains(c));
     let trailing = word[trimmed.len()..].to_string();
     (crate::normalize(trimmed).trim().to_string(), trailing)
 }
