@@ -3462,7 +3462,7 @@ fn words2num_sentence_folded(
 ) -> Result<String, W2nError> {
     // Validate up front (#201): the walk swallows every per-run error, so an
     // unsupported `lang` or `to` would otherwise come back as the input text.
-    resolve_lang(lang)?;
+    let resolved_lang = resolve_lang(lang)?;
     check_converter_type(to)?;
     // fr / de / es clock times, read on the words before the walk ("à neuf
     // heures quinze" -> "à 9h15"); the walk leaves the figures alone.
@@ -3490,14 +3490,15 @@ fn words2num_sentence_folded(
     // The plain walk cuts the same subunit off: fr "douze dollars et
     // cinquante cents" is "12 dollars et 50 cents", not "… 5000" (#868).
     // The subunit is swapped for a placeholder word, not cut off, so the
-    // words before it keep their right-hand context: "un euro et un cent" is
-    // "1 euro et 1 cent", the "un" no lone article (#1001).
-    let resolved = resolve_lang(lang)?;
+    // words before it keep their right-hand context: "un euro et un centime"
+    // stays "1 euro et 1 centime" (#1001).
+    let resolved = resolved_lang;
     let pieces = crate::w2n_currency::subunit_pieces(sentence, &resolved);
     if pieces.len() == 1 {
         return words2num_sentence_walk(sentence, lang, to, has_kwargs);
     }
-    const MARK: &str = "wnsubunitmark";
+    // A private-use character can't occur in a transcript.
+    const MARK: &str = "\u{F8FF}wnsub\u{F8FF}";
     let mut masked = String::new();
     let mut kept: Vec<String> = Vec::new();
     for (piece, walk) in pieces {
