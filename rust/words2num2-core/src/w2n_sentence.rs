@@ -495,7 +495,12 @@ fn py_rstrip_char(s: &str, ch: char) -> &str {
 /// Also the script-native marks and closing brackets/quotes `normalize` folds
 /// to a space (#121): "पाँच।" reads 5 and keeps its danda, "five)" its bracket.
 fn rstrip_punct(s: &str) -> &str {
-    let mark = |c: char| matches!(c, '.' | ',' | ';' | ':' | '!' | '?' | '"' | '\'' | '\u{2019}') || crate::is_clause_punctuation(c);
+    // The fullwidth marks too, which end a run as their ASCII forms do (#1026).
+    let mark = |c: char| {
+        matches!(c, '.' | ',' | ';' | ':' | '!' | '?' | '"' | '\'' | '\u{2019}')
+            || matches!(c, '\u{FF0C}' | '\u{FF01}' | '\u{FF1F}' | '\u{FF1B}' | '\u{FF1A}')
+            || crate::is_clause_punctuation(c)
+    };
     // Format characters ride with a mark before them ("twenty,\u{200b}"),
     // and only then: a bare ZWSP is a word-break hint, as inside unspaced
     // th/zh/ja numbers (#870, #998).
@@ -7104,6 +7109,12 @@ mod script_mark_tests {
         assert_eq!(s("x ایک سو۔ پانچ y", "ur"), "x 100۔ 5 y");
         assert_eq!(s("x មួយរយ។ ប្រាំ y", "km"), "x 100។ 5 y");
         assert_eq!(s("x መቶ። አምስት y", "am"), "x 100። 5 y");
+        // A glued fullwidth mark is kept between the two (#1026).
+        assert_eq!(s("\u{4E94}\u{FF0C}\u{5341}\u{4E8C}", "zh"), "5\u{FF0C}12");
+        assert_eq!(s("x \u{4E94}\u{FF01}\u{5341}\u{4E8C} y", "zh"), "x 5\u{FF01}12 y");
+        assert_eq!(s("\u{767E}\u{FF0C}\u{5341}\u{4E8C}", "ja"), "100\u{FF0C}12");
+        assert_eq!(s("\u{5343}\u{FF1A}\u{5341}\u{4E8C}", "ja"), "1000\u{FF1A}12");
+        assert_eq!(s("ร้อย\u{FF0C}สิบสอง", "th"), "100\u{FF0C}12");
         // Unchanged without the mark.
         assert_eq!(s("တစ်ရာ ငါး", "my"), "105");
     }

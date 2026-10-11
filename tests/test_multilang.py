@@ -298,6 +298,8 @@ def test_year_counter_and_spaced_groups_issue_876(lang, text, expected):
         ("my", "တစ်ရာ။ ငါး ယောက်", "100။ 5 ယောက်"),
         ("my", "တစ်ရာ၊ ငါး ယောက်", "100၊ 5 ယောက်"),
         ("ur", "x ایک سو۔ پانچ y", "x 100۔ 5 y"),
+        ("zh", "五，十二", "5，12"),
+        ("ja", "千：十二", "1000：12"),
     ],
 )
 def test_script_mark_ends_run_issue_1023(lang, text, expected):
