@@ -1253,10 +1253,27 @@ fn unit_of_next_morpheme(key: &str, parts: &[String], j: usize, clean: &str) -> 
         && crate::lookup_norm(key, &format!("{norm}{next}"), false, &[]).ok().flatten().is_some()
 }
 
+/// my counters, currencies and units: a "နှစ်" right before one is the
+/// number two, never the noun "year" ("ငါးရာ နှစ် ကျပ်" is 502 kyat, #1015).
+const MY_COUNTERS: &[&str] = &[
+    "ယောက်", "ဦး", "ပါး", "ကောင်", "ခု", "လုံး", "စင်း", "စီး", "ချောင်း", "ပြား", "ထည်", "အုပ်",
+    "ခွက်", "ပုလင်း", "ဘူး", "အိမ်", "ဆောင်", "ပင်", "ပွင့်", "ရွက်", "မျိုး", "ကြိမ်", "ခါ", "ချပ်",
+    "စု", "ဖွဲ့", "ရက်", "လ", "ပတ်", "နာရီ", "မိနစ်", "စက္ကန့်", "ကျပ်", "ကျပ်သား", "ဒေါ်လာ",
+    "ယူရို", "ပိဿာ", "ကီလို", "မီတာ", "ပေ", "လက်မ", "မိုင်",
+];
+
+/// Is `next` (the word after a my "နှစ်") a counter, currency or unit?
+fn my_counter(next: Option<&str>) -> bool {
+    next.is_some_and(|w| {
+        let w = crate::normalize(w);
+        MY_COUNTERS.iter().any(|c| crate::normalize(c) == w)
+    })
+}
+
 /// my: is `clean` the standalone "နှစ်" (year) after a number that is not
-/// whole ten-thousands (see the walker, #876)?
-fn my_year_counter(resolved: &str, clean: &str, so_far: Option<&W2nValue>) -> bool {
-    if !resolved.starts_with("my") || crate::normalize(clean) != crate::normalize("နှစ်") {
+/// whole ten-thousands, with no counter after it (see the walker, #876)?
+fn my_year_counter(resolved: &str, clean: &str, so_far: Option<&W2nValue>, next: Option<&str>) -> bool {
+    if !resolved.starts_with("my") || crate::normalize(clean) != crate::normalize("နှစ်") || my_counter(next) {
         return false;
     }
     match so_far {
@@ -3801,8 +3818,10 @@ fn words2num_sentence_walk(
             // my "နှစ်" is "two" and the counter "year": after a number it is
             // the year ("အသက် နှစ်ဆယ့်တစ် နှစ်" is 21 years), unless the
             // number is whole ten-thousands, where the renderer itself spaces
-            // the two ("တစ်သောင်း နှစ်" is 10002) (#876).
-            if j > i && my_year_counter(&resolved, &clean, best_value.as_ref()) {
+            // the two ("တစ်သောင်း နှစ်" is 10002) (#876), or a counter follows
+            // ("ငါးရာ နှစ် ကျပ်" is 502 kyat, #1015).
+            let after = if has_trailing_mark(tok) { None } else { next_word(&parts, j) };
+            if j > i && my_year_counter(&resolved, &clean, best_value.as_ref(), after.as_deref()) {
                 break;
             }
             // A morpheme that leads its unit (es "veinti", it "trent") opens a
@@ -4191,8 +4210,13 @@ fn words2num_sentence_walk(
                 && resolved.starts_with("my")
                 && crate::normalize(rstrip_punct(piece)) == crate::normalize("နှစ်")
                 && prev_word(&parts, i).is_some_and(|p| starts_run(&converter, &p, decimal_heads))
-                // Not across a mark: "ငါး။ နှစ် ယောက်" opens a new sentence.
-                && parts[..i].iter().rev().find(|t| !py_str_isspace(t)).is_some_and(|raw| !has_trailing_mark(raw) && !tokens::is_punct_part(raw))
+                // Not across a mark: "ငါး။ နှစ် ယောက်" opens a new sentence;
+                // nor after a word with trailing punctuation ("ငါး-").
+                && parts[..i].iter().rev().find(|t| !py_str_isspace(t)).is_some_and(|raw| {
+                    !has_trailing_mark(raw) && !tokens::is_punct_part(raw) && rstrip_punct(raw) == raw.as_str()
+                })
+                // Not before a counter: "ငါးရာ နှစ် ကျပ်" (#1015).
+                && !(!has_trailing_mark(piece) && my_counter(next_word(&parts, i).as_deref()))
             {
                 // my "ငါး နှစ်": the year after a number, no 2 (#876).
                 None
@@ -6985,6 +7009,16 @@ mod my_year_counter_tests {
         // Not across a mark: a new sentence's "two people".
         assert_eq!(s("ငါး။ နှစ် ယောက် လာတယ်"), "5။ 2 ယောက် လာတယ်");
         assert_eq!(s("ငါး, နှစ် ယောက်"), "5, 2 ယောက်");
+        assert_eq!(s("ငါး. နှစ် ယောက်"), "5. 2 ယောက်");
+        assert_eq!(s("အဆင့် သုံး၊ နှစ် နဲ့ တစ်"), "အဆင့် 3၊ 2 နဲ့ 1");
+        assert_eq!(s("ငါး- နှစ် ယောက်"), "ငါး- 2 ယောက်");
+        // Before a counter or currency it is the two (#1015).
+        assert_eq!(s("ငါးရာ နှစ် ကျပ်"), "502 ကျပ်");
+        assert_eq!(s("တစ်ထောင် နှစ် ကျပ်"), "1002 ကျပ်");
+        assert_eq!(s("ဈေး ငါးထောင် နှစ် ကျပ်"), "ဈေး 5002 ကျပ်");
+        assert_eq!(s("တစ်ရာ နှစ် ယောက်"), "102 ယောက်");
+        // Not across a mark: "နှစ်။ ကျပ်" ends on the year.
+        assert_eq!(s("ငါးရာ နှစ်။ ကျပ်"), "500 နှစ်။ ကျပ်");
     }
 
     /// #876: spaced groups add only below the lowest place filled, in every
