@@ -7165,6 +7165,10 @@ mod plain_walk_subunit_tests {
         // The connector after the unit, not the "et" inside the count (#1010).
         assert_eq!(s("douze dollars et vingt et un cents", "fr_BE", "cardinal"), "12 dollars et 21 cents");
         assert_eq!(s("douze dollars et nonante et un cents", "fr_CH", "cardinal"), "12 dollars et 91 cents");
+        // A one-word count is the amount, no article or adjective (#1009).
+        assert_eq!(s("un dollar et un cent", "fr", "cardinal"), "1 dollar et 1 cent");
+        assert_eq!(s("deux dollars et neuf cents", "fr", "cardinal"), "2 dollars et 9 cents");
+        assert_eq!(s("deux dollars et neuf cents de plus", "fr", "cardinal"), "2 dollars et 900 de plus");
         // currency=True: the count is a plain number naming no currency,
         // not across a sentence or two "et"-joined numbers (#1013, #1017).
         let c = |t: &str, l: &str| super::words2num_sentence_opts(t, l, "cardinal", false, true).unwrap();
@@ -7215,8 +7219,8 @@ mod plain_walk_subunit_tests {
         assert_eq!(c("douze dollars et \u{216B} deux cents personnes", "fr"), "12 $ et \u{216B} 200 personnes");
         // Words that are no count are no amount.
         assert_eq!(c("le billet coûte cinq dollars et la salle compte quatre cents places", "fr"), "le billet coûte 5 $ et la salle compte 400 places");
-        // The plain walk leaves a mid-clause "un cent" as written.
-        assert_eq!(s("douze dollars et un cent chacun", "fr", "cardinal"), "12 dollars et un cent chacun");
+        // A mid-clause "un cent" is one cent (#1009).
+        assert_eq!(s("douze dollars et un cent chacun", "fr", "cardinal"), "12 dollars et 1 cent chacun");
     }
 }
 

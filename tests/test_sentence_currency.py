@@ -303,3 +303,16 @@ def test_plain_walk_subunit(lang, text, to, expected):
 )
 def test_subunit_count_is_one_plain_number_issue_1017(text, lang, expected):
     assert words2num_sentence(text, lang=lang, currency=True) == expected
+
+
+@pytest.mark.parametrize(
+    "text, currency, expected",
+    [
+        ("un dollar et un cent", False, "1 dollar et 1 cent"),
+        ("deux dollars et neuf cents", False, "2 dollars et 9 cents"),
+        ("deux dollars et neuf cents", True, "2,09 $"),
+        ("un euro et un centime", True, "1,01 €"),
+    ],
+)
+def test_one_word_subunit_count_issue_1009(text, currency, expected):
+    assert words2num_sentence(text, lang="fr", currency=currency) == expected

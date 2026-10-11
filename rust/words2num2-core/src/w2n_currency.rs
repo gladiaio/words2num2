@@ -1327,6 +1327,7 @@ fn pieces_for_walk_with(sentence: &str, lang: &str, subunits_only: bool) -> Vec<
         })
     };
     let mut kept: Vec<usize> = Vec::new(); // parts kept verbatim
+    let mut count_renames: Vec<(usize, String)> = Vec::new();
     let mut renames: Vec<(usize, String)> = Vec::new();
     for w in 0..words.len() {
         // A subunit name after "<unit> <connector> <one to four words>".
@@ -1417,6 +1418,14 @@ fn pieces_for_walk_with(sentence: &str, lang: &str, subunits_only: bool) -> Vec<
             });
             if numeric_sub && ok {
                 kept.push(words[w]);
+                // A one-word count is the amount: "et un cent", "et neuf
+                // cents" are 1 and 9 cents, not the article "un" or "neuf"
+                // (new), which a lone homograph would stay (#1009).
+                if conn == Some(1) {
+                    if let Ok(Some(v)) = crate::lookup_norm(lang, &keys[w - 1], false, &[]) {
+                        count_renames.push((words[w - 1], v.to_string()));
+                    }
+                }
             }
         }
         // The article-one right before a currency unit name, opening the
@@ -1457,6 +1466,10 @@ fn pieces_for_walk_with(sentence: &str, lang: &str, subunits_only: bool) -> Vec<
     }
     for (j, text) in renames.into_iter().filter(|_| !subunits_only) {
         parts[j].text = text;
+    }
+    for (j, text) in count_renames {
+        let trailing = word_key(&parts[j].text).1;
+        parts[j].text = format!("{text}{trailing}");
     }
     let mut pieces = Vec::new();
     let mut cur = String::new();
