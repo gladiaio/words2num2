@@ -2414,7 +2414,7 @@ fn next_word(parts: &[String], i: usize) -> Option<String> {
 
 /// Month names, for the date reading of "first"/"second" ("the first of
 /// march", "le premier avril"). Diacritics stripped, as `normalize` does.
-fn months(resolved: &str) -> &'static str {
+pub(crate) fn months(resolved: &str) -> &'static str {
     let base = resolved.split(&['_', '-'][..]).next().unwrap_or(resolved);
     match base {
         "en" => {
@@ -3382,6 +3382,31 @@ pub fn words2num_sentence(
 /// currency word (+ subunit) are written the way the language writes that
 /// currency (`$1,355.28`, `43,20 $`, `20,50 €`). See [`crate::w2n_currency`].
 pub fn words2num_sentence_opts(
+    sentence: &str,
+    lang: &str,
+    to: &str,
+    has_kwargs: bool,
+    currency: bool,
+) -> Result<String, W2nError> {
+    words2num_sentence_full(sentence, lang, to, has_kwargs, currency, false)
+}
+
+/// [`words2num_sentence_opts`] with the date pass: day + month (+ year) spans
+/// written the way the language writes a date ("March 12, 2026", "12 March
+/// 2026", "am 12. März 2026"). See [`crate::w2n_date`].
+pub fn words2num_sentence_full(
+    sentence: &str,
+    lang: &str,
+    to: &str,
+    has_kwargs: bool,
+    currency: bool,
+    date: bool,
+) -> Result<String, W2nError> {
+    let out = words2num_sentence_folded(sentence, lang, to, has_kwargs, currency)?;
+    Ok(if date { crate::w2n_date::fold_dates(&out, lang) } else { out })
+}
+
+fn words2num_sentence_folded(
     sentence: &str,
     lang: &str,
     to: &str,

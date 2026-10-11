@@ -248,7 +248,8 @@ fn words2num(
 
 /// `_rust.words2num_sentence(sentence, lang, to, kwargs)`.
 #[pyfunction]
-#[pyo3(signature = (sentence, lang="en", to="cardinal", kwargs=None, currency=false, convert_numerical_symbols=false))]
+#[pyo3(signature = (sentence, lang="en", to="cardinal", kwargs=None, currency=false, convert_numerical_symbols=false, date=false))]
+#[allow(clippy::too_many_arguments)]
 fn words2num_sentence(
     py: Python<'_>,
     sentence: &str,
@@ -257,6 +258,7 @@ fn words2num_sentence(
     kwargs: Option<Bound<'_, PyDict>>,
     currency: bool,
     convert_numerical_symbols: bool,
+    date: bool,
 ) -> PyResult<String> {
     // A stray keyword used to make every conversion fail silently, handing the
     // sentence back unchanged (#201); it is a TypeError like in `words2num`.
@@ -265,7 +267,7 @@ fn words2num_sentence(
     // A long transcript takes a while: release the GIL for the walk (#186).
     py.detach(move || {
         words2num2_core::with_numerical_symbols(convert_numerical_symbols, || {
-            w2n_sentence::words2num_sentence_opts(&sentence, &lang, &to, false, currency)
+            w2n_sentence::words2num_sentence_full(&sentence, &lang, &to, false, currency, date)
         })
     })
         .map_err(|e| w2n_error_to_pyerr(py, e))
