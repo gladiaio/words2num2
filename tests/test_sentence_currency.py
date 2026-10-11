@@ -290,6 +290,7 @@ def test_plain_walk_subunit(lang, text, to, expected):
         ),
         ("douze dollars et zéro cent", "fr", "12,00 $"),
         ("12 dollars et 50 cents", "fr", "12,50 $"),
+        ("douze dollars et deux virgule cinq cents", "fr", "12 $ et 2,5 cents"),
     ],
 )
 def test_subunit_count_is_one_plain_number_issue_1017(text, lang, expected):

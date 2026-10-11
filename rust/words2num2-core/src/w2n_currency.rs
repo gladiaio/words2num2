@@ -1356,12 +1356,21 @@ fn pieces_for_walk_with(sentence: &str, lang: &str, subunits_only: bool) -> Vec<
                 // people), so there it must end the clause. "dix cents" is no
                 // 1000 ("mille"), so 10 is no hundreds multiple.
                 let hundreds = figure.is_none() && if subunits_only { (2..=19).contains(&v) && v != 10 } else { (1..10).contains(&v) };
+                // currency=True keeps, as written, a count it cannot read as
+                // one integer but that is one amount: a decimal ("deux virgule
+                // cinq cents", "2,5 cents"), native digits, a long figure.
+                // Never across a connector: "cinq et deux cents" (#1017, #1022).
+                let numberish = |k: &String| {
+                    k.chars().any(char::is_numeric) || crate::token_may_be_number(lang, k) || matches!(k.as_str(), "virgule" | "point")
+                };
+                let opaque = !subunits_only
+                    && v == -1
+                    && keys[w - back..w].iter().all(numberish)
+                    && !keys[w - back..w].iter().any(|k| conns.contains(&k.as_str()));
                 unit_ends_at(w - back - 2)
                     && unpunct
                     && unnamed
-                    && all_numbers
-                    && (figure.is_some() || (0..=99).contains(&v))
-                    && (!hundreds || ends_clause)
+                    && (opaque || (all_numbers && (figure.is_some() || (0..=99).contains(&v)) && (!hundreds || ends_clause)))
             });
             if numeric_sub && ok {
                 kept.push(words[w]);

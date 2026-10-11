@@ -6992,6 +6992,14 @@ mod plain_walk_subunit_tests {
         assert_eq!(c("12 dollars et 2 cents personnes", "fr"), "12,02 $ personnes");
         assert_eq!(c("12 dollars et 21 cents", "fr_BE"), "12,21 $");
         assert_eq!(c("douze dollars et 150 cents", "fr"), "12 $ et 150 cents");
+        // A count that is one amount but no integer stays as written (#1022).
+        assert_eq!(c("douze dollars et deux virgule cinq cents", "fr"), "12 $ et 2,5 cents");
+        assert_eq!(c("12 dollars et 2,5 cents", "fr"), "12 $ et 2,5 cents");
+        assert_eq!(c("12 dollars et 2.5 cents", "fr_CA"), "12 $ et 2.5 cents");
+        assert_eq!(c("12 dollars et \u{665}\u{660} cents", "fr"), "12 $ et \u{665}\u{660} cents");
+        assert_eq!(c("12 dollars et 99999999999999999999 cents", "fr"), "12 $ et 99999999999999999999 cents");
+        // Words that are no count are no amount.
+        assert_eq!(c("le billet coûte cinq dollars et la salle compte quatre cents places", "fr"), "le billet coûte 5 $ et la salle compte 400 places");
         // The plain walk leaves a mid-clause "un cent" as written.
         assert_eq!(s("douze dollars et un cent chacun", "fr", "cardinal"), "12 dollars et un cent chacun");
     }
