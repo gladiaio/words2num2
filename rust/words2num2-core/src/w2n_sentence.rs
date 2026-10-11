@@ -7020,6 +7020,42 @@ mod plain_walk_subunit_tests {
         assert_eq!(s("vingt dollars et douze cents personnes", "fr", "cardinal"), "20 dollars et 1200 personnes");
         assert_eq!(s("dix dollars et cinq. Trois cents personnes", "fr", "cardinal"), "10 dollars et 5. 300 personnes");
         assert_eq!(s("douze dollars et douze cents", "fr", "cardinal"), "12 dollars et 12 cents");
+        // The connector after the unit, not the "et" inside the count (#1010).
+        assert_eq!(s("douze dollars et vingt et un cents", "fr_BE", "cardinal"), "12 dollars et 21 cents");
+        assert_eq!(s("douze dollars et nonante et un cents", "fr_CH", "cardinal"), "12 dollars et 91 cents");
+        // currency=True: the count is a plain number naming no currency,
+        // not across a sentence or two "et"-joined numbers (#1013, #1017).
+        let c = |t: &str, l: &str| super::words2num_sentence_opts(t, l, "cardinal", false, true).unwrap();
+        assert_eq!(c("douze dollars et vingt et un cents", "fr_BE"), "12,21 $");
+        assert_eq!(c("cinquante dollars et soixante cents et deux cents personnes", "fr_BE"), "50,60 $ et 200 personnes");
+        assert_eq!(c("dix euros et cinquante centimes et trois cents personnes", "fr_CH"), "10,50 € et 300 personnes");
+        assert_eq!(c("cent dollars et vingt cents et quatre cents invités", "fr_CA"), "100,20 $ et 400 invités");
+        assert_eq!(c("dix dollars et cinq et deux cents personnes", "fr"), "10 $ et 5 et 200 personnes");
+        assert_eq!(c("mille euros et cinq et trois cents personnes", "fr"), "1 000 € et 5 et 300 personnes");
+        assert_eq!(c("dix dollars et deux cents", "fr"), "10,02 $");
+        assert_eq!(c("dix dollars et quinze cents chacun", "fr"), "10,15 $ chacun");
+        // The renderer's x.00: "et zéro cent" is a subunit amount (#1019).
+        assert_eq!(c("douze dollars et zéro cent", "fr"), "12,00 $");
+        assert_eq!(c("un dollar et zéro cent", "fr"), "1,00 $");
+        assert_eq!(c("douze dollars et zéro cent", "fr_CH"), "12,00 $");
+        assert_eq!(c("cent dollars et zéro cent", "fr_BE"), "100,00 $");
+        assert_eq!(c("douze dollars et zéro cents", "fr"), "12,00 $");
+        // A count in figures is a subunit amount, never hundreds.
+        assert_eq!(c("12 dollars et 50 cents", "fr"), "12,50 $");
+        assert_eq!(c("douze dollars et 99 cents", "fr"), "12,99 $");
+        assert_eq!(c("12 dollars et 2 cents personnes", "fr"), "12,02 $ personnes");
+        assert_eq!(c("12 dollars et 21 cents", "fr_BE"), "12,21 $");
+        assert_eq!(c("douze dollars et 150 cents", "fr"), "12 $ et 150 cents");
+        // A count that is one amount but no integer stays as written (#1022).
+        assert_eq!(c("douze dollars et deux virgule cinq cents", "fr"), "12 $ et 2,5 cents");
+        assert_eq!(c("12 dollars et 2,5 cents", "fr"), "12 $ et 2,5 cents");
+        assert_eq!(c("12 dollars et 2.5 cents", "fr_CA"), "12 $ et 2.5 cents");
+        assert_eq!(c("12 dollars et \u{665}\u{660} cents", "fr"), "12 $ et \u{665}\u{660} cents");
+        assert_eq!(c("12 dollars et 99999999999999999999 cents", "fr"), "12 $ et 99999999999999999999 cents");
+        // Words that are no count are no amount.
+        assert_eq!(c("le billet coûte cinq dollars et la salle compte quatre cents places", "fr"), "le billet coûte 5 $ et la salle compte 400 places");
+        // The plain walk leaves a mid-clause "un cent" as written.
+        assert_eq!(s("douze dollars et un cent chacun", "fr", "cardinal"), "12 dollars et un cent chacun");
     }
 }
 

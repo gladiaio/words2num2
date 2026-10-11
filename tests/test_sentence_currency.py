@@ -272,3 +272,26 @@ def test_audit_fold(lang, text, expected):
 )
 def test_plain_walk_subunit(lang, text, to, expected):
     assert words2num_sentence(text, lang=lang, to=to) == expected
+
+
+@pytest.mark.parametrize(
+    "text, lang, expected",
+    [
+        ("douze dollars et vingt et un cents", "fr_BE", "12,21 $"),
+        (
+            "cinquante dollars et soixante cents et deux cents personnes",
+            "fr_BE",
+            "50,60 $ et 200 personnes",
+        ),
+        (
+            "dix dollars et cinq et deux cents personnes",
+            "fr",
+            "10 $ et 5 et 200 personnes",
+        ),
+        ("douze dollars et zéro cent", "fr", "12,00 $"),
+        ("12 dollars et 50 cents", "fr", "12,50 $"),
+        ("douze dollars et deux virgule cinq cents", "fr", "12 $ et 2,5 cents"),
+    ],
+)
+def test_subunit_count_is_one_plain_number_issue_1017(text, lang, expected):
+    assert words2num_sentence(text, lang=lang, currency=True) == expected
