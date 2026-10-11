@@ -8,7 +8,7 @@ follows [Semantic Versioning](https://semver.org/) and uses
 
 ### Fixed
 
-- A sign word with a mark, then a space, before a figure reads with the locale's separators again: fr "moins: 1.234" is -1234 (was -1.234), en "minus: 1,234" -1234 (was an error) (#1032).
+- A sign word with a mark, then a space, before a figure reads with the locale's separators again: fr "moins: 1.234" is -1234 (was -1.234 in 0.4.0), en "minus: 1,234" -1234 (was an error in 0.4.0) (#1032).
 
 ## [0.4.0] — 2026-10-11
 

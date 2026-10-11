@@ -6924,6 +6924,9 @@ mod glued_sign_figure_tests {
         same("minus: 1,5", "-1,5", "de", "cardinal");
         same("moins; 2,5", "-2,5", "fr", "cardinal");
         same("-. 5", "-5", "en", "cardinal");
+        // Both sides read, not both fail.
+        assert!(w("moins: 1.234", "fr", "cardinal").is_some());
+        assert!(w("minus: 1,234", "en", "cardinal").is_some());
         assert_eq!(w("-:5", "en", "cardinal"), None);
         assert_eq!(w("-(5", "en", "cardinal"), None);
         // #984: a point before the figure is the figure's, a bare dash glued to
