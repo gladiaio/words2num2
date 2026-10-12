@@ -858,7 +858,13 @@ struct Num {
 }
 
 fn parse_num(word: &str) -> Option<Num> {
-    let body = word.trim_start_matches(|c: char| ",;:!?،؛؟।॥۔։።፣፤，！？；：。、".contains(c) || crate::w2n_sentence::is_format_char(c));
+    // Never a dot or a form of it: ".5", "．5" are decimals.
+    let body = word.trim_start_matches(|c: char| {
+        ",;:!?،؛؟।॥۔։።፣፤，！？；：。、‼⁇⁈⁉｡､﹐﹔﹖﹗፧".contains(c)
+            || (crate::w2n_sentence::folded_mark(c) == Some(crate::w2n_sentence::Mark::Terminal)
+                && !crate::w2n_sentence::folds_to_dots(c))
+            || crate::w2n_sentence::is_format_char(c)
+    });
     let lead = word[..word.len() - body.len()].to_string();
     let word = body;
     let core = word.trim_end_matches(crate::w2n_sentence::is_format_char);
@@ -893,7 +899,10 @@ fn parse_num(word: &str) -> Option<Num> {
 /// script sentence marks (#1067, #1071). No dash, slash or symbol ("€",
 /// "%", "+", emoji): those stay on the word (#1072, #1074).
 fn trailing_mark(c: char) -> bool {
-    LEGACY_MARKS.contains(c) || "}”’“‘›」』】》）］｝〕〉｣〗〙〛＂＇，。．！？；：、…‥‼⁇⁈⁉｡､﹒﹐﹔﹖﹗․।॥،؛؟۔።፣፤፧။၊។៕։՝๚".contains(c)
+    matches!(
+        crate::w2n_sentence::folded_mark(c),
+        Some(crate::w2n_sentence::Mark::Terminal | crate::w2n_sentence::Mark::Closing)
+    ) || LEGACY_MARKS.contains(c) || "}”’“‘›」』】》）］｝〕〉｣〗〙〛＂＇，。．！？；：、…‥‼⁇⁈⁉｡､﹒﹐﹔﹖﹗․।॥،؛؟۔።፣፤፧။၊។៕։՝๚".contains(c)
 }
 
 /// The marks the currency pass has always split off a word; the subunit
@@ -1124,7 +1133,7 @@ pub fn fold_currency(text: &str, lang: &str) -> String {
         // subunit follows: "zéro dollar, et cinquante-cinq centimes" (the
         // punctuation of a transcript), "twelve euros, thirty-four cents" (how
         // num2words writes English amounts, #47).
-        let comma = matches!(trailing.as_str(), "," | "，" | "、" | "､" | "၊" | "՝" | "،" | "﹐");
+        let comma = matches!(trailing.as_str(), "," | "，" | "、" | "､" | "၊" | "՝" | "،" | "﹐" | "﹑" | "︐" | "︑");
         if (trailing.is_empty() || comma) && frac.is_none() && cur.decimals > 0 {
             if let Some(k) = next_word(&parts, m.end) {
                 let (kkey, _) = word_key(&parts[k].text);
