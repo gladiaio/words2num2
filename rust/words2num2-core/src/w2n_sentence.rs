@@ -3959,6 +3959,7 @@ fn words2num_sentence_walk(
         let mut best_value: Option<W2nValue> = None;
         let mut best_end = i;
         let mut best_ordinal = false;
+        let mut gap_ended = false;
         // The spoken decimal separator of a table-language decimal run.
         let mut best_sep: Option<char> = None;
         let mut j = i;
@@ -3985,12 +3986,23 @@ fn words2num_sentence_walk(
             let digit_word = |w: Option<String>| {
                 w.is_some_and(|w| matches!(converter.to_cardinal(&w), Ok(W2nValue::Int(v)) if v >= BigInt::from(0) && v <= BigInt::from(9)))
             };
+            // Only inside a pure dictation: every word so far a single digit,
+            // so a compound or a decimal ("atus ida \u{200b} lima", "three
+            // point one \u{200b} four") is never split (#1100).
             let dictation_gap = j > i
                 && tok.chars().all(is_format_char)
                 && py_str_isspace(&parts[j - 1])
                 && parts.get(j + 1).is_some_and(|t| py_str_isspace(t))
-                && digit_word(prev_word(&parts, j))
+                && parts[i..j]
+                    .iter()
+                    .filter(|t| !py_str_isspace(t))
+                    .all(|t| digit_word(Some(rstrip_punct(t).to_lowercase())))
                 && digit_word(next_word(&parts, j));
+            if dictation_gap {
+                // The digit before the gap is a digit, no article: "one
+                // \u{200b} two" is "1 \u{200b} 2" (#1101).
+                gap_ended = true;
+            }
             if clean.is_empty()
                 || dictation_gap
                 || opens_with_punct(tok)
@@ -4385,6 +4397,7 @@ fn words2num_sentence_walk(
                 None
             } else if article_number
                 && best_end == i
+                && !gap_ended
                 && !article_is_count(&resolved, &parts, i, next_is_number)
             {
                 // A lone "one" / "un" / "um" is an article or a pronoun.
@@ -4400,6 +4413,7 @@ fn words2num_sentence_walk(
                 (lexicon::ko_counter_follows(&head, next.as_deref())).then(|| v.text_str())
             } else if plain
                 && best_end == i
+                && !gap_ended
                 && is_homograph(&resolved, &parts, i, piece)
                 && !next_is_number
                 // "sei e trenta": a connector, then a number.

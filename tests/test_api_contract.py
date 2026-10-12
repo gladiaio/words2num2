@@ -254,6 +254,8 @@ def test_sign_word_mark_space_figure_issue_1032(text, lang, expected):
         ("x one hundred \u200b and five y", "en", "x 105 y"),
         ("one hundred\u200bfive", "en", "105"),
         ("x 二十\u200b,一 y", "zh", "x 20\u200b,一 y"),
+        ("x three point one \u200b four y", "en", "x 3.14 y"),
+        ("x one \u200b two y", "en", "x 1 \u200b 2 y"),
     ],
 )
 def test_leading_format_char_and_bidi_marks_issue_1000(text, lang, expected):
