@@ -257,6 +257,14 @@ def test_sign_word_mark_space_figure_issue_1032(text, lang, expected):
         ("x three point one \u200b four y", "en", "x 3.14 y"),
         ("x one \u200b two y", "en", "x 1\u200b 2 y"),
         ("x 二十 \u200e二十 y", "zh", "x 20 \u200e20 y"),
+        # A spaced format-only token after a quoted number keeps the quote
+        # (#1115, #1117).
+        ('x "five" \u200b y', "en", 'x "5" \u200b y'),
+        ('he said "five" \u200e and left', "en", 'he said "5" \u200e and left'),
+        # ar / he: a format character before the conjunction (#1116).
+        ("x خمسمائة \u200eوخمسة وخمسون y", "ar", "x 555 y"),
+        ("x ألفان \u200fوأربعة وعشرون y", "ar", "x 2024 y"),
+        ("x מאה \u200eועשרים ושלוש y", "he", "x 123 y"),
     ],
 )
 def test_leading_format_char_and_bidi_marks_issue_1000(text, lang, expected):

@@ -196,6 +196,9 @@ fn number_like(converter: &super::Converter, resolved: &str, word: &str) -> bool
     if is_number(converter, word) {
         return true;
     }
+    // A bidi mark or other format character before the conjunction
+    // ("\u{200e}وخمسة") is no part of the word (#1116).
+    let word = word.trim_start_matches(super::is_format_char);
     let rest = match base(resolved) {
         "ar" => word.strip_prefix('و'),
         "he" => word.strip_prefix('ו'),

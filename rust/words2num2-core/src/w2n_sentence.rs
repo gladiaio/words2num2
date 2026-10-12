@@ -4174,11 +4174,14 @@ fn words2num_sentence_walk(
                 // morpheme follows is its unit, no end of this run (#988).
                 // Nor on a part of format characters alone glued to the next
                 // word (a zh/ja/th segmenter piece, "二十 \u{200e}二十"): the
-                // run would swallow the space before it (#1083 audit).
+                // run would swallow the space before it (#1083 audit). Nor on
+                // one after a word with a mark ("\"five\" \u{200b}"): the mark
+                // would be lost (#1115, #1117).
                 Some((v, ordinal))
                     if candidate_is_number(&converter, &clean, includable)
                         && !(tok.chars().all(is_format_char)
-                            && parts.get(j + 1).is_some_and(|t| !py_str_isspace(t)))
+                            && (parts.get(j + 1).is_some_and(|t| !py_str_isspace(t))
+                                || (j > i && !trailing_punct(parts[i..j].concat().trim_end()).is_empty())))
                         && !unit_of_next_morpheme(converter.n2w_key(), &parts, j, &clean) =>
                 {
                     best_value = Some(v);
