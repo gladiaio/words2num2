@@ -462,3 +462,40 @@ def test_mark_before_format_char_kept_after_amount(text, lang, expected):
 def test_count_rewrite_keeps_a_leading_mark(text, lang, expected):
     """#1156 audit: the article / count / feminine rewrite dropped the mark."""
     assert words2num_sentence(text, lang=lang, currency=True) == expected
+
+
+@pytest.mark.parametrize(
+    "text, lang, expected",
+    [
+        # A share of one unit is no amount 1 (#906).
+        ("half a dollar and twenty cents", "en", "half a dollar and 20 cents"),
+        (
+            "a quarter of a dollar and five cents",
+            "en",
+            "a quarter of a dollar and 5 cents",
+        ),
+        # A multi-word unit name (#929).
+        ("a US dollar and twenty cents", "en", "$1.20"),
+        ("une livre sterling et vingt pence", "fr", "1,20 £"),
+        # Only a 1-99 subunit count confirms the article (#930).
+        ("a dollar and two hundred cents", "en", "a dollar and 200 cents"),
+        ("a dollar and twenty cents", "en", "$1.20"),
+        # Zero cents, regional tens, a mark between, more shares, a
+        # sentence break (#1166-#1170).
+        ("a dollar zero cents", "en", "$1.00"),
+        ("une livre et septante-deux pence", "fr_CH", "1,72 £"),
+        ("he owes me half, a dollar and twenty cents", "en", "he owes me half, $1.20"),
+        (
+            "three quarters of a dollar and five cents",
+            "en",
+            "three quarters of a dollar and 5 cents",
+        ),
+        ("double a dollar and fifty cents", "en", "double a dollar and 50 cents"),
+        ("a month of a dollar and five cents", "en", "a month of $1.05"),
+        ("a pound sterling. And twenty pence", "en", "a pound sterling. And 20 pence"),
+        ("x half ,a dollar and twenty cents y", "en", "x half ,$1.20 y"),
+        ("a yen and twenty cents", "en", "a yen and 20 cents"),
+    ],
+)
+def test_article_one_counts_only_before_a_subunit_amount(text, lang, expected):
+    assert words2num_sentence(text, lang=lang, currency=True) == expected
