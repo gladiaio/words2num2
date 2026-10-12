@@ -518,6 +518,51 @@ fn trailing_mark(s: &str) -> String {
     trailing_punct(s).chars().filter(|c| !is_format_char(*c)).collect()
 }
 
+/// The word before a run is left as written because a mark opens it
+/// (")two"), but the run would continue its number ("thousand twenty four"
+/// after ")two"): the run stays as written too, no split value (#1112,
+/// #1114). Walks back over at most 4 words to the mark-led one; walking the
+/// words without the mark decides whether they all read as one number.
+fn continues_punct_led(
+    lang: &str,
+    to: &str,
+    has_kwargs: bool,
+    parts: &[String],
+    i: usize,
+    run: &str,
+    out: &str,
+) -> bool {
+    let mut k = i;
+    let mut found = None;
+    for _ in 0..5 {
+        let Some(p) = (0..k).rev().find(|&q| !py_str_isspace(&parts[q])) else { break };
+        let raw = &parts[p];
+        if raw.starts_with(|c: char| !c.is_alphanumeric()) {
+            found = Some(p);
+            break;
+        }
+        if raw.chars().any(|c| c.is_ascii_digit()) || has_trailing_mark(raw.trim_end_matches(',')) {
+            break;
+        }
+        k = p;
+    }
+    found.is_some_and(|p| {
+        let raw = &parts[p];
+        let core = raw.trim_start_matches(|c: char| !c.is_alphanumeric());
+        let joined = format!("{}{}{}", core, parts[p + 1..i].concat(), run);
+        // Without the mark the walker reads it all as one number, not two;
+        // the walk, not the converter, so spoken years and digit strings
+        // ("nineteen eighty four", "oh five") count too (#1119).
+        // The words between were left as written too ("-one 2 three" is
+        // not joined across the 2).
+        !core.is_empty()
+            && !has_trailing_mark(raw)
+            && out.ends_with(&parts[p..i].concat())
+            && words2num_sentence_walk(&joined, lang, to, has_kwargs)
+                .is_ok_and(|w| !w.trim().contains(char::is_whitespace) && w.chars().any(|c| c.is_ascii_digit()))
+    })
+}
+
 /// Does the token end in a real mark, not only invisible format characters?
 /// A bare ZWSP is a word-break hint inside unspaced th/zh/ja numbers
 /// ("สองร้อย\u{200b}ห้าสิบ" is 250), no end of the run (#998).
@@ -3903,6 +3948,11 @@ fn words2num_sentence_walk(
         };
         if let Some((digits, end)) = digit_run {
             let run = parts[i..=end].concat();
+            if continues_punct_led(lang, to, has_kwargs, &parts, i, rstrip_punct(py_strip(&run)), &out) {
+                out.push_str(&run);
+                i = end + 1;
+                continue;
+            }
             out.push_str(sep_before(i));
             out.push_str(&digits);
             out.push_str(if en_digits { run_tail(&run) } else { trailing_punct(&run) });
@@ -4330,7 +4380,15 @@ fn words2num_sentence_walk(
             // Preserve trailing punctuation that was stripped during parse.
             let run = parts[i..=best_end].concat();
             let trailing = trailing_punct(&run);
-            let rendered = if best_ordinal {
+            // The word before is left as written because a mark opens it
+            // (")two"), but this run would continue its number ("thousand
+            // twenty four" after ")two"): the run stays as written too, no
+            // split value (#1112, #1114).
+            let stripped_run = rstrip_punct(py_strip(&run)).to_string();
+            let punct_led_join = continues_punct_led(lang, to, has_kwargs, &parts, i, &stripped_run, &out);
+            let rendered = if punct_led_join {
+                None
+            } else if best_ordinal {
                 ordinal_rendering(&converter, &resolved, &parts, i, best_end, &v)
             } else if plain
                 && !best_ordinal
@@ -7424,6 +7482,31 @@ mod script_mark_tests {
 
 #[cfg(test)]
 mod leading_mark_tests {
+    /// #1114: a closer glued before a number word keeps that word as
+    /// written, and the rest of its number stays as written with it: no
+    /// smaller value read from the tail.
+    #[test]
+    fn closer_led_number_stays_whole_issue_1114() {
+        let s = |t: &str, l: &str| super::words2num_sentence(t, l, "cardinal", false).unwrap();
+        assert_eq!(s("x )two thousand twenty four y", "en"), "x )two thousand twenty four y");
+        assert_eq!(s("x ]one thousand, two hundred and thirty-four y", "en"), "x ]one thousand, two hundred and thirty-four y");
+        assert_eq!(s("x )deux cents y", "fr"), "x )deux cents y");
+        assert_eq!(s("x }zwei tausend y", "de"), "x }zwei tausend y");
+        assert_eq!(s("x )\u{0434}\u{0432}\u{0435} \u{0442}\u{044B}\u{0441}\u{044F}\u{0447}\u{0438} y", "ru"), "x )\u{0434}\u{0432}\u{0435} \u{0442}\u{044B}\u{0441}\u{044F}\u{0447}\u{0438} y");
+        assert_eq!(s("x )wun zero fife y", "en_AERO"), "x )wun zero fife y");
+        // Two numbers after the mark stay two; other words end the number.
+        assert_eq!(s(")twenty one twenty one", "en"), ")twenty one 21");
+        assert_eq!(s("x )fifty apples two y", "en"), "x )fifty apples 2 y");
+        assert_eq!(s("x )two 3 y", "en"), "x )two 3 y");
+        assert_eq!(s("x (two thousand twenty four) y", "en"), "x (2024) y");
+        let c = |t: &str, l: &str| super::words2num_sentence_opts(t, l, "cardinal", false, true).unwrap();
+        assert_eq!(c("he paid )twenty five dollars", "en"), "he paid )twenty five dollars");
+        let d = |t: &str, l: &str| {
+            super::words2num_sentence_full(t, l, "cardinal", false, false, true, None, "written", false).unwrap()
+        };
+        assert_eq!(d("x )twenty first of may y", "en"), "x )twenty first of may y");
+    }
+
     /// #1041, #1044: a clause mark glued before a number is cut off and kept;
     /// the number reads whole after it.
     #[test]
