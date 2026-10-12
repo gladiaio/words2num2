@@ -533,10 +533,13 @@ fn continues_punct_led(
     run: &str,
     out: &str,
 ) -> bool {
+    // A part of format characters alone is skipped like a space ("two
+    // hundred \u{200b} five", #1130).
+    let blank = |t: &str| py_str_isspace(t) || t.chars().all(is_format_char);
     let mut k = i;
     let mut found = None;
     for _ in 0..5 {
-        let Some(p) = (0..k).rev().find(|&q| !py_str_isspace(&parts[q])) else { break };
+        let Some(p) = (0..k).rev().find(|&q| !blank(&parts[q])) else { break };
         let raw = &parts[p];
         if raw.starts_with(|c: char| !c.is_alphanumeric()) {
             found = Some(p);
@@ -556,11 +559,28 @@ fn continues_punct_led(
         // ("nineteen eighty four", "oh five") count too (#1119).
         // The words between were left as written too ("-one 2 three" is
         // not joined across the 2).
-        !core.is_empty()
-            && !has_trailing_mark(raw)
-            && out.ends_with(&parts[p..i].concat())
-            && words2num_sentence_walk(&joined, lang, to, has_kwargs)
-                .is_ok_and(|w| !w.trim().contains(char::is_whitespace) && w.chars().any(|c| c.is_ascii_digit()))
+        // The number opens at the mark-led word, or inside it (ar "وخمسة" ->
+        // "و55", ceb "ika-usa libo" -> "ika-1000"): zh "，第" is the prefix
+        // 第 alone, no number word, and "第21" stays as the walk reads it
+        // (#1122, #1143).
+        let is_one = |w: &str| {
+            let w = w.trim();
+            let lead: String = w.chars().take_while(|c| !c.is_ascii_digit()).collect();
+            !w.contains(char::is_whitespace)
+                && w.len() > lead.len()
+                && (!lead.chars().any(char::is_alphabetic) || {
+                    // Letters only: the walk may write a hyphen after the
+                    // prefix (id "ke-21", he "ו-25", #1151).
+                    let letters = |t: &str| t.chars().filter(|c| c.is_alphabetic()).flat_map(char::to_lowercase).collect::<String>();
+                    let (lead, core) = (letters(&lead), letters(core));
+                    core.len() > lead.len() && core.starts_with(&lead)
+                })
+        };
+        if core.is_empty() || has_trailing_mark(raw) || !out.ends_with(&parts[p..i].concat()) {
+            return false;
+        }
+        let Ok(walked) = words2num_sentence_walk(&joined, lang, to, has_kwargs) else { return false };
+        is_one(&walked)
     })
 }
 
