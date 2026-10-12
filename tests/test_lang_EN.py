@@ -343,3 +343,36 @@ def test_run_may_not_start_with_other_includables():
     # and the articles stay run-internal.
     assert words2num_sentence("minus forty two") == "minus 42"
     assert words2num_sentence("and seven") == "and 7"
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        # A spoken century of 16-20, no ordinal, no mark before the decade
+        # (#905, #927).
+        ("the nineteen nineties", "the 1990s"),
+        ("twenty twenties", "2020s"),
+        ("she counted forty twenties", "she counted 40 twenties"),
+        ("twelve twenties please", "12 twenties please"),
+        ("I was nineteen, nineties kids rule", "I was 19, nineties kids rule"),
+        # "N hundred" is one year (#903).
+        ("nine hundred", "900"),
+        ("the year five hundred and twenty", "the year 520"),
+        ("at nine fifteen", "at 9:15"),
+        # Centuries 10-21 after a period cue (#1172); an "oh" digit (#1173).
+        ("the fourteen nineties", "the 1490s"),
+        ("the early fourteen nineties, when", "the early 1490s, when"),
+        ("I have fifteen twenties and a ten", "I have 15 twenties and a 10"),
+        ("one oh one dalmatians", "101 dalmatians"),
+        ("at nine oh five", "at 9:05"),
+        # A format character is no mark between the words (#1171 audit).
+        ("the nineteen\u2060 nineties", "the 1990s"),
+        ("nine hundred\u200b fifteen", "915"),
+        ("the (fifteen nineties)", "the (1590s)"),
+        ("one two oh four", "1 2 oh 4"),
+    ],
+)
+def test_year_mode_decades_and_hundreds(text, expected):
+    from words2num2 import words2num_sentence
+
+    assert words2num_sentence(text, to="year") == expected
