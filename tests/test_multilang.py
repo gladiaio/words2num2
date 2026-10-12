@@ -354,6 +354,34 @@ def test_closer_led_number_stays_whole_issue_1114(lang, text, expected):
 @pytest.mark.parametrize(
     "lang,text,expected",
     [
+        ("zh", "x )第二十一 y", "x )第21 y"),
+        ("zh", "比赛结果 ，第三名", "比赛结果 ，第3名"),
+        ("zh", "x ，约二十 y", "x ，约20 y"),
+        ("ja", "x 、第三 y", "x 、第3 y"),
+        ("th", "x )ที่ยี่สิบเอ็ด y", "x )ที่21 y"),
+        # A spaced format character inside the number (#1130); a mark-led word
+        # that holds the number (ceb "ika-usa", #1143).
+        ("ceb", "x )ika-usa libo y", "x )ika-usa libo y"),
+        # The walk may add a hyphen after the prefix (#1151).
+        ("id", "x )kedua puluh satu y", "x )kedua puluh satu y"),
+        ("he", "x )ועשרים וחמש y", "x )ועשרים וחמש y"),
+        ("en", "x )two hundred \u200b five y", "x )two hundred \u200b five y"),
+        ("en_AERO", "x fife fife fife y", "x 555 y"),
+        # The compat closers too (#1127).
+        ("en", "x ）two hundred \u200b five y", "x ）two hundred \u200b five y"),
+        # A dash lead keeps the number whole too; no look-ahead over a mark.
+        ("fr", "x −deux mille vingt-quatre y", "x −deux mille vingt-quatre y"),
+        ("en", "x -double zero seven y", "x -double zero seven y"),
+        ("en", "x )one two. three four y", "x )one 2. 3 4 y"),
+    ],
+)
+def test_mark_led_prefix_still_reads_issue_1122(lang, text, expected):
+    assert words2num_sentence(text, lang=lang) == expected
+
+
+@pytest.mark.parametrize(
+    "lang,text,expected",
+    [
         ("en", 'x "twenty" one y', 'x "20" one y'),
         ("en", "x 'twenty' one y", "x '20' one y"),
         ("en", 'x twenty" three y', 'x 20" 3 y'),
