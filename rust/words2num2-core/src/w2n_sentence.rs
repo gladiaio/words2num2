@@ -2305,8 +2305,8 @@ fn table_digit_run(
             j += 1;
             continue;
         }
-        if tok.chars().all(is_format_char) {
-            break; // (#1089)
+        if tok.chars().all(is_format_char) && j > 0 && py_str_isspace(&parts[j - 1]) {
+            break; // a spaced format-only token ends a dictation (#1089)
         }
         let clean = rstrip_punct(tok).to_lowercase();
         // "cinq 5": a token in figures is a literal, not a digit word (#68).
@@ -3976,16 +3976,20 @@ fn words2num_sentence_walk(
             }
             // Format characters are no part of the word: "\u{200b}third" is an
             // ordinal word (#1090, #1091).
-            // A part of format characters alone glued inside a word (a zh/th
-            // segmenter piece, "二百\u{200b}五十") stays as it is, a word-break
-            // hint (#998); between spaces it ends the run ("fife \u{200b} seven").
-            let spaced = (j > 0 && py_str_isspace(&parts[j - 1])) || parts.get(j + 1).is_some_and(|t| py_str_isspace(t));
-            let clean: String = if tok.chars().all(is_format_char) && !spaced {
-                rstrip_punct(tok).to_lowercase()
-            } else {
-                rstrip_punct(tok).to_lowercase().chars().filter(|c| !is_format_char(*c)).collect()
+            let clean = rstrip_punct(tok).to_lowercase();
+            // A format-only token between two single-digit words ends a
+            // dictation: "fife \u{200b} seven" is 5, then 7 (#1089, #1092).
+            let digit_word = |w: Option<String>| {
+                w.is_some_and(|w| matches!(converter.to_cardinal(&w), Ok(W2nValue::Int(v)) if v >= BigInt::from(0) && v <= BigInt::from(9)))
             };
+            let dictation_gap = j > i
+                && tok.chars().all(is_format_char)
+                && py_str_isspace(&parts[j - 1])
+                && parts.get(j + 1).is_some_and(|t| py_str_isspace(t))
+                && digit_word(prev_word(&parts, j))
+                && digit_word(next_word(&parts, j));
             if clean.is_empty()
+                || dictation_gap
                 || opens_with_punct(tok)
                 // A piece the zh/ja/th segmenter left opening on a glued mark
                 // ("，五" of "二十，五"): the run never crosses the mark (#1028).
@@ -4074,8 +4078,11 @@ fn words2num_sentence_walk(
                 // cs "tři sta": "sta" is also an inflected ordinal ("stá"), but
                 // the run reads as an ordinal only if its ordinal reading agrees.
                 Ok(v) => {
+                    // Format characters are no part of the word: "\u{200b}third" is
+                    // an ordinal word (#1090, #1091).
+                    let bare: String = clean.chars().filter(|c| !is_format_char(*c)).collect();
                     let ordinal = plain
-                        && converter.is_ordinal_word(&clean)
+                        && converter.is_ordinal_word(&bare)
                         && (matches!(converter, Converter::En)
                             || converter.to_ordinal(&stripped).is_ok_and(|o| o == v));
                     Some((v, ordinal))

@@ -251,6 +251,9 @@ def test_sign_word_mark_space_figure_issue_1032(text, lang, expected):
         ("x \u200bthird y", "en", "x \u200b3rd y"),
         ("x twenty-first\u200e y", "en", "x 21st\u200e y"),
         ("x fife \u200b seven", "en_AERO", "x 5 \u200b 7"),
+        ("x one hundred \u200b and five y", "en", "x 105 y"),
+        ("one hundred\u200bfive", "en", "105"),
+        ("x 二十\u200b,一 y", "zh", "x 20\u200b,一 y"),
     ],
 )
 def test_leading_format_char_and_bidi_marks_issue_1000(text, lang, expected):
