@@ -380,6 +380,13 @@ def test_fold_keeps_cjk_trailing_mark_issue_1067(text, lang, expected):
             "x )it costs $25.50 y",
         ),
         ("x )wij betaalden vijftig euro y", "nl", "x )wij betaalden € 50 y"),
+        ("x )it's fifty dollars y", "en", "x )it's $50 y"),
+        ("x )c'est vingt euros y", "fr", "x )c'est 20 € y"),
+        (
+            "x )twelve dollars,\u200b fifty cents y",
+            "en",
+            "x )twelve dollars,\u200b fifty cents y",
+        ),
     ],
 )
 def test_closer_led_amount_keeps_its_subunit_issue_1123(text, lang, expected):
