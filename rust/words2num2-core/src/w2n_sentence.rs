@@ -4608,8 +4608,18 @@ fn words2num_sentence_walk(
         if en_year {
             // "the nineteen nineties", "the twenty twenties": the decade of that
             // century, one token ("1990s"); the cardinal walk keeps it in words.
+            // A spoken century, 16 to 20 ("eighteen eighties", "twenty
+            // twenties"), no ordinal and no mark before the decade word:
+            // "forty twenties" are banknotes, "nineteen, nineties" two words
+            // (#905, #927).
             let century = match &best_value {
-                Some(W2nValue::Int(c)) => i64::try_from(c).ok().filter(|c| (10..=99).contains(c)),
+                Some(W2nValue::Int(c))
+                    if !best_ordinal
+                        && trailing_punct(&parts[best_end]).is_empty()
+                        && crate::w2n_lang_en::ordinal_cardinal(&rstrip_punct(&parts[best_end]).to_lowercase()).is_none() =>
+                {
+                    i64::try_from(c).ok().filter(|c| (16..=20).contains(c))
+                }
                 _ => None,
             };
             let decade = next_word_index(&parts, best_end)
@@ -4628,7 +4638,10 @@ fn words2num_sentence_walk(
             // The single-token `words2num(..., to="year")` still reads "nine
             // eleven" as 911, the way num2words2 spells 100..999 (#111).
             let three_digit = matches!(&best_value, Some(W2nValue::Int(v)) if (BigInt::from(100)..BigInt::from(1000)).contains(v));
-            if three_digit && best_end > i && crate::w2n_lang_en::unit_value(&head).is_some_and(|u| (1..=9).contains(&u)) {
+            // Not "nine hundred", "seven hundred fifty": the scale word makes
+            // it a cardinal year, no time (#903).
+            let hundred = next_word(&parts, i).is_some_and(|w| w == "hundred");
+            if three_digit && best_end > i && !hundred && crate::w2n_lang_en::unit_value(&head).is_some_and(|u| (1..=9).contains(&u)) {
                 if let Ok(v) = converter.to_cardinal(&head) {
                     best_value = Some(v);
                     best_end = i;
