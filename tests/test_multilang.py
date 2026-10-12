@@ -326,3 +326,19 @@ def test_script_mark_ends_run_issue_1023(lang, text, expected):
 )
 def test_leading_clause_mark_issue_1041(lang, text, expected):
     assert words2num_sentence(text, lang=lang) == expected
+
+
+@pytest.mark.parametrize(
+    "lang,text,expected",
+    [
+        ("zh", "二十．五", "20．五"),
+        ("en", "x 5．5 y", "x 5．5 y"),
+        ("ja", "x 五十︒ 二 y", "x 50︒ 2 y"),
+        ("en", "x fifty｣ two y", "x 50｣ 2 y"),
+        ("en", "x ﹕fifty y", "x ﹕50 y"),
+        ("el", "x πενήντα; δύο y", "x 50; 2 y"),
+        ("uk", "x п＇ять y", "x 5 y"),
+    ],
+)
+def test_folded_marks_issue_1088(lang, text, expected):
+    assert words2num_sentence(text, lang=lang) == expected
