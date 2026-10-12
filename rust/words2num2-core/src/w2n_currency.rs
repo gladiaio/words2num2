@@ -1277,7 +1277,10 @@ fn subunit_follows(lang: &str, conns: &[&str], keys: &[String], named: &[Option<
     // dollar and cents, the article stays a word (#930); zero is the
     // renderer's own "a dollar zero cents" (#1166).
     let amount = matches!(crate::lookup_norm(lang, &keys[first..x].join(" "), false, &[]), Ok(Some(n)) if (0..100).contains(&n));
-    x > first && amount && named.get(x).is_some_and(|m| m.as_ref().is_some_and(|m| m.word.sub))
+    // A currency with no minor unit has no subunit to fold: "a yen and
+    // twenty cents" keeps its article (#1165 audit).
+    let minor = named[v].as_ref().is_some_and(|m| m.word.cur.decimals > 0);
+    x > first && amount && minor && named.get(x).is_some_and(|m| m.as_ref().is_some_and(|m| m.word.sub))
 }
 
 /// The article-one of a language, which counts 1 in front of a currency name.
@@ -1506,6 +1509,7 @@ fn pieces_for_walk_with(sentence: &str, lang: &str, subunits_only: bool, counts:
         };
         let share = w > 0
             && bare(w - 1)
+            && parts[words[w]].text.starts_with(char::is_alphanumeric)
             && (matches!(keys[w - 1].as_str(), "half" | "twice" | "thrice" | "double" | "triple")
                 || (keys[w - 1] == "of" && w > 1 && bare(w - 2) && fraction(&keys[w - 2])));
         let article_unit = w + 1 < words.len()

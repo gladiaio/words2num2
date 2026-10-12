@@ -482,6 +482,8 @@ def test_count_rewrite_keeps_a_leading_mark(text, lang, expected):
         ("double a dollar and fifty cents", "en", "double a dollar and 50 cents"),
         ("a month of a dollar and five cents", "en", "a month of $1.05"),
         ("a pound sterling. And twenty pence", "en", "a pound sterling. And 20 pence"),
+        ("x half ,a dollar and twenty cents y", "en", "x half ,$1.20 y"),
+        ("a yen and twenty cents", "en", "a yen and 20 cents"),
     ],
 )
 def test_article_one_counts_only_before_a_subunit_amount(text, lang, expected):
