@@ -537,17 +537,21 @@ fn continues_punct_led(
     // A part of format characters alone is skipped like a space ("two
     // hundred \u{200b} five", #1130).
     let blank = |t: &str| py_str_isspace(t) || t.chars().all(is_format_char);
+    // A pause comma cut off as its own part ("dollars，"): passed over as
+    // the ASCII comma glued to the word is; the joined walk decides.
+    const PAUSE: [char; 10] = ['\u{FF0C}', '\u{3001}', '\u{FF64}', '\u{FE50}', '\u{FE51}', '\u{FE10}', '\u{FE11}', '\u{060C}', '\u{104A}', '\u{055D}'];
+    let pause = |t: &str| !t.is_empty() && t.chars().all(|c| PAUSE.contains(&c) || is_format_char(c)) && t.chars().any(|c| PAUSE.contains(&c));
     let mut k = i;
     let mut found = None;
     for _ in 0..5 {
-        let Some(p) = (0..k).rev().find(|&q| !blank(&parts[q])) else { break };
+        let Some(p) = (0..k).rev().find(|&q| !blank(&parts[q]) && !pause(&parts[q])) else { break };
         let raw = &parts[p];
         // Format characters alone in front are no mark ("\u{200b}a").
         if raw.trim_start_matches(is_format_char).starts_with(|c: char| !c.is_alphanumeric()) {
             found = Some(p);
             break;
         }
-        if raw.chars().any(|c| c.is_ascii_digit()) || has_trailing_mark(raw.trim_end_matches(is_format_char).trim_end_matches(',')) {
+        if raw.chars().any(|c| c.is_ascii_digit()) || has_trailing_mark(raw.trim_end_matches(is_format_char).trim_end_matches(',').trim_end_matches(PAUSE)) {
             break;
         }
         k = p;
