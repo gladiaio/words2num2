@@ -366,6 +366,9 @@ def test_closer_led_ordinal_stays_whole_issue_1114():
         ("en", "x ﹕fifty y", "x ﹕50 y"),
         # ｀ splits off like ASCII "`" (#1113).
         ("en", "x ｀twenty five y", "x ｀25 y"),
+        # A compat closer or ＿ keeps the whole number as written (#1112).
+        ("en", "x ）two thousand twenty four y", "x ）two thousand twenty four y"),
+        ("ru", "x _две тысячи двадцать четыре y", "x _две тысячи двадцать четыре y"),
         ("el", "x πενήντα; δύο y", "x 50; 2 y"),
         ("uk", "x п＇ять y", "x 5 y"),
     ],
