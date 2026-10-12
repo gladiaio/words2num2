@@ -599,9 +599,15 @@ fn continues_punct_led(
                 // front, so the pieces rewrite a word only as the pass itself
                 // does ("-a dollar" keeps its "a", #1162); the walk then reads
                 // the words without it.
-                // A mark the walk keeps the word behind (")a") needs none:
-                // that word stays as written either way.
-                let lead = if opens_with_punct(raw) { "" } else { &raw[..raw.len() - core.len()] };
+                // A mark the walk keeps the word behind (")a", "#a") needs
+                // none: that word stays as written either way.
+                // Probed with the run's own first word: "-fifty" reads as -50,
+                // "#fifty" and "\u{200b})fifty" stay as written (#1163).
+                let lead_raw = &raw[..raw.len() - core.len()];
+                let probe = format!("{}{}", lead_raw, run.split_whitespace().next().unwrap_or(""));
+                let read_past = !lead_raw.is_empty()
+                    && words2num_sentence_walk(&probe, lang, to, has_kwargs).is_ok_and(|w| w != probe);
+                let lead = if read_past { lead_raw } else { "" };
                 let text = format!("{}{}{}", lead, joined, tail);
                 let mut walked = String::new();
                 for (piece, walk) in crate::w2n_currency::pieces_for_walk(&text, cur, matches!(to, "cardinal" | "year" | "currency")) {

@@ -428,6 +428,14 @@ def test_mark_before_format_char_kept_after_amount(text, lang, expected):
         ("x ,une livre et vingt pence y", "fr", "x ,1,20 £ y"),
         # Not after a dot: the walk never folds there (#1159 audit).
         ("x ...a dollar and fifty cents y", "en", "x ...a dollar and 50 cents y"),
+        # A mark the walk keeps the word behind: the amount stays whole, as
+        # "#five dollars and fifty cents" does (#1163).
+        ("x #a dollar and fifty cents y", "en", "x #a dollar and fifty cents y"),
+        (
+            "x \u200b)a dollar and fifty cents y",
+            "en",
+            "x \u200b)a dollar and fifty cents y",
+        ),
         ("x -a dollar and fifty cents y", "en", "x -a dollar and 50 cents y"),
         (
             "x (\u200ba dollar and fifty cents y",
