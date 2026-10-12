@@ -30,11 +30,11 @@ pub(super) enum Glue {
 /// quotes (straight, curly, guillemets, CJK corner brackets), the Spanish
 /// inverted marks.
 fn is_leading_punct(c: char) -> bool {
-    matches!(
+    super::folded_mark(c) == Some(super::Mark::Opening) || matches!(
         c,
         '(' | '[' | '{' | '"' | '\'' | '`' | '«' | '‹' | '“' | '”' | '„' | '‟' | '‘' | '’' | '‚'
             | '‛' | '¿' | '¡' | '（' | '「' | '『' | '【' | '〈' | '《' | '〔' | '…' | '—' | '–'
-            | '＂' | '＇' | '｢' | '﹙' | '﹛' | '﹝'
+            | '＂' | '＇' | '｀' | '｢' | '﹙' | '﹛' | '﹝'
     )
 }
 
@@ -43,7 +43,7 @@ fn is_leading_punct(c: char) -> bool {
 /// #1044, #1049). Not in zh / ja / th, where a lone numeral after a mark
 /// stays as written (#1028, #1048).
 fn is_leading_clause_mark(c: char) -> bool {
-    matches!(
+    super::folded_mark(c) == Some(super::Mark::Terminal) || matches!(
         c,
         ',' | '.' | ';' | ':' | '!' | '?' | '।' | '॥' | '،' | '؛' | '؟' | '۔' | '։' | '።' | '፣' | '፤'
             | '，' | '．' | '！' | '？' | '；' | '：' | '。' | '、'
@@ -64,6 +64,7 @@ fn is_legacy_trailing(c: char) -> bool {
 /// "vingt-deux»", "पाँच।") is cut off whole and kept verbatim.
 pub(super) fn is_trailing_punct(c: char) -> bool {
     is_legacy_trailing(c)
+        || super::folded_mark(c).is_some()
         || matches!(
             c,
             ')' | ']' | '}' | '%' | '…' | '»' | '«' | '›' | '‹' | '“' | '”' | '‘' | '’' | '„'
