@@ -531,6 +531,7 @@ fn continues_punct_led(
     parts: &[String],
     i: usize,
     run: &str,
+    after: &[String],
     out: &str,
 ) -> bool {
     // A part of format characters alone is skipped like a space ("two
@@ -545,7 +546,7 @@ fn continues_punct_led(
             found = Some(p);
             break;
         }
-        if raw.chars().any(|c| c.is_ascii_digit()) || has_trailing_mark(raw.trim_end_matches(',')) {
+        if raw.chars().any(|c| c.is_ascii_digit()) || has_trailing_mark(raw.trim_end_matches(is_format_char).trim_end_matches(',')) {
             break;
         }
         k = p;
@@ -580,7 +581,28 @@ fn continues_punct_led(
             return false;
         }
         let Ok(walked) = words2num_sentence_walk(&joined, lang, to, has_kwargs) else { return false };
-        is_one(&walked)
+        if is_one(&walked) {
+            return true;
+        }
+        // currency=True: one amount once folded ("5 dollars and 50" ->
+        // "$5.50", fr "20 euros 50" -> "20,50 €", #1123).
+        // The word after the run is read too, as the fold reads it: "fifty
+        // cents" is a subunit, "fifty people" is not (#181).
+        CURRENCY_FOLD.with(|c| {
+            c.borrow().as_deref().is_some_and(|cur| {
+                let tail: String = after.iter().take(2).map(String::as_str).collect();
+                let Ok(walked) = words2num_sentence_walk(&format!("{}{}", joined, tail), lang, to, has_kwargs) else { return false };
+                let folded = crate::w2n_currency::fold_currency(&walked, cur);
+                // The walked words open with the figure: no word before it
+                // ("we paid 50 dollars", "it's 50 dollars" are no amount
+                // opened by the mark-led word, #1157).
+                let lead_ok = walked
+                    .split(|c: char| c.is_ascii_digit())
+                    .next()
+                    .is_some_and(|pre| !pre.chars().any(char::is_alphabetic));
+                folded != walked && lead_ok && folded.split_whitespace().filter(|t| t.chars().any(|c| c.is_ascii_digit())).count() == 1
+            })
+        })
     })
 }
 
@@ -665,6 +687,13 @@ thread_local! {
 
 fn aero_gaps() -> bool {
     AERO_GAPS.with(|c| c.get())
+}
+
+thread_local! {
+    /// Set to the resolved language while the `currency=True` pass walks its
+    /// pieces: the closer-led join reads the joined words as the currency
+    /// fold will, so "five dollars and fifty" counts as one amount (#1123).
+    static CURRENCY_FOLD: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
 }
 
 thread_local! {
@@ -3862,13 +3891,27 @@ fn words2num_sentence_folded(
         // Walked piece by piece: fr "trente-quatre cents" after "dollars et"
         // is 34 US cents, not 3400 (see `pieces_for_walk`).
         let mut out = String::new();
-        for (piece, walk) in crate::w2n_currency::pieces_for_walk(sentence, &resolved, matches!(to, "cardinal" | "year" | "currency")) {
-            if walk {
-                out.push_str(&words2num_sentence_walk(&piece, lang, to, has_kwargs)?);
-            } else {
-                out.push_str(&piece);
+        // Cleared on every exit, a panic unwinding included.
+        struct ClearFold;
+        impl Drop for ClearFold {
+            fn drop(&mut self) {
+                CURRENCY_FOLD.with(|c| *c.borrow_mut() = None);
             }
         }
+        CURRENCY_FOLD.with(|c| *c.borrow_mut() = Some(resolved.clone()));
+        let _clear = ClearFold;
+        let walked: Result<(), W2nError> = (|| {
+            for (piece, walk) in crate::w2n_currency::pieces_for_walk(sentence, &resolved, matches!(to, "cardinal" | "year" | "currency")) {
+                if walk {
+                    out.push_str(&words2num_sentence_walk(&piece, lang, to, has_kwargs)?);
+                } else {
+                    out.push_str(&piece);
+                }
+            }
+            Ok(())
+        })();
+        drop(_clear);
+        walked?;
         return Ok(crate::w2n_currency::fold_currency(&out, &resolved));
     }
     // The plain walk cuts the same subunit off: fr "douze dollars et
@@ -4102,7 +4145,7 @@ fn words2num_sentence_walk(
         };
         if let Some((digits, end)) = digit_run {
             let run = parts[i..=end].concat();
-            if continues_punct_led(lang, to, has_kwargs, &parts, i, rstrip_punct(py_strip(&run)), &out) {
+            if continues_punct_led(lang, to, has_kwargs, &parts, i, rstrip_punct(py_strip(&run)), &parts[end + 1..], &out) {
                 out.push_str(&run);
                 i = end + 1;
                 continue;
@@ -4587,7 +4630,7 @@ fn words2num_sentence_walk(
             // twenty four" after ")two"): the run stays as written too, no
             // split value (#1112, #1114).
             let stripped_run = rstrip_punct(py_strip(&run)).to_string();
-            let punct_led_join = continues_punct_led(lang, to, has_kwargs, &parts, i, &stripped_run, &out);
+            let punct_led_join = continues_punct_led(lang, to, has_kwargs, &parts, i, &stripped_run, &parts[best_end + 1..], &out);
             let rendered = if punct_led_join {
                 None
             } else if best_ordinal {

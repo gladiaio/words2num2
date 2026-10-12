@@ -362,6 +362,40 @@ def test_fold_keeps_cjk_trailing_mark_issue_1067(text, lang, expected):
 @pytest.mark.parametrize(
     "text, lang, expected",
     [
+        (
+            "x )twenty five dollars and fifty cents y",
+            "en",
+            "x )twenty five dollars and fifty cents y",
+        ),
+        ("x )five dollars fifty cents y", "en", "x )five dollars fifty cents y"),
+        ("x )vingt euros cinquante y", "fr", "x )vingt euros cinquante y"),
+        # Not one amount without the mark either: the tail reads alone.
+        ("x )five dollars and fifty people y", "en", "x )five dollars and 50 people y"),
+        ("x )five apples and fifty cents y", "en", "x )five apples and 50 cents y"),
+        # A mark-led word that is no number does not hold the amount (#1157).
+        ("x )we paid fifty dollars y", "en", "x )we paid $50 y"),
+        (
+            "x )it costs twenty five dollars and fifty cents y",
+            "en",
+            "x )it costs $25.50 y",
+        ),
+        ("x )wij betaalden vijftig euro y", "nl", "x )wij betaalden € 50 y"),
+        ("x )it's fifty dollars y", "en", "x )it's $50 y"),
+        ("x )c'est vingt euros y", "fr", "x )c'est 20 € y"),
+        (
+            "x )twelve dollars,\u200b fifty cents y",
+            "en",
+            "x )twelve dollars,\u200b fifty cents y",
+        ),
+    ],
+)
+def test_closer_led_amount_keeps_its_subunit_issue_1123(text, lang, expected):
+    assert words2num_sentence(text, lang=lang, currency=True) == expected
+
+
+@pytest.mark.parametrize(
+    "text, lang, expected",
+    [
         ("x five dollars，\u200e y", "en", "x $5，\u200e y"),
         ("x five dollars,\u200b y", "en", "x $5,\u200b y"),
         ("x cinq euros!\ufeff y", "fr", "x 5 €!\ufeff y"),
