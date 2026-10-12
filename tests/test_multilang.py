@@ -351,6 +351,25 @@ def test_closer_led_number_stays_whole_issue_1114(lang, text, expected):
     assert words2num_sentence(text, lang=lang) == expected
 
 
+@pytest.mark.parametrize(
+    "lang,text,expected",
+    [
+        ("en", 'x "twenty" one y', 'x "20" one y'),
+        ("en", "x 'twenty' one y", "x '20' one y"),
+        ("en", 'x twenty" three y', 'x 20" 3 y'),
+        ("en", 'x twenty\u200b" three y', 'x 20\u200b" 3 y'),
+        ("en", 'he said "two" thousand people', 'he said "2" thousand people'),
+        ("fi", 'x "kaksikymmentä" yksi y', 'x "20" 1 y'),
+        # Controls: a quoted number reads whole, a bracket ends the run too.
+        ("en", 'x "twenty one" y', 'x "21" y'),
+        ("en", "x 'nineteen eighty four' y", "x '1984' y"),
+        ("en", "x (twenty) one y", "x (20) one y"),
+    ],
+)
+def test_closing_quote_ends_run_issue_1120(lang, text, expected):
+    assert words2num_sentence(text, lang=lang) == expected
+
+
 def test_closer_led_ordinal_stays_whole_issue_1114():
     # was "x )twenty 1 y"
     assert words2num_sentence("x )twenty first y", to="ordinal") == "x )twenty first y"
