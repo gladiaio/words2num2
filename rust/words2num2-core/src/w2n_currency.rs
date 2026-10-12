@@ -910,11 +910,15 @@ fn trailing_mark(c: char) -> bool {
 const LEGACY_MARKS: &str = ",.;:!?)]\"'»";
 
 fn legacy_trailing(word: &str) -> bool {
-    word.ends_with(|c: char| LEGACY_MARKS.contains(c))
+    // A mark behind format characters still counts: "un.\u{200b}" (#1155).
+    word.trim_end_matches(crate::w2n_sentence::is_format_char).ends_with(|c: char| LEGACY_MARKS.contains(c))
 }
 
 fn word_key(word: &str) -> (String, String) {
-    let trimmed = word.trim_end_matches(trailing_mark);
+    // Format characters after the mark ride with it: "dollars,\u{200e}" keeps
+    // ",\u{200e}", not lost to normalize (#1083 audit).
+    let trimmed = word.trim_end_matches(|c: char| trailing_mark(c) || crate::w2n_sentence::is_format_char(c));
+    let trimmed = &word[..trimmed.len() + word[trimmed.len()..].find(|c: char| !crate::w2n_sentence::is_format_char(c)).unwrap_or(word.len() - trimmed.len())];
     let trailing = word[trimmed.len()..].to_string();
     (crate::normalize(trimmed).trim().to_string(), trailing)
 }
@@ -1133,7 +1137,11 @@ pub fn fold_currency(text: &str, lang: &str) -> String {
         // subunit follows: "zéro dollar, et cinquante-cinq centimes" (the
         // punctuation of a transcript), "twelve euros, thirty-four cents" (how
         // num2words writes English amounts, #47).
-        let comma = matches!(trailing.as_str(), "," | "，" | "、" | "､" | "၊" | "՝" | "،" | "﹐" | "﹑" | "︐" | "︑");
+        // Format characters after the comma do not end the pause (#1154).
+        let comma = matches!(trailing.trim_end_matches(crate::w2n_sentence::is_format_char), "," | "，" | "、" | "､" | "၊" | "՝" | "،" | "﹐" | "﹑" | "︐" | "︑");
+        // The format characters after a pause comma ride after the amount
+        // when the subunit joins it: "dollars,\u{200b} fifty cents" (#1154).
+        let pause_fmt: String = if comma { trailing.chars().filter(|c| crate::w2n_sentence::is_format_char(*c)).collect() } else { String::new() };
         if (trailing.is_empty() || comma) && frac.is_none() && cur.decimals > 0 {
             if let Some(k) = next_word(&parts, m.end) {
                 let (kkey, _) = word_key(&parts[k].text);
@@ -1155,7 +1163,7 @@ pub fn fold_currency(text: &str, lang: &str) -> String {
                             frac = Some(minor);
                             consumed_end = sw.end;
                             trailing = sw.trailing;
-                            sub_invisible = format!("{}{}", sub_num.lead, sub_num.invisible);
+                            sub_invisible = format!("{}{}{}", pause_fmt, sub_num.lead, sub_num.invisible);
                         }
                     } else if let Some(minor) = minor.filter(|_| !comma) {
                         // "two euros fifty": bare subunit, only when nothing
@@ -1174,7 +1182,7 @@ pub fn fold_currency(text: &str, lang: &str) -> String {
                             frac = Some(minor);
                             consumed_end = s;
                             trailing = sub_num.trailing.clone();
-                            sub_invisible = format!("{}{}", sub_num.lead, sub_num.invisible);
+                            sub_invisible = format!("{}{}{}", pause_fmt, sub_num.lead, sub_num.invisible);
                         }
                     }
                 }
