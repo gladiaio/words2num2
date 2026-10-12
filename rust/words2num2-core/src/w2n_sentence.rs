@@ -500,6 +500,8 @@ fn rstrip_punct(s: &str) -> &str {
         matches!(c, '.' | ',' | ';' | ':' | '!' | '?' | '"' | '\'' | '\u{2019}')
             || matches!(c, '\u{FF0C}' | '\u{FF01}' | '\u{FF1F}' | '\u{FF1B}' | '\u{FF1A}')
             || more_terminal(c)
+            || folded_mark(c).is_some()
+            || c == '\u{FF3F}' // ＿
             || matches!(c, '\u{FF02}' | '\u{FF07}' | '\u{FF63}' | '\u{FE5A}' | '\u{FE5C}' | '\u{FE5E}' | '\u{FF08}') // ＂ ＇ ｣ ﹚ ﹜ ﹞ （
             || crate::is_clause_punctuation(c)
     };
@@ -592,10 +594,54 @@ fn ends_with_terminal_punct(s: &str) -> bool {
     ) || s.trim_end_matches(is_format_char).chars().next_back().is_some_and(more_terminal)
 }
 
+/// The kind of punctuation a compatibility form (fullwidth, small, vertical,
+/// superscript, Greek ";") stands for, read from its NFKC fold: "︕" is a
+/// "!", "⁾" a ")", "﹙" a "(" (#1094, #1096, #1099).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Mark {
+    /// Folds to . , ; : ! ? 、 。 or a run of dots: ends a run.
+    Terminal,
+    /// Folds to a closing bracket or quote.
+    Closing,
+    /// Folds to an opening bracket.
+    Opening,
+}
+
+pub(crate) fn folded_mark(c: char) -> Option<Mark> {
+    use unicode_normalization::UnicodeNormalization;
+    // ASCII and letters are handled by the explicit lists; the ellipsis "…"
+    // stays a trailing mark that does not end a run.
+    if c.is_ascii() || c.is_alphanumeric() || c == '\u{2026}' {
+        return None;
+    }
+    let f: String = std::iter::once(c).nfkc().collect();
+    if f.is_empty() || f == c.to_string() {
+        return None;
+    }
+    let all = |set: &str| f.chars().all(|x| set.contains(x));
+    if all(".,;:!?\u{3001}\u{3002}") {
+        Some(Mark::Terminal)
+    } else if all(")]}\"'\u{300D}\u{300F}\u{3011}\u{300B}\u{3015}\u{3009}\u{3017}\u{3019}\u{301B}") {
+        Some(Mark::Closing)
+    } else if all("([{\u{300C}\u{300E}\u{3010}\u{300A}\u{3014}\u{3008}\u{3016}\u{3018}\u{301A}") {
+        Some(Mark::Opening)
+    } else {
+        None
+    }
+}
+
+/// Does `c` fold to dots only ("．", "﹒", "︙")? Such a mark before a figure
+/// reads as a decimal point.
+pub(crate) fn folds_to_dots(c: char) -> bool {
+    use unicode_normalization::UnicodeNormalization;
+    let f: String = std::iter::once(c).nfkc().collect();
+    !f.is_empty() && f.chars().all(|x| x == '.')
+}
+
 /// More sentence and clause marks that end a run and stay in the output:
 /// ‼ ‥ ⁇ ⁈ ⁉, halfwidth ｡ ､, small-form ﹐ ﹒ ﹔ ﹖ ﹗, ․, hy ։ ՝, am ፧ (#1080).
 fn more_terminal(c: char) -> bool {
-    matches!(
+    folded_mark(c) == Some(Mark::Terminal) || matches!(
         c,
         '\u{203C}' | '\u{2025}' | '\u{2047}' | '\u{2048}' | '\u{2049}' | '\u{FF61}' | '\u{FF64}'
             | '\u{FE50}' | '\u{FE52}' | '\u{FE54}' | '\u{FE56}' | '\u{FE57}' | '\u{2024}'

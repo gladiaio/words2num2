@@ -342,3 +342,32 @@ def test_leading_clause_mark_issue_1041(lang, text, expected):
 )
 def test_folded_marks_issue_1088(lang, text, expected):
     assert words2num_sentence(text, lang=lang) == expected
+
+
+@pytest.mark.parametrize(
+    "lang,text,expected",
+    [
+        ("el", "x ;πενήντα y", "x ;50 y"),
+        ("en", "x fifty ﹑two y", "x 50 ﹑2 y"),
+        ("en", "x fifty］ two y", "x 50］ 2 y"),
+        ("en", "x fifty⁾ two y", "x 50⁾ 2 y"),
+        ("en", "x fifty︙ two y", "x 50︙ 2 y"),
+        ("en", "x fifty﹙ apples", "x 50﹙ apples"),
+        ("en", "x forty… two y", "x 40… 2 y"),
+    ],
+)
+def test_marks_by_nfkc_fold_issue_1096(lang, text, expected):
+    assert words2num_sentence(text, lang=lang) == expected
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        ("x ‼fifty dollars y", "x ‼$50 y"),
+        ("x five dollars fifty︕ y", "x $5.50︕ y"),
+        ("x fifty dollars︕ y", "x $50︕ y"),
+        ("x ．5 dollars", "x ．5 dollars"),
+    ],
+)
+def test_currency_marks_by_nfkc_fold_issue_1099(text, expected):
+    assert words2num_sentence(text, currency=True) == expected
