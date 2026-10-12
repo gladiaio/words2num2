@@ -683,6 +683,20 @@ fn ends_with_terminal_punct(s: &str) -> bool {
     ) || s.trim_end_matches(is_format_char).chars().next_back().is_some_and(more_terminal)
 }
 
+/// The word closes a straight quote ("\"twenty\"", "twenty'"): the run
+/// ends there, as at a closing bracket, so the quote is not lost inside a
+/// longer number ("x \"twenty\" three y" is "x \"20\" 3 y", #1120). A
+/// format character before the quote ("twenty\u{200b}\"") does not hide it.
+fn ends_with_close_quote(s: &str) -> bool {
+    let t = s.trim_end_matches(is_format_char);
+    t.ends_with(['"', '\''])
+        && t.trim_end_matches(['"', '\''])
+            .trim_end_matches(is_format_char)
+            .chars()
+            .next_back()
+            .is_some_and(char::is_alphanumeric)
+}
+
 /// More sentence and clause marks that end a run and stay in the output:
 /// ‼ ‥ ⁇ ⁈ ⁉, halfwidth ｡ ､, small-form ﹐ ﹒ ﹔ ﹖ ﹗, ․, hy ։ ՝, am ፧ (#1080).
 fn more_terminal(c: char) -> bool {
@@ -2257,7 +2271,7 @@ fn en_number_words(parts: &[String], i: usize) -> Vec<EnWord> {
                 last: k + 1 == n,
             });
         }
-        if ends_with_terminal_punct(tok) || ends_dash {
+        if ends_with_terminal_punct(tok) || ends_dash || ends_with_close_quote(tok) {
             break;
         }
         j += 1;
@@ -2406,7 +2420,7 @@ fn table_digit_run(
         }
         digits.push_str(&d);
         end = Some((digits.len(), j));
-        if ends_with_terminal_punct(tok) {
+        if ends_with_terminal_punct(tok) || ends_with_close_quote(tok) {
             break;
         }
         j += 1;
@@ -4265,6 +4279,9 @@ fn words2num_sentence_walk(
                     Some(scale) if j > i => commas.push((j, scale)),
                     _ => break,
                 }
+            }
+            if ends_with_close_quote(tok) {
+                break;
             }
             j += 1;
         }
