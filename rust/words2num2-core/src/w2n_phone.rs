@@ -131,12 +131,7 @@ fn written(run: &Run, candidates: &[Id]) -> Option<String> {
 /// writes it. A run no numbering plan knows comes back unchanged.
 pub fn fold_phones(text: &str, lang: &str, region: Option<&str>) -> String {
     let candidates = regions(lang, region);
-    // A token of format characters alone is no group separator: with
-    // phone=True format characters go, as after a value (#1020, #1083 audit).
-    let toks: Vec<&str> = text
-        .split(' ')
-        .filter(|t| t.is_empty() || !t.chars().all(crate::w2n_sentence::is_format_char))
-        .collect();
+    let toks: Vec<&str> = text.split(' ').collect();
     let mut out: Vec<String> = Vec::with_capacity(toks.len());
     let mut i = 0;
     while i < toks.len() {

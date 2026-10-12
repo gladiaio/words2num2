@@ -2646,11 +2646,9 @@ fn prev_word(parts: &[String], i: usize) -> Option<String> {
 /// The next non-blank part after `i`, lowercased and without trailing
 /// punctuation.
 fn next_word(parts: &[String], i: usize) -> Option<String> {
-    // A token of format characters alone is invisible: "one \u{200b} two"
-    // has "two" next (#1101).
     parts[i + 1..]
         .iter()
-        .find(|t| !py_str_isspace(t) && !t.chars().all(is_format_char))
+        .find(|t| !py_str_isspace(t))
         .map(|t| rstrip_punct(t).to_lowercase())
 }
 
@@ -4176,11 +4174,13 @@ fn words2num_sentence_walk(
                 // a half", not "1 half"; "five point" keeps its "point".
                 // fi "viisi kymmentä kuusi kymmentä": the "kuusi" a suffix
                 // morpheme follows is its unit, no end of this run (#988).
-                // Nor on a part of format characters alone: the run "二十 \u{200e}"
-                // would swallow the space before the next word (#1083 audit).
+                // Nor on a part of format characters alone glued to the next
+                // word (a zh/ja/th segmenter piece, "二十 \u{200e}二十"): the
+                // run would swallow the space before it (#1083 audit).
                 Some((v, ordinal))
                     if candidate_is_number(&converter, &clean, includable)
-                        && !tok.chars().all(is_format_char)
+                        && !(tok.chars().all(is_format_char)
+                            && parts.get(j + 1).is_some_and(|t| !py_str_isspace(t)))
                         && !unit_of_next_morpheme(converter.n2w_key(), &parts, j, &clean) =>
                 {
                     best_value = Some(v);
