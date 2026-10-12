@@ -808,7 +808,7 @@ fn ends_with_close_quote(s: &str) -> bool {
             .next_back()
             // A combining mark or the tsheg ends a word too: ml "ഇരുപത്\""
             // (virama), bo "གཅིག་\"" (#1150).
-            .is_some_and(|c| c.is_alphanumeric() || unicode_normalization::char::is_combining_mark(c) || c == '\u{0F0B}')
+            .is_some_and(|c| c.is_alphanumeric() || unicode_normalization::char::is_combining_mark(c) || matches!(c, '\u{0F0B}' | '\u{0F0C}'))
 }
 
 /// More sentence and clause marks that end a run and stay in the output:

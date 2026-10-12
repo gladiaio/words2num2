@@ -287,6 +287,8 @@ def test_sign_word_mark_space_figure_issue_1032(text, lang, expected):
         ("x twenty \u200b)five y", "en", "x 20 \u200b)five y"),
         ("x twenty \u200e)five y", "en", "x 20 \u200e)five y"),
         ("x ម្ភៃ \u200e។ប្រាំ y", "km", "x 20 \u200e។ប្រាំ y"),
+        ("x နှစ်ဆယ် \u200f၊ငါး y", "my", "x 20 \u200f၊ငါး y"),
+        ("x עשרים \u200f׃חמש y", "he", "x 20 \u200f׃חמש y"),
     ],
 )
 def test_leading_format_char_and_bidi_marks_issue_1000(text, lang, expected):
