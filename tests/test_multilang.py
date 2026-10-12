@@ -359,6 +359,11 @@ def test_closer_led_number_stays_whole_issue_1114(lang, text, expected):
         ("zh", "x ，约二十 y", "x ，约20 y"),
         ("ja", "x 、第三 y", "x 、第3 y"),
         ("th", "x )ที่ยี่สิบเอ็ด y", "x )ที่21 y"),
+        # A spaced format character inside the number, an aero digit string
+        # (#1130, #1131).
+        ("en", "x )two hundred \u200b five y", "x )two hundred \u200b five y"),
+        ("en_AERO", "x )fife fife fife y", "x )fife fife fife y"),
+        ("en_AERO", "x fife fife fife y", "x 555 y"),
     ],
 )
 def test_mark_led_prefix_still_reads_issue_1122(lang, text, expected):

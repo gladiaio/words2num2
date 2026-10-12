@@ -530,15 +530,23 @@ fn continues_punct_led(
     parts: &[String],
     i: usize,
     run: &str,
+    next: &[String],
     out: &str,
 ) -> bool {
+    // A part of format characters alone is skipped like a space ("two
+    // hundred \u{200b} five", #1130).
+    let blank = |t: &str| py_str_isspace(t) || t.chars().all(is_format_char);
     let mut k = i;
     let mut found = None;
     for _ in 0..5 {
-        let Some(p) = (0..k).rev().find(|&q| !py_str_isspace(&parts[q])) else { break };
+        let Some(p) = (0..k).rev().find(|&q| !blank(&parts[q])) else { break };
         let raw = &parts[p];
         if raw.starts_with(|c: char| !c.is_alphanumeric()) {
-            found = Some(p);
+            // A dash in front is a sign or a list bullet, not a closer: "code
+            // -one two three" keeps reading after it (#956).
+            if !raw.starts_with(['-', '\u{2010}', '\u{2011}', '\u{2012}', '\u{2013}', '\u{2014}', '\u{2015}', '\u{2212}', '\u{FF0D}']) {
+                found = Some(p);
+            }
             break;
         }
         if raw.chars().any(|c| c.is_ascii_digit()) || has_trailing_mark(raw.trim_end_matches(',')) {
@@ -555,18 +563,46 @@ fn continues_punct_led(
         // ("nineteen eighty four", "oh five") count too (#1119).
         // The words between were left as written too ("-one 2 three" is
         // not joined across the 2).
-        !core.is_empty()
-            && !has_trailing_mark(raw)
-            && out.ends_with(&parts[p..i].concat())
-            && words2num_sentence_walk(&joined, lang, to, has_kwargs)
-                .is_ok_and(|w| {
-                    let w = w.trim();
-                    // The number opens at the mark-led word: zh "，第三" leaves
-                    // the prefix 第 as written, not a number (#1122).
-                    !w.contains(char::is_whitespace)
-                        && w.chars().any(|c| c.is_ascii_digit())
-                        && !w.starts_with(char::is_alphabetic)
-                })
+        // The number opens at the mark-led word, or that word reads as a
+        // number itself (ar "وخمسة"): zh "，第三" leaves the prefix 第 as
+        // written, not a number (#1122).
+        let core_number = std::cell::OnceCell::new();
+        let one_number = |text: &str| {
+            words2num_sentence_walk(text, lang, to, has_kwargs).is_ok_and(|w| {
+                let w = w.trim();
+                !w.contains(char::is_whitespace)
+                    && w.chars().any(|c| c.is_ascii_digit())
+                    && (!w.starts_with(char::is_alphabetic)
+                        || *core_number.get_or_init(|| {
+                            words2num_sentence_walk(core, lang, to, has_kwargs)
+                                .is_ok_and(|c| c.chars().any(|c| c.is_ascii_digit()))
+                        }))
+            })
+        };
+        if core.is_empty() || has_trailing_mark(raw) || !out.ends_with(&parts[p..i].concat()) {
+            return false;
+        }
+        if one_number(&joined) {
+            return true;
+        }
+        // Or with up to 4 words after the run: a digit string reads whole only
+        // at three digits ("fife fife" is 5 5, "fife fife fife" 555, #1131).
+        let mut ahead = joined;
+        let mut words = 0;
+        for t in next {
+            ahead.push_str(t);
+            if blank(t) {
+                continue;
+            }
+            words += 1;
+            if words > 4 || one_number(&ahead) {
+                return words <= 4;
+            }
+            if has_trailing_mark(t) {
+                break;
+            }
+        }
+        false
     })
 }
 
@@ -3955,7 +3991,7 @@ fn words2num_sentence_walk(
         };
         if let Some((digits, end)) = digit_run {
             let run = parts[i..=end].concat();
-            if continues_punct_led(lang, to, has_kwargs, &parts, i, rstrip_punct(py_strip(&run)), &out) {
+            if continues_punct_led(lang, to, has_kwargs, &parts, i, rstrip_punct(py_strip(&run)), &parts[end + 1..], &out) {
                 out.push_str(&run);
                 i = end + 1;
                 continue;
@@ -4392,7 +4428,7 @@ fn words2num_sentence_walk(
             // twenty four" after ")two"): the run stays as written too, no
             // split value (#1112, #1114).
             let stripped_run = rstrip_punct(py_strip(&run)).to_string();
-            let punct_led_join = continues_punct_led(lang, to, has_kwargs, &parts, i, &stripped_run, &out);
+            let punct_led_join = continues_punct_led(lang, to, has_kwargs, &parts, i, &stripped_run, &parts[best_end + 1..], &out);
             let rendered = if punct_led_join {
                 None
             } else if best_ordinal {
