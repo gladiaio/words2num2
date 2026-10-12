@@ -3661,7 +3661,7 @@ fn words2num_sentence_folded(
         // Walked piece by piece: fr "trente-quatre cents" after "dollars et"
         // is 34 US cents, not 3400 (see `pieces_for_walk`).
         let mut out = String::new();
-        for (piece, walk) in crate::w2n_currency::pieces_for_walk(sentence, &resolved) {
+        for (piece, walk) in crate::w2n_currency::pieces_for_walk(sentence, &resolved, matches!(to, "cardinal" | "year" | "currency")) {
             if walk {
                 out.push_str(&words2num_sentence_walk(&piece, lang, to, has_kwargs)?);
             } else {
@@ -3676,7 +3676,7 @@ fn words2num_sentence_folded(
     // words before it keep their right-hand context: "un euro et un centime"
     // stays "1 euro et 1 centime" (#1001).
     let resolved = resolved_lang;
-    let pieces = crate::w2n_currency::subunit_pieces(sentence, &resolved);
+    let pieces = crate::w2n_currency::subunit_pieces(sentence, &resolved, matches!(to, "cardinal" | "year" | "currency"));
     if pieces.len() == 1 {
         return words2num_sentence_walk(sentence, lang, to, has_kwargs);
     }
@@ -7178,6 +7178,19 @@ mod plain_walk_subunit_tests {
         // The connector after the unit, not the "et" inside the count (#1010).
         assert_eq!(s("douze dollars et vingt et un cents", "fr_BE", "cardinal"), "12 dollars et 21 cents");
         assert_eq!(s("douze dollars et nonante et un cents", "fr_CH", "cardinal"), "12 dollars et 91 cents");
+        // A one-word count is the amount, no article or adjective (#1009).
+        assert_eq!(s("un dollar et un cent", "fr", "cardinal"), "1 dollar et 1 cent");
+        assert_eq!(s("deux dollars et neuf cents", "fr", "cardinal"), "2 dollars et 9 cents");
+        assert_eq!(s("deux dollars et neuf cents de plus", "fr", "cardinal"), "2 dollars et 900 de plus");
+        assert_eq!(s("douze dollars et (vingt cents)", "fr", "cardinal"), "12 dollars et (20 cents)");
+        assert_eq!(s("un dollar et (un cent)", "fr", "cardinal"), "1 dollar et (un cent)");
+        assert_eq!(s("douze dollars et neuf\u{2026} cents", "fr", "cardinal"), "12 dollars et 9\u{2026} cents");
+        assert_eq!(s("douze dollars et vingt( cents", "fr", "cardinal"), "12 dollars et 20( cents");
+        assert_eq!(s("douze dollars et vingt cents", "fr", "ordinal"), "douze dollars et vingt cents");
+        assert_eq!(s("douze dollars et vingt cents", "fr", "digits"), "douze dollars et vingt cents");
+        let co = |t: &str, to: &str| super::words2num_sentence_opts(t, "fr", to, false, true).unwrap();
+        assert_eq!(co("douze dollars et vingt cents", "ordinal"), "douze dollars et vingt cents");
+        assert_eq!(co("douze dollars et un cent chacun", "cardinal"), "12,01 $ chacun");
         // currency=True: the count is a plain number naming no currency,
         // not across a sentence or two "et"-joined numbers (#1013, #1017).
         let c = |t: &str, l: &str| super::words2num_sentence_opts(t, l, "cardinal", false, true).unwrap();
@@ -7228,8 +7241,8 @@ mod plain_walk_subunit_tests {
         assert_eq!(c("douze dollars et \u{216B} deux cents personnes", "fr"), "12 $ et \u{216B} 200 personnes");
         // Words that are no count are no amount.
         assert_eq!(c("le billet coûte cinq dollars et la salle compte quatre cents places", "fr"), "le billet coûte 5 $ et la salle compte 400 places");
-        // The plain walk leaves a mid-clause "un cent" as written.
-        assert_eq!(s("douze dollars et un cent chacun", "fr", "cardinal"), "12 dollars et un cent chacun");
+        // A mid-clause "un cent" is one cent (#1009).
+        assert_eq!(s("douze dollars et un cent chacun", "fr", "cardinal"), "12 dollars et 1 cent chacun");
     }
 }
 
