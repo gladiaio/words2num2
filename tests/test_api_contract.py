@@ -282,6 +282,12 @@ def test_sign_word_mark_space_figure_issue_1032(text, lang, expected):
         # The fullwidth and small minus too (#1083 audit).
         ("x \u200e－\u200etwenty five y", "en", "x \u200e-\u200e25 y"),
         ("x ﹣\u200etwenty five y", "en", "x -\u200e25 y"),
+        ("x ⁻\u200etwenty five y", "en", "x -\u200e25 y"),
+        ("x ‒\u200etwenty five y", "en", "x -\u200e25 y"),
+        ("x ₋\u200etwenty five y", "en", "x -\u200e25 y"),
+        ("x ‐\u200etwenty five y", "en", "x -\u200e25 y"),
+        ("x ‑\u200etwenty five y", "en", "x -\u200e25 y"),
+        ("x ﹘\u200etwenty five y", "en", "x -\u200e25 y"),
         ("四十 \u200b.七", "zh", "40 \u200b.七"),
         # Before a glued closer or clause mark (#1147, #1148).
         ("x twenty \u200b)five y", "en", "x 20 \u200b)five y"),
