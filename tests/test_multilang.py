@@ -396,6 +396,16 @@ def test_mark_led_prefix_still_reads_issue_1122(lang, text, expected):
         ("az", 'x "iyirmi" birinci y', 'x "20" 1-ci y'),
         ("et", 'x "kakskümmend" esimene y', 'x "20" 1. y'),
         ("bg", 'x сто" първи y', 'x 100" 1-ви y'),
+        # Nor as a fraction across the quote (#1149); after a combining mark
+        # the quote ends the word too (#1150).
+        ("bg", 'x сто" четвърти y', 'x 100" 4-ти y'),
+        ("pt", 'x vinte" quarto y', 'x 20" 4º y'),
+        ("en", 'x three" quarters y', 'x 3" quarters y'),
+        ("ml", 'x ഇരുപത്" ഒന്ന് y', 'x 20" 1 y'),
+        ("bo", 'x གཅིག་བརྒྱ་" གསུམ་ y', 'x 100" 3 y'),
+        ("bo", 'x གཅིག་བརྒྱ༌" གསུམ་ y', 'x 100" 3 y'),
+        ("sa", "x एकम् शतम्' त्रीणि y", "x 100' 3 y"),
+        ("en", "x two. half y", "x 2. half y"),
     ],
 )
 def test_closing_quote_ends_run_issue_1120(lang, text, expected):
