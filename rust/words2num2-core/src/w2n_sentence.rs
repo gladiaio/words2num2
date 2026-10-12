@@ -500,7 +500,7 @@ fn rstrip_punct(s: &str) -> &str {
         matches!(c, '.' | ',' | ';' | ':' | '!' | '?' | '"' | '\'' | '\u{2019}')
             || matches!(c, '\u{FF0C}' | '\u{FF01}' | '\u{FF1F}' | '\u{FF1B}' | '\u{FF1A}')
             || more_terminal(c)
-            || c == '\u{FF02}' // ＂
+            || matches!(c, '\u{FF02}' | '\u{FF07}' | '\u{FF63}' | '\u{FE5A}' | '\u{FE5C}' | '\u{FE5E}' | '\u{FF08}') // ＂ ＇ ｣ ﹚ ﹜ ﹞ （
             || crate::is_clause_punctuation(c)
     };
     // Format characters ride with a mark before them ("twenty,\u{200b}"),
@@ -613,6 +613,9 @@ fn more_terminal(c: char) -> bool {
         '\u{203C}' | '\u{2025}' | '\u{2047}' | '\u{2048}' | '\u{2049}' | '\u{FF61}' | '\u{FF64}'
             | '\u{FE50}' | '\u{FE52}' | '\u{FE54}' | '\u{FE56}' | '\u{FE57}' | '\u{2024}'
             | '\u{0589}' | '\u{055D}' | '\u{1367}'
+            // NFKC-folded forms of . ; ! ? , : (#1088): fullwidth ．, Greek ;,
+            // vertical ︐ ︑ ︒ ︓ ︔ ︕ ︖, small ﹕.
+            | '\u{FF0E}' | '\u{037E}' | '\u{FE10}'..='\u{FE16}' | '\u{FE55}' | '\u{FE51}' | '\u{FE30}'
     )
 }
 
@@ -7452,6 +7455,11 @@ mod script_mark_tests {
         // ‼ ‥ ⁇ ⁈ ⁉ ｡ ､ ﹗ ․ ։ ՝ ፧ end the run and stay (#1080 audit).
         assert_eq!(s("x fifty\u{203C} two y", "en"), "x 50\u{203C} 2 y");
         assert_eq!(s("x fifty\u{FF61} y", "en"), "x 50\u{FF61} y");
+        // NFKC-folded forms (#1088) and a mark before the word (#1087).
+        assert_eq!(s("x fifty\u{FF0E} two y", "en"), "x 50\u{FF0E} 2 y");
+        assert_eq!(s("x \u{03C0}\u{03B5}\u{03BD}\u{03AE}\u{03BD}\u{03C4}\u{03B1}\u{037E} \u{03B4}\u{03CD}\u{03BF} y", "el"), "x 50\u{037E} 2 y");
+        assert_eq!(s("x \u{203C}fifty y", "en"), "x \u{203C}50 y");
+        assert_eq!(s("he said \u{FF02}fifty\u{FF02} apples", "en"), "he said \u{FF02}50\u{FF02} apples");
         let c = |t: &str| super::words2num_sentence_opts(t, "en", "cardinal", false, true).unwrap();
         assert_eq!(c("x five dollars fifty\u{203C} y"), "x $5.50\u{203C} y");
         assert_eq!(s("\u{4E8C}\u{5341}\u{FF61}\u{4E94}", "zh"), "20\u{FF61}\u{4E94}");
