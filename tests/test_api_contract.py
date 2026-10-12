@@ -256,6 +256,7 @@ def test_sign_word_mark_space_figure_issue_1032(text, lang, expected):
         ("x 二十\u200b,一 y", "zh", "x 20\u200b,一 y"),
         ("x three point one \u200b four y", "en", "x 3.14 y"),
         ("x one \u200b two y", "en", "x 1 \u200b 2 y"),
+        ("x 二十 \u200e二十 y", "zh", "x 20 \u200e20 y"),
     ],
 )
 def test_leading_format_char_and_bidi_marks_issue_1000(text, lang, expected):
@@ -268,6 +269,12 @@ def test_leading_format_char_and_bidi_marks_issue_1000(text, lang, expected):
         ("x \u200bfive dollars", {"currency": True}, "x \u200b$5"),
         ("twelve dollars \u200bfifty", {"currency": True}, "$12.50\u200b"),
         ("on the \u200bfifth of march", {"date": True}, "on March 5"),
+        ("x 二十 \u200e二十 y", {"date": True, "lang": "zh"}, "x 20 \u200e20 y"),
+        (
+            "call zero \u200b six one two three four five six seven eight",
+            {"phone": True},
+            "call (061) 234 5678",
+        ),
     ],
 )
 def test_leading_format_char_keeps_folds_issue_1000(text, kwargs, expected):

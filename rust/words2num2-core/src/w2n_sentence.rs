@@ -569,6 +569,17 @@ fn lead_format(first: &str) -> String {
 }
 
 thread_local! {
+    /// The aero (spelling-alphabet) variants: a format-only token between two
+    /// digit words ends a dictation there, as their digit words concatenate
+    /// (#1089, #1092). Elsewhere a phone number reads across it (#1083 audit).
+    static AERO_GAPS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+fn aero_gaps() -> bool {
+    AERO_GAPS.with(|c| c.get())
+}
+
+thread_local! {
     static BARE_FORMAT_KEPT: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
 }
 
@@ -2153,7 +2164,7 @@ fn en_number_words(parts: &[String], i: usize) -> Vec<EnWord> {
         }
         // A token of format characters alone is no digit word: "fife \u{200b}
         // seven" is 5, then 7 (#1089, #1092).
-        if tok.chars().all(is_format_char) {
+        if aero_gaps() && tok.chars().all(is_format_char) {
             break;
         }
         // A dash at either end is a sign or punctuation, no hyphen between two
@@ -2308,7 +2319,7 @@ fn table_digit_run(
             j += 1;
             continue;
         }
-        if tok.chars().all(is_format_char) && j > 0 && py_str_isspace(&parts[j - 1]) {
+        if aero_gaps() && tok.chars().all(is_format_char) && j > 0 && py_str_isspace(&parts[j - 1]) {
             break; // a spaced format-only token ends a dictation (#1089)
         }
         let clean = rstrip_punct(tok).to_lowercase();
@@ -2635,9 +2646,11 @@ fn prev_word(parts: &[String], i: usize) -> Option<String> {
 /// The next non-blank part after `i`, lowercased and without trailing
 /// punctuation.
 fn next_word(parts: &[String], i: usize) -> Option<String> {
+    // A token of format characters alone is invisible: "one \u{200b} two"
+    // has "two" next (#1101).
     parts[i + 1..]
         .iter()
-        .find(|t| !py_str_isspace(t))
+        .find(|t| !py_str_isspace(t) && !t.chars().all(is_format_char))
         .map(|t| rstrip_punct(t).to_lowercase())
 }
 
@@ -3740,6 +3753,7 @@ fn words2num_sentence_walk(
     has_kwargs: bool,
 ) -> Result<String, W2nError> {
     let resolved = resolve_lang(lang)?;
+    AERO_GAPS.with(|c| c.set(resolved.to_lowercase().contains("aero")));
     let fmt_key = crate::w2n_formats::format_key(lang, &resolved);
     let converter = converter_for(&resolved);
     let postfix_scales = matches!(converter, Converter::Table(l) if crate::has_postfix_scales(l));
@@ -3990,6 +4004,7 @@ fn words2num_sentence_walk(
             // so a compound or a decimal ("atus ida \u{200b} lima", "three
             // point one \u{200b} four") is never split (#1100).
             let dictation_gap = j > i
+                && aero_gaps()
                 && tok.chars().all(is_format_char)
                 && py_str_isspace(&parts[j - 1])
                 && parts.get(j + 1).is_some_and(|t| py_str_isspace(t))
@@ -4161,8 +4176,11 @@ fn words2num_sentence_walk(
                 // a half", not "1 half"; "five point" keeps its "point".
                 // fi "viisi kymmentä kuusi kymmentä": the "kuusi" a suffix
                 // morpheme follows is its unit, no end of this run (#988).
+                // Nor on a part of format characters alone: the run "二十 \u{200e}"
+                // would swallow the space before the next word (#1083 audit).
                 Some((v, ordinal))
                     if candidate_is_number(&converter, &clean, includable)
+                        && !tok.chars().all(is_format_char)
                         && !unit_of_next_morpheme(converter.n2w_key(), &parts, j, &clean) =>
                 {
                     best_value = Some(v);
