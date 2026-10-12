@@ -593,7 +593,14 @@ fn continues_punct_led(
                 let tail: String = after.iter().take(2).map(String::as_str).collect();
                 let Ok(walked) = words2num_sentence_walk(&format!("{}{}", joined, tail), lang, to, has_kwargs) else { return false };
                 let folded = crate::w2n_currency::fold_currency(&walked, cur);
-                folded != walked && folded.split_whitespace().filter(|t| t.chars().any(|c| c.is_ascii_digit())).count() == 1
+                // The amount opens the folded text: only a currency sign
+                // ("$", "€", "R$") may come before its figure, never a word
+                // ("we paid $50" is no amount opened by "we", #1157).
+                let lead_ok = folded
+                    .split(|c: char| c.is_ascii_digit())
+                    .next()
+                    .is_some_and(|pre| pre.split_whitespace().all(|t| !t.chars().all(char::is_alphanumeric)));
+                folded != walked && lead_ok && folded.split_whitespace().filter(|t| t.chars().any(|c| c.is_ascii_digit())).count() == 1
             })
         })
     })
