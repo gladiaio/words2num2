@@ -499,6 +499,8 @@ fn rstrip_punct(s: &str) -> &str {
     let mark = |c: char| {
         matches!(c, '.' | ',' | ';' | ':' | '!' | '?' | '"' | '\'' | '\u{2019}')
             || matches!(c, '\u{FF0C}' | '\u{FF01}' | '\u{FF1F}' | '\u{FF1B}' | '\u{FF1A}')
+            || more_terminal(c)
+            || c == '\u{FF02}' // ＂
             || crate::is_clause_punctuation(c)
     };
     // Format characters ride with a mark before them ("twenty,\u{200b}"),
@@ -600,6 +602,17 @@ fn ends_with_terminal_punct(s: &str) -> bool {
                 | '\u{1362}' | '\u{1363}' | '\u{1364}' // ። ፣ ፤
                 | '\u{17D4}' | '\u{17D5}' // ។ ៕
         )
+    ) || s.trim_end_matches(is_format_char).chars().next_back().is_some_and(more_terminal)
+}
+
+/// More sentence and clause marks that end a run and stay in the output:
+/// ‼ ‥ ⁇ ⁈ ⁉, halfwidth ｡ ､, small-form ﹐ ﹒ ﹔ ﹖ ﹗, ․, hy ։ ՝, am ፧ (#1080).
+fn more_terminal(c: char) -> bool {
+    matches!(
+        c,
+        '\u{203C}' | '\u{2025}' | '\u{2047}' | '\u{2048}' | '\u{2049}' | '\u{FF61}' | '\u{FF64}'
+            | '\u{FE50}' | '\u{FE52}' | '\u{FE54}' | '\u{FE56}' | '\u{FE57}' | '\u{2024}'
+            | '\u{0589}' | '\u{055D}' | '\u{1367}'
     )
 }
 
@@ -7411,6 +7424,12 @@ mod script_mark_tests {
         // Spaced languages read a mark-led number as before.
         assert!(s("x ,deux mille y", "fr").contains("2000"));
         assert!(s("x ,\u{0434}\u{0432}\u{0430}\u{0434}\u{0446}\u{0430}\u{0442}\u{044C} \u{043E}\u{0434}\u{0438}\u{043D} y", "ru").contains("21"));
+        // ‼ ‥ ⁇ ⁈ ⁉ ｡ ､ ﹗ ․ ։ ՝ ፧ end the run and stay (#1080 audit).
+        assert_eq!(s("x fifty\u{203C} two y", "en"), "x 50\u{203C} 2 y");
+        assert_eq!(s("x fifty\u{FF61} y", "en"), "x 50\u{FF61} y");
+        let c = |t: &str| super::words2num_sentence_opts(t, "en", "cardinal", false, true).unwrap();
+        assert_eq!(c("x five dollars fifty\u{203C} y"), "x $5.50\u{203C} y");
+        assert_eq!(s("\u{4E8C}\u{5341}\u{FF61}\u{4E94}", "zh"), "20\u{FF61}\u{4E94}");
         // Unchanged without the mark.
         assert_eq!(s("တစ်ရာ ငါး", "my"), "105");
     }
