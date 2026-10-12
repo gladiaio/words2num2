@@ -8,6 +8,7 @@ follows [Semantic Versioning](https://semver.org/) and uses
 
 ### Fixed
 
+- Sentence mode: ‼ ‥ ⁇ ⁈ ⁉, halfwidth ｡ ､, small-form ﹐ ﹒ ﹔ ﹖ ﹗, ․, hy ։ ՝ and am ፧ end a number and stay in the output: "x fifty‼ two y" is "x 50‼ 2 y" (was "x 52 y", the mark lost).
 - `date=True`: an article alone ("the", de "dem" / "zum", es "el", pt "o", it "il" / "fino", fr "le") is no range link: "on 3 12 2026 the 4 5 2000 votes were counted" keeps "4 5 2000" as numbers; "to the", "bis zum", "hasta el" … still join a range (#1076).
 - `currency=True`: a punctuation mark after a folded amount (fullwidth, CJK, script, closing quotes and brackets) is kept: "x cinq euros， y" is "x 5 €， y" (was "x 5 € y"), "x five dollars。" "x $5。", "x five dollars” y" "x $5” y"; a fullwidth "，" / "、" before a subunit is a pause like ",", so the amount still joins (#1067, #1071).
 - `date=True`: a range joined by two words (de "bis zum", pt "até o", en "to the", es "hasta el", it "fino al") folds its first end too: "ab 12 3 2000 bis zum 13. März 2000" is "ab 12.03.2000 bis zum 13. März 2000" (#1066).
