@@ -3887,7 +3887,15 @@ fn words2num_sentence_folded(
         // Walked piece by piece: fr "trente-quatre cents" after "dollars et"
         // is 34 US cents, not 3400 (see `pieces_for_walk`).
         let mut out = String::new();
+        // Cleared on every exit, a panic unwinding included.
+        struct ClearFold;
+        impl Drop for ClearFold {
+            fn drop(&mut self) {
+                CURRENCY_FOLD.with(|c| *c.borrow_mut() = None);
+            }
+        }
         CURRENCY_FOLD.with(|c| *c.borrow_mut() = Some(resolved.clone()));
+        let _clear = ClearFold;
         let walked: Result<(), W2nError> = (|| {
             for (piece, walk) in crate::w2n_currency::pieces_for_walk(sentence, &resolved, matches!(to, "cardinal" | "year" | "currency")) {
                 if walk {
@@ -3898,7 +3906,7 @@ fn words2num_sentence_folded(
             }
             Ok(())
         })();
-        CURRENCY_FOLD.with(|c| *c.borrow_mut() = None);
+        drop(_clear);
         walked?;
         return Ok(crate::w2n_currency::fold_currency(&out, &resolved));
     }
