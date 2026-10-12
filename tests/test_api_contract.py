@@ -248,6 +248,9 @@ def test_sign_word_mark_space_figure_issue_1032(text, lang, expected):
         ("twenty.\u200e One", "en", "20.\u200e One"),
         ("x five \u200bapples y", "en", "x 5 \u200bapples y"),
         ("ninety \u200enine cents", "en", "99 cents"),
+        ("x \u200bthird y", "en", "x \u200b3rd y"),
+        ("x twenty-first\u200e y", "en", "x 21st\u200e y"),
+        ("x fife \u200b seven", "en_AERO", "x 5 \u200b 7"),
     ],
 )
 def test_leading_format_char_and_bidi_marks_issue_1000(text, lang, expected):

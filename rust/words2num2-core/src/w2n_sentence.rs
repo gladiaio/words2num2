@@ -2148,6 +2148,11 @@ fn en_number_words(parts: &[String], i: usize) -> Vec<EnWord> {
             j += 1;
             continue;
         }
+        // A token of format characters alone is no digit word: "fife \u{200b}
+        // seven" is 5, then 7 (#1089, #1092).
+        if tok.chars().all(is_format_char) {
+            break;
+        }
         // A dash at either end is a sign or punctuation, no hyphen between two
         // words: "-four five six" is no 456. A trailing one ends the run and
         // stays after the figure: "five five five- one" is "555- 1" (#956).
@@ -2299,6 +2304,9 @@ fn table_digit_run(
         if py_str_isspace(tok) {
             j += 1;
             continue;
+        }
+        if tok.chars().all(is_format_char) {
+            break; // (#1089)
         }
         let clean = rstrip_punct(tok).to_lowercase();
         // "cinq 5": a token in figures is a literal, not a digit word (#68).
@@ -3966,7 +3974,17 @@ fn words2num_sentence_walk(
                 j += 1;
                 continue;
             }
-            let clean = rstrip_punct(tok).to_lowercase();
+            // Format characters are no part of the word: "\u{200b}third" is an
+            // ordinal word (#1090, #1091).
+            // A part of format characters alone glued inside a word (a zh/th
+            // segmenter piece, "二百\u{200b}五十") stays as it is, a word-break
+            // hint (#998); between spaces it ends the run ("fife \u{200b} seven").
+            let spaced = (j > 0 && py_str_isspace(&parts[j - 1])) || parts.get(j + 1).is_some_and(|t| py_str_isspace(t));
+            let clean: String = if tok.chars().all(is_format_char) && !spaced {
+                rstrip_punct(tok).to_lowercase()
+            } else {
+                rstrip_punct(tok).to_lowercase().chars().filter(|c| !is_format_char(*c)).collect()
+            };
             if clean.is_empty()
                 || opens_with_punct(tok)
                 // A piece the zh/ja/th segmenter left opening on a glued mark
