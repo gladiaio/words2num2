@@ -4620,7 +4620,15 @@ fn words2num_sentence_walk(
                 {
                     // 10..=21 after "the", "early", "mid", "late" ("the fourteen
                     // nineties"); 16..=20 always (#1172).
-                    let cued = prev_word(&parts, i).is_some_and(|p| matches!(p.as_str(), "the" | "early" | "mid" | "late" | "mid-"));
+                    // Past format characters and an opening mark ("the (fifteen
+                    // nineties)", "the\u{200e} fifteen nineties").
+                    let cue = parts[..i]
+                        .iter()
+                        .rev()
+                        .map(|t| t.trim_matches(is_format_char))
+                        .find(|t| !t.is_empty() && !py_str_isspace(t) && t.chars().any(char::is_alphanumeric))
+                        .map(|t| rstrip_punct(t.trim_start_matches(|c: char| !c.is_alphanumeric())).to_lowercase());
+                    let cued = cue.is_some_and(|p| matches!(p.as_str(), "the" | "early" | "mid" | "late" | "mid-"));
                     i64::try_from(c).ok().filter(|c| (16..=20).contains(c) || (cued && (10..=21).contains(c)))
                 }
                 _ => None,
@@ -4644,10 +4652,19 @@ fn words2num_sentence_walk(
             // Not "nine hundred", "seven hundred fifty", "one oh one": the
             // scale word or the "oh" digit makes it a year, no time (#903,
             // #1173).
-            let hundred = next_word(&parts, i).is_some_and(|w| {
+            // "oh" only in an isolated "<digit> oh <digit>": inside a longer
+            // dictated string ("five five five oh one two") it groups nothing
+            // (#1171 audit).
+            let digit = |w: Option<String>| {
+                w.is_some_and(|w| crate::w2n_lang_en::unit_value(w.trim_matches(is_format_char)).is_some_and(|u| u <= 9) || w == "zero" || w == "oh")
+            };
+            let oh_alone = next_word(&parts, i).is_some_and(|w| {
                 let w = w.trim_matches(is_format_char);
-                w == "hundred" || w == "oh" || w.starts_with("oh-")
-            });
+                w == "oh" || w.starts_with("oh-")
+            }) && !digit(prev_word(&parts, i))
+                && !digit(next_word(&parts, best_end));
+            let hundred = oh_alone
+                || next_word(&parts, i).is_some_and(|w| w.trim_matches(is_format_char) == "hundred");
             if three_digit && best_end > i && !hundred && crate::w2n_lang_en::unit_value(&head).is_some_and(|u| (1..=9).contains(&u)) {
                 if let Ok(v) = converter.to_cardinal(&head) {
                     best_value = Some(v);

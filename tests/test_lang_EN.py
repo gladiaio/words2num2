@@ -368,6 +368,8 @@ def test_run_may_not_start_with_other_includables():
         # A format character is no mark between the words (#1171 audit).
         ("the nineteen\u2060 nineties", "the 1990s"),
         ("nine hundred\u200b fifteen", "915"),
+        ("the (fifteen nineties)", "the (1590s)"),
+        ("one two oh four", "1 2 oh 4"),
     ],
 )
 def test_year_mode_decades_and_hundreds(text, expected):
