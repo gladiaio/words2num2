@@ -6,6 +6,10 @@ follows [Semantic Versioning](https://semver.org/) and uses
 
 ## [Unreleased]
 
+### Fixed
+
+- Sentence mode: after a number word that closes a straight quote, an ordinal word reads on its own, as after a closing bracket: az 'x "iyirmi" birinci y' is 'x "20" 1-ci y' (was left as written since #1120), et 'x "20" 1. y', bg 'x 100" 1-ви y' (#1133).
+
 ## [0.4.1] — 2026-10-12
 
 ### Fixed
