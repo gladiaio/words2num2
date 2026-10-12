@@ -910,7 +910,8 @@ fn trailing_mark(c: char) -> bool {
 const LEGACY_MARKS: &str = ",.;:!?)]\"'»";
 
 fn legacy_trailing(word: &str) -> bool {
-    word.ends_with(|c: char| LEGACY_MARKS.contains(c))
+    // A mark behind format characters still counts: "un.\u{200b}" (#1155).
+    word.trim_end_matches(crate::w2n_sentence::is_format_char).ends_with(|c: char| LEGACY_MARKS.contains(c))
 }
 
 fn word_key(word: &str) -> (String, String) {
@@ -1136,7 +1137,8 @@ pub fn fold_currency(text: &str, lang: &str) -> String {
         // subunit follows: "zéro dollar, et cinquante-cinq centimes" (the
         // punctuation of a transcript), "twelve euros, thirty-four cents" (how
         // num2words writes English amounts, #47).
-        let comma = matches!(trailing.as_str(), "," | "，" | "、" | "､" | "၊" | "՝" | "،" | "﹐" | "﹑" | "︐" | "︑");
+        // Format characters after the comma do not end the pause (#1154).
+        let comma = matches!(trailing.trim_end_matches(crate::w2n_sentence::is_format_char), "," | "，" | "、" | "､" | "၊" | "՝" | "،" | "﹐" | "﹑" | "︐" | "︑");
         if (trailing.is_empty() || comma) && frac.is_none() && cur.decimals > 0 {
             if let Some(k) = next_word(&parts, m.end) {
                 let (kkey, _) = word_key(&parts[k].text);

@@ -368,6 +368,11 @@ def test_fold_keeps_cjk_trailing_mark_issue_1067(text, lang, expected):
         # Unchanged: a format character alone, or before the mark.
         ("x five dollars\u200b y", "en", "x $5 y"),
         ("x five dollars\u200b, y", "en", "x $5, y"),
+        # The comma pause and the clause end see through the format
+        # character (#1154, #1155).
+        ("twelve dollars,\u200b fifty cents", "en", "$12.50"),
+        ("cinq euros,\u200f cinquante centimes", "fr", "5,50 €"),
+        ("x douze dollars et un.\u200b cents y", "fr", "x 12 $ et un.\u200b 100 y"),
     ],
 )
 def test_mark_before_format_char_kept_after_amount(text, lang, expected):
