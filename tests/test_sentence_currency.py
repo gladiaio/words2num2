@@ -383,8 +383,12 @@ def test_fold_keeps_cjk_trailing_mark_issue_1067(text, lang, expected):
     ],
 )
 def test_closer_led_amount_keeps_its_subunit_issue_1123(text, lang, expected):
+    assert words2num_sentence(text, lang=lang, currency=True) == expected
 
 
+@pytest.mark.parametrize(
+    "text, lang, expected",
+    [
         ("x five dollars，\u200e y", "en", "x $5，\u200e y"),
         ("x five dollars,\u200b y", "en", "x $5,\u200b y"),
         ("x cinq euros!\ufeff y", "fr", "x 5 €!\ufeff y"),
