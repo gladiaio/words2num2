@@ -340,6 +340,9 @@ def test_leading_clause_mark_issue_1041(lang, text, expected):
             "x ]dvije tisuće dvadeset četiri y",
         ),
         # Two numbers stay two; the open bracket still reads (control).
+        # Spoken years and digit strings too (#1119).
+        ("en", "x ]nineteen eighty four y", "x ]nineteen eighty four y"),
+        ("en", "x )oh five y", "x )oh five y"),
         ("en", ")twenty one twenty one", ")twenty one 21"),
         ("en", "x (two thousand twenty four) y", "x (2024) y"),
     ],

@@ -524,7 +524,6 @@ fn trailing_mark(s: &str) -> String {
 /// #1114). Walks back over at most 4 words to the mark-led one; walking the
 /// words without the mark decides whether they all read as one number.
 fn continues_punct_led(
-    converter: &Converter,
     lang: &str,
     to: &str,
     has_kwargs: bool,
@@ -551,13 +550,14 @@ fn continues_punct_led(
         let raw = &parts[p];
         let core = raw.trim_start_matches(|c: char| !c.is_alphanumeric());
         let joined = format!("{}{}{}", core, parts[p + 1..i].concat(), run);
-        // Without the mark the walker reads it all as one number, not two.
+        // Without the mark the walker reads it all as one number, not two;
+        // the walk, not the converter, so spoken years and digit strings
+        // ("nineteen eighty four", "oh five") count too (#1119).
         // The words between were left as written too ("-one 2 three" is
         // not joined across the 2).
         !core.is_empty()
             && !has_trailing_mark(raw)
             && out.ends_with(&parts[p..i].concat())
-            && converter.convert(to, py_strip(&joined), has_kwargs).is_ok()
             && words2num_sentence_walk(&joined, lang, to, has_kwargs)
                 .is_ok_and(|w| !w.trim().contains(char::is_whitespace) && w.chars().any(|c| c.is_ascii_digit()))
     })
@@ -3948,7 +3948,7 @@ fn words2num_sentence_walk(
         };
         if let Some((digits, end)) = digit_run {
             let run = parts[i..=end].concat();
-            if continues_punct_led(&converter, lang, to, has_kwargs, &parts, i, rstrip_punct(py_strip(&run)), &out) {
+            if continues_punct_led(lang, to, has_kwargs, &parts, i, rstrip_punct(py_strip(&run)), &out) {
                 out.push_str(&run);
                 i = end + 1;
                 continue;
@@ -4385,7 +4385,7 @@ fn words2num_sentence_walk(
             // twenty four" after ")two"): the run stays as written too, no
             // split value (#1112, #1114).
             let stripped_run = rstrip_punct(py_strip(&run)).to_string();
-            let punct_led_join = continues_punct_led(&converter, lang, to, has_kwargs, &parts, i, &stripped_run, &out);
+            let punct_led_join = continues_punct_led(lang, to, has_kwargs, &parts, i, &stripped_run, &out);
             let rendered = if punct_led_join {
                 None
             } else if best_ordinal {
