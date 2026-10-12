@@ -348,6 +348,11 @@ def test_closer_led_number_stays_whole_issue_1114(lang, text, expected):
     assert words2num_sentence(text, lang=lang) == expected
 
 
+def test_closer_led_ordinal_stays_whole_issue_1114():
+    # was "x )twenty 1 y"
+    assert words2num_sentence("x )twenty first y", to="ordinal") == "x )twenty first y"
+
+
 @pytest.mark.parametrize(
     "lang,text,expected",
     [
