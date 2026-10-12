@@ -275,6 +275,24 @@ def test_leading_format_char_and_bidi_marks_issue_1000(text, lang, expected):
             {"phone": True},
             "call (061) 234 5678",
         ),
+        # A spaced format-only token stays part of the fold (#1107, #1109).
+        ("it costs twelve \u200b dollars", {"currency": True}, "it costs $12\u200b"),
+        (
+            "twenty dollars and five \u200b cents please",
+            {"currency": True},
+            "$20.05\u200b please",
+        ),
+        (
+            "el primero \u200b de enero de dos mil veinte",
+            {"lang": "es"},
+            "el 1º\u200b de enero de 2020",
+        ),
+        (
+            "el primero \u200b de enero de dos mil veinte",
+            {"lang": "es", "date": True},
+            "el 1 de enero de 2020",
+        ),
+        ("hello \u200b world", {"phone": True}, "hello \u200b world"),
     ],
 )
 def test_leading_format_char_keeps_folds_issue_1000(text, kwargs, expected):

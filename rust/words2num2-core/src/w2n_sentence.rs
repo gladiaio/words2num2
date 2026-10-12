@@ -3990,8 +3990,6 @@ fn words2num_sentence_walk(
                 j += 1;
                 continue;
             }
-            // Format characters are no part of the word: "\u{200b}third" is an
-            // ordinal word (#1090, #1091).
             let clean = rstrip_punct(tok).to_lowercase();
             // A format-only token between two single-digit words ends a
             // dictation: "fife \u{200b} seven" is 5, then 7 (#1089, #1092).
