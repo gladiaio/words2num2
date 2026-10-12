@@ -81,9 +81,7 @@ fn split_punct(tok: &str) -> Vec<&str> {
 fn split_punct_with(tok: &str, clause_lead: bool) -> Vec<&str> {
     let lead_end = tok
         .char_indices()
-        // Format characters before a word ride before it: "x \u{200b}five" keeps
-        // its ZWSP (#1000).
-        .find(|&(_, c)| !(is_leading_punct(c) || is_format(c) || (clause_lead && is_leading_clause_mark(c))))
+        .find(|&(_, c)| !(is_leading_punct(c) || (clause_lead && is_leading_clause_mark(c))))
         .map_or(tok.len(), |(k, _)| k);
     if lead_end == tok.len() {
         return vec![tok];

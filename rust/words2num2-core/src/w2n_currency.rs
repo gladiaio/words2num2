@@ -858,7 +858,7 @@ struct Num {
 }
 
 fn parse_num(word: &str) -> Option<Num> {
-    let body = word.trim_start_matches(|c: char| ",;:!?،؛؟।॥۔։።፣፤，！？；：。、".contains(c));
+    let body = word.trim_start_matches(|c: char| ",;:!?،؛؟।॥۔։።፣፤，！？；：。、".contains(c) || crate::w2n_sentence::is_format_char(c));
     let lead = word[..word.len() - body.len()].to_string();
     let word = body;
     let core = word.trim_end_matches(crate::w2n_sentence::is_format_char);
@@ -1134,7 +1134,7 @@ pub fn fold_currency(text: &str, lang: &str) -> String {
                     sub_at = next_word(&parts, k);
                 }
                 let sub_num = sub_at.and_then(|s| parse_num(&parts[s].text).map(|n| (s, n)));
-                if let Some((s, sub_num)) = sub_num.filter(|(_, n)| n.frac.is_empty() && n.lead.is_empty()) {
+                if let Some((s, sub_num)) = sub_num.filter(|(_, n)| n.frac.is_empty() && n.lead.chars().all(crate::w2n_sentence::is_format_char)) {
                     let minor = minor_digits(&sub_num.int, cur);
                     let after = next_word(&parts, s);
                     // Explicit subunit word after it?
@@ -1146,7 +1146,7 @@ pub fn fold_currency(text: &str, lang: &str) -> String {
                             frac = Some(minor);
                             consumed_end = sw.end;
                             trailing = sw.trailing;
-                            sub_invisible = sub_num.invisible.clone();
+                            sub_invisible = format!("{}{}", sub_num.lead, sub_num.invisible);
                         }
                     } else if let Some(minor) = minor.filter(|_| !comma) {
                         // "two euros fifty": bare subunit, only when nothing
@@ -1165,7 +1165,7 @@ pub fn fold_currency(text: &str, lang: &str) -> String {
                             frac = Some(minor);
                             consumed_end = s;
                             trailing = sub_num.trailing.clone();
-                            sub_invisible = sub_num.invisible.clone();
+                            sub_invisible = format!("{}{}", sub_num.lead, sub_num.invisible);
                         }
                     }
                 }

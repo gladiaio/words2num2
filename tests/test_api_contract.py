@@ -246,7 +246,21 @@ def test_sign_word_mark_space_figure_issue_1032(text, lang, expected):
     [
         ("x \u200bfive y", "en", "x \u200b5 y"),
         ("twenty.\u200e One", "en", "20.\u200e One"),
+        ("x five \u200bapples y", "en", "x 5 \u200bapples y"),
+        ("ninety \u200enine cents", "en", "99 cents"),
     ],
 )
 def test_leading_format_char_and_bidi_marks_issue_1000(text, lang, expected):
     assert words2num2.words2num_sentence(text, lang=lang) == expected
+
+
+@pytest.mark.parametrize(
+    "text, kwargs, expected",
+    [
+        ("x \u200bfive dollars", {"currency": True}, "x \u200b$5"),
+        ("twelve dollars \u200bfifty", {"currency": True}, "$12.50\u200b"),
+        ("on the \u200bfifth of march", {"date": True}, "on March 5"),
+    ],
+)
+def test_leading_format_char_keeps_folds_issue_1000(text, kwargs, expected):
+    assert words2num2.words2num_sentence(text, **kwargs) == expected

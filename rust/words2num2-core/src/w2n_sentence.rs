@@ -555,6 +555,17 @@ fn trailing_punct(s: &str) -> &str {
     &s[kept.len()..]
 }
 
+/// The format characters before a run's first word, written back before its
+/// value: "x \u{200b}five y" is "x \u{200b}5 y" (#1000). Not before a date or
+/// phone pass, as for those after a value (#1020).
+fn lead_format(first: &str) -> String {
+    if BARE_FORMAT_KEPT.with(|c| c.get()) {
+        first.chars().take_while(|c| is_format_char(*c)).collect()
+    } else {
+        String::new()
+    }
+}
+
 thread_local! {
     static BARE_FORMAT_KEPT: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
 }
@@ -3890,6 +3901,7 @@ fn words2num_sentence_walk(
         if let Some((digits, end)) = digit_run {
             let run = parts[i..=end].concat();
             out.push_str(sep_before(i));
+            out.push_str(&lead_format(&parts[i]));
             out.push_str(&digits);
             out.push_str(if en_digits { run_tail(&run) } else { trailing_punct(&run) });
             out.push_str(sep_after(end));
@@ -4163,6 +4175,7 @@ fn words2num_sentence_walk(
         if en_cardinal || en_year {
             if let Some((time, end)) = en_time_run(&parts, i) {
                 out.push_str(sep_before(i));
+                out.push_str(&lead_format(&parts[i]));
                 out.push_str(&time);
                 out.push_str(trailing_punct(&parts[end]));
                 out.push_str(sep_after(end));
@@ -4268,6 +4281,7 @@ fn words2num_sentence_walk(
                 .and_then(|k| en_decade_value(&rstrip_punct(&parts[k]).to_lowercase()).map(|d| (k, d)));
             if let (Some(c), Some((k, d))) = (century, decade) {
                 out.push_str(sep_before(i));
+                out.push_str(&lead_format(&parts[i]));
                 out.push_str(&format!("{c}{d}0s"));
                 out.push_str(trailing_punct(&parts[k]));
                 out.push_str(sep_after(k));
@@ -4393,6 +4407,7 @@ fn words2num_sentence_walk(
                 Some(text) => {
                     after_decimal = matches!(v, W2nValue::Dec(_)) && trailing.chars().all(is_format_char);
                     out.push_str(sep_before(i));
+                    out.push_str(&lead_format(&parts[i]));
                     out.push_str(&text);
                     out.push_str(trailing);
                     out.push_str(sep_after(best_end));
