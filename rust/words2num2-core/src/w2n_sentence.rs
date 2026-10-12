@@ -2142,7 +2142,8 @@ fn comma_after_scale(converter: &Converter, tok: &str) -> Option<BigInt> {
     if trailing_mark(tok) != "," {
         return None;
     }
-    let clean = rstrip_punct(tok).to_lowercase().replace('-', " ");
+    // "\u{200b}thousand,": a format character is no part of the word (#1121).
+    let clean: String = rstrip_punct(tok).to_lowercase().replace('-', " ").chars().filter(|c| !is_format_char(*c)).collect();
     let last = *py_split_whitespace(&clean).last()?;
     let words = scale_comma_words(converter.n2w_key());
     if words.is_empty() {

@@ -265,6 +265,8 @@ def test_sign_word_mark_space_figure_issue_1032(text, lang, expected):
         ("x خمسمائة \u200eوخمسة وخمسون y", "ar", "x 555 y"),
         ("x ألفان \u200fوأربعة وعشرون y", "ar", "x 2024 y"),
         ("x מאה \u200eועשרים ושלוש y", "he", "x 123 y"),
+        # A format character before a scale word with its comma (#1121).
+        ("x twelve \u200bthousand, three hundred and forty-five y", "en", "x 12345 y"),
     ],
 )
 def test_leading_format_char_and_bidi_marks_issue_1000(text, lang, expected):
