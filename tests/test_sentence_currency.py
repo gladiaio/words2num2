@@ -342,6 +342,12 @@ def test_one_word_count_after_a_glued_mark_issue_1075():
         ("x five dollars, y", "en", "x $5, y"),
         ("x five dollars” y", "en", "x $5” y"),
         ("x cinq euros． y", "fr", "x 5 €． y"),
+        ("x five dollars} y", "en", "x $5} y"),
+        ("x five dollars‼ y", "en", "x $5‼ y"),
+        ("x cinq euros｡ y", "fr", "x 5 €｡ y"),
+        ("x fünf Euro“ y", "de", "x 5 €“ y"),
+        ("twelve dollars‼ fifty cents", "en", "$12‼ $0.50"),
+        ("x cinco euros､ cincuenta céntimos y", "es", "x 5,50 € y"),
         # No symbol or dash split off; a fullwidth comma is a pause.
         ("x cinq euros€ y", "fr", "x 5 euros€ y"),
         ("five dollars 50% off", "en", "$5 50% off"),
