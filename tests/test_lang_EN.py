@@ -365,6 +365,9 @@ def test_run_may_not_start_with_other_includables():
         ("I have fifteen twenties and a ten", "I have 15 twenties and a 10"),
         ("one oh one dalmatians", "101 dalmatians"),
         ("at nine oh five", "at 9:05"),
+        # A format character is no mark between the words (#1171 audit).
+        ("the nineteen\u2060 nineties", "the 1990s"),
+        ("nine hundred\u200b fifteen", "915"),
     ],
 )
 def test_year_mode_decades_and_hundreds(text, expected):

@@ -4615,7 +4615,7 @@ fn words2num_sentence_walk(
             let century = match &best_value {
                 Some(W2nValue::Int(c))
                     if !best_ordinal
-                        && trailing_punct(&parts[best_end]).is_empty()
+                        && trailing_punct(&parts[best_end]).trim_matches(is_format_char).is_empty()
                         && crate::w2n_lang_en::ordinal_cardinal(&rstrip_punct(&parts[best_end]).to_lowercase()).is_none() =>
                 {
                     // 10..=21 after "the", "early", "mid", "late" ("the fourteen
@@ -4644,7 +4644,10 @@ fn words2num_sentence_walk(
             // Not "nine hundred", "seven hundred fifty", "one oh one": the
             // scale word or the "oh" digit makes it a year, no time (#903,
             // #1173).
-            let hundred = next_word(&parts, i).is_some_and(|w| w == "hundred" || w == "oh" || w.starts_with("oh-"));
+            let hundred = next_word(&parts, i).is_some_and(|w| {
+                let w = w.trim_matches(is_format_char);
+                w == "hundred" || w == "oh" || w.starts_with("oh-")
+            });
             if three_digit && best_end > i && !hundred && crate::w2n_lang_en::unit_value(&head).is_some_and(|u| (1..=9).contains(&u)) {
                 if let Ok(v) = converter.to_cardinal(&head) {
                     best_value = Some(v);
