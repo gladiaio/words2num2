@@ -362,6 +362,9 @@ def test_closer_led_number_stays_whole_issue_1114(lang, text, expected):
         # A spaced format character inside the number (#1130); a mark-led word
         # that holds the number (ceb "ika-usa", #1143).
         ("ceb", "x )ika-usa libo y", "x )ika-usa libo y"),
+        # The walk may add a hyphen after the prefix (#1151).
+        ("id", "x )kedua puluh satu y", "x )kedua puluh satu y"),
+        ("he", "x )ועשרים וחמש y", "x )ועשרים וחמש y"),
         ("en", "x )two hundred \u200b five y", "x )two hundred \u200b five y"),
         ("en_AERO", "x fife fife fife y", "x 555 y"),
         # The compat closers too (#1127).

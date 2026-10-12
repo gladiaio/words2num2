@@ -568,8 +568,13 @@ fn continues_punct_led(
             let lead: String = w.chars().take_while(|c| !c.is_ascii_digit()).collect();
             !w.contains(char::is_whitespace)
                 && w.len() > lead.len()
-                && (!lead.chars().any(char::is_alphabetic)
-                    || (core.len() > lead.len() && core.to_lowercase().starts_with(&lead.to_lowercase())))
+                && (!lead.chars().any(char::is_alphabetic) || {
+                    // Letters only: the walk may write a hyphen after the
+                    // prefix (id "ke-21", he "ו-25", #1151).
+                    let letters = |t: &str| t.chars().filter(|c| c.is_alphabetic()).flat_map(char::to_lowercase).collect::<String>();
+                    let (lead, core) = (letters(&lead), letters(core));
+                    core.len() > lead.len() && core.starts_with(&lead)
+                })
         };
         if core.is_empty() || has_trailing_mark(raw) || !out.ends_with(&parts[p..i].concat()) {
             return false;

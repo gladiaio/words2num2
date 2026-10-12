@@ -8,7 +8,7 @@ follows [Semantic Versioning](https://semver.org/) and uses
 
 ### Fixed
 
-- Sentence mode: the 0.4.1 closer-led rule (#1114) no longer leaves a number as written after a mark-led prefix that is no number word: zh "x )第二十一 y" is "x )第21 y" again (0.4.1: unchanged), also "，约二十", ja "、第三", th ")ที่ยี่สิบเอ็ด" (#1122). A mark-led word that holds the number still keeps it whole: ceb "x )ika-usa libo y" (#1143). A spaced format character inside the number no longer splits it: "x )two hundred \u200b five y" stays as written (0.4.1: "x )two hundred \u200b 5 y") (#1130).
+- Sentence mode: the 0.4.1 closer-led rule (#1114) no longer leaves a number as written after a mark-led prefix that is no number word: zh "x )第二十一 y" is "x )第21 y" again (0.4.1: unchanged), also "，约二十", ja "、第三", th ")ที่ยี่สิบเอ็ด" (#1122). A mark-led word that holds the number still keeps it whole: ceb "x )ika-usa libo y", id "x )kedua puluh satu y", he "x )ועשרים וחמש y" (#1143, #1151). A spaced format character inside the number no longer splits it: "x )two hundred \u200b five y" stays as written (0.4.1: "x )two hundred \u200b 5 y") (#1130).
 
 ## [0.4.1] — 2026-10-12
 
