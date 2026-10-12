@@ -357,3 +357,19 @@ def test_one_word_count_after_a_glued_mark_issue_1075():
 )
 def test_fold_keeps_cjk_trailing_mark_issue_1067(text, lang, expected):
     assert words2num_sentence(text, lang=lang, currency=True) == expected
+
+
+@pytest.mark.parametrize(
+    "text, lang, expected",
+    [
+        ("x five dollars，\u200e y", "en", "x $5，\u200e y"),
+        ("x five dollars,\u200b y", "en", "x $5,\u200b y"),
+        ("x cinq euros!\ufeff y", "fr", "x 5 €!\ufeff y"),
+        # Unchanged: a format character alone, or before the mark.
+        ("x five dollars\u200b y", "en", "x $5 y"),
+        ("x five dollars\u200b, y", "en", "x $5, y"),
+    ],
+)
+def test_mark_before_format_char_kept_after_amount(text, lang, expected):
+    """#1083 audit: a mark then a format character after the unit was lost."""
+    assert words2num_sentence(text, lang=lang, currency=True) == expected

@@ -914,7 +914,10 @@ fn legacy_trailing(word: &str) -> bool {
 }
 
 fn word_key(word: &str) -> (String, String) {
-    let trimmed = word.trim_end_matches(trailing_mark);
+    // Format characters after the mark ride with it: "dollars,\u{200e}" keeps
+    // ",\u{200e}", not lost to normalize (#1083 audit).
+    let trimmed = word.trim_end_matches(|c: char| trailing_mark(c) || crate::w2n_sentence::is_format_char(c));
+    let trimmed = &word[..trimmed.len() + word[trimmed.len()..].find(|c: char| !crate::w2n_sentence::is_format_char(c)).unwrap_or(word.len() - trimmed.len())];
     let trailing = word[trimmed.len()..].to_string();
     (crate::normalize(trimmed).trim().to_string(), trailing)
 }
