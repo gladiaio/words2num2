@@ -893,7 +893,7 @@ fn parse_num(word: &str) -> Option<Num> {
 /// script sentence marks (#1067, #1071). No dash, slash or symbol ("€",
 /// "%", "+", emoji): those stay on the word (#1072, #1074).
 fn trailing_mark(c: char) -> bool {
-    LEGACY_MARKS.contains(c) || "”’›」』】》）］｝〕〉，。．！？；：、…।॥،؛؟۔።፣፤".contains(c)
+    LEGACY_MARKS.contains(c) || "}”’“‘›」』】》）］｝〕〉｣〗〙〛＂＇，。．！？；：、…‥‼⁇⁈⁉｡､﹒﹐﹔﹖﹗․।॥،؛؟۔።፣፤፧။၊។៕։՝๚".contains(c)
 }
 
 /// The marks the currency pass has always split off a word; the subunit
@@ -1124,7 +1124,7 @@ pub fn fold_currency(text: &str, lang: &str) -> String {
         // subunit follows: "zéro dollar, et cinquante-cinq centimes" (the
         // punctuation of a transcript), "twelve euros, thirty-four cents" (how
         // num2words writes English amounts, #47).
-        let comma = matches!(trailing.as_str(), "," | "，" | "、");
+        let comma = matches!(trailing.as_str(), "," | "，" | "、" | "､" | "၊" | "՝" | "،" | "﹐");
         if (trailing.is_empty() || comma) && frac.is_none() && cur.decimals > 0 {
             if let Some(k) = next_word(&parts, m.end) {
                 let (kkey, _) = word_key(&parts[k].text);
@@ -1281,14 +1281,16 @@ fn article_one(lang: &str, word: &str) -> bool {
 ///   en "a"/"an", an article in running text — unless a subunit after the
 ///   unit says it is money: "a dollar and twenty cents", "une livre et vingt
 ///   pence" ([`subunit_follows`]).
-pub fn pieces_for_walk(sentence: &str, lang: &str) -> Vec<(String, bool)> {
-    pieces_for_walk_with(sentence, lang, false)
+pub fn pieces_for_walk(sentence: &str, lang: &str, counts: bool) -> Vec<(String, bool)> {
+    pieces_for_walk_with(sentence, lang, false, counts)
 }
 
 /// [`pieces_for_walk`] with only the subunit cut, no currency rewrites: the
 /// plain walk keeps fr "dollars et cinquante cents" as 50 cents, not 5000
 /// (#868).
-pub fn subunit_pieces(sentence: &str, lang: &str) -> Vec<(String, bool)> {
+/// `counts`: write a one-word count before the subunit as its value (#1009);
+/// off in ordinal mode, which leaves cardinals as words.
+pub fn subunit_pieces(sentence: &str, lang: &str, counts: bool) -> Vec<(String, bool)> {
     // Only a subunit the walk reads as a multiplier needs the cut: fr "cent",
     // "cents" (100). Elsewhere (en, or no such word in the text) the scan is
     // skipped (#1001).
@@ -1297,7 +1299,7 @@ pub fn subunit_pieces(sentence: &str, lang: &str) -> Vec<(String, bool)> {
     if mults.is_empty() || !crate::normalize(sentence).split_whitespace().any(|w| mults.iter().any(|m| m == w)) {
         return vec![(sentence.to_string(), true)];
     }
-    pieces_for_walk_with(sentence, lang, true)
+    pieces_for_walk_with(sentence, lang, true, counts)
 }
 
 /// The subunit names of `base` that are also a multiplier word (>= 100),
@@ -1323,7 +1325,7 @@ fn multiplier_subunits(base: &str) -> std::sync::Arc<Vec<String>> {
     v
 }
 
-fn pieces_for_walk_with(sentence: &str, lang: &str, subunits_only: bool) -> Vec<(String, bool)> {
+fn pieces_for_walk_with(sentence: &str, lang: &str, subunits_only: bool, counts: bool) -> Vec<(String, bool)> {
     let base = lang.split(&['_', '-'][..]).next().unwrap_or(lang);
     if hand_lexicon(base).is_empty() {
         return vec![(sentence.to_string(), true)];
@@ -1343,6 +1345,7 @@ fn pieces_for_walk_with(sentence: &str, lang: &str, subunits_only: bool) -> Vec<
         })
     };
     let mut kept: Vec<usize> = Vec::new(); // parts kept verbatim
+    let mut count_renames: Vec<(usize, String)> = Vec::new();
     let mut renames: Vec<(usize, String)> = Vec::new();
     for w in 0..words.len() {
         // A subunit name after "<unit> <connector> <one to four words>".
@@ -1388,11 +1391,12 @@ fn pieces_for_walk_with(sentence: &str, lang: &str, subunits_only: bool) -> Vec<
                     Ok(Some(v)) => v,
                     _ => -1,
                 });
-                // "<2-9> cents" is also a hundreds multiple; the plain walk
+                // "<2-9> cents" is also a hundreds multiple ("un cent" is no
+                // 100: French says "cent", #1063); the plain walk
                 // also takes 11-19 for one ("douze cents personnes" is 1200
                 // people), so there it must end the clause. "dix cents" is no
                 // 1000 ("mille"), so 10 is no hundreds multiple.
-                let hundreds = figure.is_none() && if subunits_only { (2..=19).contains(&v) && v != 10 } else { (1..10).contains(&v) };
+                let hundreds = figure.is_none() && if subunits_only { (2..=19).contains(&v) && v != 10 } else { (2..10).contains(&v) };
                 // currency=True keeps, as written, a count it cannot read as
                 // one integer but that is one amount: a decimal ("deux virgule
                 // cinq cents", "2,5 cents"), native digits, a long figure.
@@ -1433,6 +1437,19 @@ fn pieces_for_walk_with(sentence: &str, lang: &str, subunits_only: bool) -> Vec<
             });
             if numeric_sub && ok {
                 kept.push(words[w]);
+                // A one-word count is the amount: "et un cent", "et neuf
+                // cents" are 1 and 9 cents, not the article "un" or "neuf"
+                // (new), which a lone homograph would stay (#1009).
+                let text = &parts[words[w - 1]].text;
+                let core = &text[..text.len() - word_key(text).1.len()];
+                // Only a bare word: a mark or format character before or in
+                // it ("(vingt", "«un", "neuf…", "vingt(") would be lost (#1075).
+                let bare = !core.is_empty() && core.chars().all(|c| c.is_alphanumeric() || c == '-');
+                if counts && conn == Some(1) && bare {
+                    if let Ok(Some(v)) = crate::lookup_norm(lang, &keys[w - 1], false, &[]) {
+                        count_renames.push((words[w - 1], v.to_string()));
+                    }
+                }
             }
         }
         // The article-one right before a currency unit name, opening the
@@ -1473,6 +1490,10 @@ fn pieces_for_walk_with(sentence: &str, lang: &str, subunits_only: bool) -> Vec<
     }
     for (j, text) in renames.into_iter().filter(|_| !subunits_only) {
         parts[j].text = text;
+    }
+    for (j, text) in count_renames {
+        let trailing = word_key(&parts[j].text).1;
+        parts[j].text = format!("{text}{trailing}");
     }
     let mut pieces = Vec::new();
     let mut cur = String::new();

@@ -306,6 +306,34 @@ def test_subunit_count_is_one_plain_number_issue_1017(text, lang, expected):
 
 
 @pytest.mark.parametrize(
+    "text, currency, expected",
+    [
+        ("un dollar et un cent", False, "1 dollar et 1 cent"),
+        ("deux dollars et neuf cents", False, "2 dollars et 9 cents"),
+        ("deux dollars et neuf cents", True, "2,09 $"),
+        ("un euro et un centime", True, "1,01 €"),
+        ("douze dollars et un cent chacun", True, "12,01 $ chacun"),
+    ],
+)
+def test_one_word_subunit_count_issue_1009(text, currency, expected):
+    assert words2num_sentence(text, lang="fr", currency=currency) == expected
+
+
+@pytest.mark.parametrize("to", ["ordinal", "ordinal_num", "digits"])
+@pytest.mark.parametrize("currency", [False, True])
+def test_one_word_count_stays_a_word_outside_cardinal_issue_1065(to, currency):
+    text = "douze dollars et vingt cents"
+    assert words2num_sentence(text, lang="fr", to=to, currency=currency) == text
+
+
+def test_one_word_count_after_a_glued_mark_issue_1075():
+    assert (
+        words2num_sentence("un dollar et (un cent)", lang="fr")
+        == "1 dollar et (un cent)"
+    )
+
+
+@pytest.mark.parametrize(
     "text, lang, expected",
     [
         ("x cinq euros， y", "fr", "x 5 €， y"),
@@ -314,6 +342,12 @@ def test_subunit_count_is_one_plain_number_issue_1017(text, lang, expected):
         ("x five dollars, y", "en", "x $5, y"),
         ("x five dollars” y", "en", "x $5” y"),
         ("x cinq euros． y", "fr", "x 5 €． y"),
+        ("x five dollars} y", "en", "x $5} y"),
+        ("x five dollars‼ y", "en", "x $5‼ y"),
+        ("x cinq euros｡ y", "fr", "x 5 €｡ y"),
+        ("x fünf Euro“ y", "de", "x 5 €“ y"),
+        ("twelve dollars‼ fifty cents", "en", "$12‼ $0.50"),
+        ("x cinco euros､ cincuenta céntimos y", "es", "x 5,50 € y"),
         # No symbol or dash split off; a fullwidth comma is a pause.
         ("x cinq euros€ y", "fr", "x 5 euros€ y"),
         ("five dollars 50% off", "en", "$5 50% off"),
