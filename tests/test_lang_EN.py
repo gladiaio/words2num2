@@ -359,6 +359,12 @@ def test_run_may_not_start_with_other_includables():
         ("nine hundred", "900"),
         ("the year five hundred and twenty", "the year 520"),
         ("at nine fifteen", "at 9:15"),
+        # Centuries 10-21 after a period cue (#1172); an "oh" digit (#1173).
+        ("the fourteen nineties", "the 1490s"),
+        ("the early fourteen nineties, when", "the early 1490s, when"),
+        ("I have fifteen twenties and a ten", "I have 15 twenties and a 10"),
+        ("one oh one dalmatians", "101 dalmatians"),
+        ("at nine oh five", "at 9:05"),
     ],
 )
 def test_year_mode_decades_and_hundreds(text, expected):

@@ -4618,7 +4618,10 @@ fn words2num_sentence_walk(
                         && trailing_punct(&parts[best_end]).is_empty()
                         && crate::w2n_lang_en::ordinal_cardinal(&rstrip_punct(&parts[best_end]).to_lowercase()).is_none() =>
                 {
-                    i64::try_from(c).ok().filter(|c| (16..=20).contains(c))
+                    // 10..=21 after "the", "early", "mid", "late" ("the fourteen
+                    // nineties"); 16..=20 always (#1172).
+                    let cued = prev_word(&parts, i).is_some_and(|p| matches!(p.as_str(), "the" | "early" | "mid" | "late" | "mid-"));
+                    i64::try_from(c).ok().filter(|c| (16..=20).contains(c) || (cued && (10..=21).contains(c)))
                 }
                 _ => None,
             };
@@ -4638,9 +4641,10 @@ fn words2num_sentence_walk(
             // The single-token `words2num(..., to="year")` still reads "nine
             // eleven" as 911, the way num2words2 spells 100..999 (#111).
             let three_digit = matches!(&best_value, Some(W2nValue::Int(v)) if (BigInt::from(100)..BigInt::from(1000)).contains(v));
-            // Not "nine hundred", "seven hundred fifty": the scale word makes
-            // it a cardinal year, no time (#903).
-            let hundred = next_word(&parts, i).is_some_and(|w| w == "hundred");
+            // Not "nine hundred", "seven hundred fifty", "one oh one": the
+            // scale word or the "oh" digit makes it a year, no time (#903,
+            // #1173).
+            let hundred = next_word(&parts, i).is_some_and(|w| w == "hundred" || w == "oh" || w.starts_with("oh-"));
             if three_digit && best_end > i && !hundred && crate::w2n_lang_en::unit_value(&head).is_some_and(|u| (1..=9).contains(&u)) {
                 if let Ok(v) = converter.to_cardinal(&head) {
                     best_value = Some(v);
