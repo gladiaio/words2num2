@@ -6,6 +6,8 @@ follows [Semantic Versioning](https://semver.org/) and uses
 
 ## [Unreleased]
 
+## [0.4.1] — 2026-10-12
+
 ### Fixed
 
 - Sentence mode: a straight closing quote (`"` or `'`) after a number word ends the number, as a closing bracket does, and stays in the output: 'x "twenty" one y' is 'x "20" one y' (was 'x "21 y', the quote lost), 'x twenty" three y' 'x 20" 3 y' (was 'x 23 y'), 'he said "two" thousand people' 'he said "2" thousand people' (was 'he said "2000 people'). A quoted number still reads whole: 'x "twenty one" y' is 'x "21" y' (#1120).
