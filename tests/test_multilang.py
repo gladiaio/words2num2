@@ -364,6 +364,10 @@ def test_closer_led_number_stays_whole_issue_1114(lang, text, expected):
         ("en", 'x "twenty one" y', 'x "21" y'),
         ("en", "x 'nineteen eighty four' y", "x '1984' y"),
         ("en", "x (twenty) one y", "x (20) one y"),
+        # An ordinal after the quote reads on its own, as after ")" (#1133).
+        ("az", 'x "iyirmi" birinci y', 'x "20" 1-ci y'),
+        ("et", 'x "kakskümmend" esimene y', 'x "20" 1. y'),
+        ("bg", 'x сто" първи y', 'x 100" 1-ви y'),
     ],
 )
 def test_closing_quote_ends_run_issue_1120(lang, text, expected):
