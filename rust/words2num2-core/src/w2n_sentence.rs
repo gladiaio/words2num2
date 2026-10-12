@@ -500,6 +500,7 @@ fn rstrip_punct(s: &str) -> &str {
         matches!(c, '.' | ',' | ';' | ':' | '!' | '?' | '"' | '\'' | '\u{2019}')
             || matches!(c, '\u{FF0C}' | '\u{FF01}' | '\u{FF1F}' | '\u{FF1B}' | '\u{FF1A}')
             || more_terminal(c)
+            || folded_mark(c).is_some()
             || matches!(c, '\u{FF02}' | '\u{FF07}' | '\u{FF63}' | '\u{FE5A}' | '\u{FE5C}' | '\u{FE5E}' | '\u{FF08}') // ＂ ＇ ｣ ﹚ ﹜ ﹞ （
             || crate::is_clause_punctuation(c)
     };
@@ -582,7 +583,11 @@ pub(crate) fn is_format_char(c: char) -> bool {
 /// walker leaves such a piece as written.
 fn opens_with_punct(s: &str) -> bool {
     s.chars().next().is_some_and(|c| {
-        crate::is_clause_punctuation(c) || matches!(c, '\u{2018}' | '\u{201B}' | '`')
+        crate::is_clause_punctuation(c)
+            || matches!(c, '\u{2018}' | '\u{201B}' | '`' | '_')
+            // A compat closer or connector, like its ASCII form: "x ）fifty y"
+            // stays as written, as "x )fifty y" does (#1103).
+            || matches!(folded_mark(c), Some(Mark::Closing | Mark::Connector))
     })
 }
 
@@ -644,6 +649,60 @@ fn ends_run_mark(s: &str) -> bool {
     ends_with_terminal_punct(s) || ends_with_close_quote(s)
 }
 
+/// The kind of punctuation a compatibility form (fullwidth, small, vertical,
+/// superscript, Greek ";") stands for, read from its NFKC fold: "︕" is a
+/// "!", "⁾" a ")", "﹙" a "(" (#1094, #1096, #1099).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Mark {
+    /// Folds to . , ; : ! ? 、 。 or a run of dots: ends a run.
+    Terminal,
+    /// Folds to a closing bracket or quote.
+    Closing,
+    /// Folds to an opening bracket.
+    Opening,
+    /// Folds to "_" or "`": cut off either side, like "_" (#1102 F2).
+    Connector,
+}
+
+pub(crate) fn folded_mark(c: char) -> Option<Mark> {
+    use unicode_normalization::UnicodeNormalization;
+    // ASCII and letters are handled by the explicit lists; the ellipsis "…"
+    // stays a trailing mark that does not end a run.
+    if c.is_ascii() || c.is_alphanumeric() || c == '\u{2026}' {
+        return None;
+    }
+    // Only these blocks hold compatibility forms of ASCII or CJK punctuation;
+    // skip the NFKC fold for everything else (#1102 F4).
+    let cp = c as u32;
+    if !matches!(cp, 0x037E | 0x2024..=0x2025 | 0x203C..=0x2049 | 0x207D..=0x208E | 0x2329..=0x232A | 0xFE10..=0xFE6F | 0xFF00..=0xFFEF) {
+        return None;
+    }
+    let f: String = std::iter::once(c).nfkc().collect();
+    if f.is_empty() || f == c.to_string() {
+        return None;
+    }
+    let all = |set: &str| f.chars().all(|x| set.contains(x));
+    if all(".,;:!?\u{3001}\u{3002}") {
+        Some(Mark::Terminal)
+    } else if all(")]}\"'\u{300D}\u{300F}\u{3011}\u{300B}\u{3015}\u{3009}\u{3017}\u{3019}\u{301B}") {
+        Some(Mark::Closing)
+    } else if all("([{\u{300C}\u{300E}\u{3010}\u{300A}\u{3014}\u{3008}\u{3016}\u{3018}\u{301A}") {
+        Some(Mark::Opening)
+    } else if all("_`") {
+        Some(Mark::Connector)
+    } else {
+        None
+    }
+}
+
+/// Does `c` fold to dots only ("．", "﹒", "︙")? Such a mark before a figure
+/// reads as a decimal point.
+pub(crate) fn folds_to_dots(c: char) -> bool {
+    use unicode_normalization::UnicodeNormalization;
+    let f: String = std::iter::once(c).nfkc().collect();
+    !f.is_empty() && f.chars().all(|x| x == '.')
+}
+
 /// The word closes a straight quote ("\"twenty\"", "twenty'"): the run
 /// ends there, as at a closing bracket, so the quote is not lost inside a
 /// longer number ("x \"twenty\" three y" is "x \"20\" 3 y", #1120). A
@@ -661,7 +720,7 @@ fn ends_with_close_quote(s: &str) -> bool {
 /// More sentence and clause marks that end a run and stay in the output:
 /// ‼ ‥ ⁇ ⁈ ⁉, halfwidth ｡ ､, small-form ﹐ ﹒ ﹔ ﹖ ﹗, ․, hy ։ ՝, am ፧ (#1080).
 fn more_terminal(c: char) -> bool {
-    matches!(
+    folded_mark(c) == Some(Mark::Terminal) || matches!(
         c,
         '\u{203C}' | '\u{2025}' | '\u{2047}' | '\u{2048}' | '\u{2049}' | '\u{FF61}' | '\u{FF64}'
             | '\u{FE50}' | '\u{FE52}' | '\u{FE54}' | '\u{FE56}' | '\u{FE57}' | '\u{2024}'
