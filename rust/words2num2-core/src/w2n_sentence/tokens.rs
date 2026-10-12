@@ -85,18 +85,17 @@ fn split_punct(tok: &str) -> Vec<&str> {
 
 fn split_punct_with(tok: &str, clause_lead: bool) -> Vec<&str> {
     let lead_mark = |c: char| is_leading_punct(c) || (clause_lead && is_leading_clause_mark(c));
-    let lead_end = tok.char_indices().find(|&(_, c)| !lead_mark(c)).map_or(tok.len(), |(k, _)| k);
-    // Format characters before the mark ride with it: "\u{200e}(two)" cuts
-    // "\u{200e}(" like "(" (#1125, #1129). The lead ends at its last mark.
-    let lead_end = if lead_end == 0 {
-        tok.char_indices()
-            .take_while(|&(_, c)| lead_mark(c) || is_format(c))
-            .filter(|&(_, c)| lead_mark(c))
-            .last()
-            .map_or(0, |(k, c)| k + c.len_utf8())
-    } else {
-        lead_end
-    };
+    // Format characters before or between the marks ride with them:
+    // "\u{200e}(two)" cuts "\u{200e}(" like "(", "'\u{200e}'five" cuts
+    // "'\u{200e}'" (#1125, #1129, #1138, #1140). The lead ends at its last
+    // mark.
+    let lead_end = tok
+        .char_indices()
+        .take_while(|&(_, c)| lead_mark(c) || is_format(c))
+        .filter(|&(_, c)| lead_mark(c))
+        .last()
+        .map_or(0, |(k, c)| k + c.len_utf8());
+    let lead_end = if lead_end == 0 { tok.char_indices().find(|&(_, c)| !lead_mark(c)).map_or(tok.len(), |(k, _)| k) } else { lead_end };
     if lead_end == tok.len() {
         return vec![tok];
     }

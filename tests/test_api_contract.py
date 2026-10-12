@@ -273,6 +273,13 @@ def test_sign_word_mark_space_figure_issue_1032(text, lang, expected):
         ("x forty \u200b(two) y", "en", "x 40 \u200b(2) y"),
         ("x vingt \u200f(cinq) y", "fr", "x 20 \u200f(5) y"),
         ("x -\u200etwenty five y", "en", "x -\u200e25 y"),
+        # Between two leading marks, before a sign, before a zh mark
+        # (#1138, #1139, #1140).
+        ("x '\u200e'twenty five y", "en", "x '\u200e'25 y"),
+        ("x '\u200b'twenty five y", "en", "x '\u200b'25 y"),
+        ("x —\u200e—twenty five y", "en", "x —\u200e—25 y"),
+        ("x \u200e-\u200efive y", "en", "x \u200e-\u200e5 y"),
+        ("四十 \u200b.七", "zh", "40 \u200b.七"),
     ],
 )
 def test_leading_format_char_and_bidi_marks_issue_1000(text, lang, expected):

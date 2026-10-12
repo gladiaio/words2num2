@@ -606,6 +606,8 @@ fn trailing_punct(s: &str) -> &str {
 /// they go back after the sign of the figure, "-\u{200e}25", not lost
 /// (#1126).
 fn sign_format(first: &str, text: &str) -> String {
+    // Format characters before the sign went out with lead_format (#1139).
+    let first = first.trim_start_matches(is_format_char);
     let mut chars = first.chars();
     let (Some(sign), Some(c)) = (chars.next(), chars.next()) else { return text.to_string() };
     if !matches!(sign, '-' | '+' | '\u{2212}') || !is_format_char(c) || !text.starts_with(['-', '+', '\u{2212}']) {
@@ -3912,7 +3914,7 @@ fn words2num_sentence_walk(
         // Nor, in a script written without spaces, does a piece opening on a
         // glued mark ("，五" of "二十，五"): the mark would be lost (#1028).
         let starts = starts_run(&converter, &head, decimal_heads)
-            && !(unspaced_script(&resolved) && piece.starts_with(tokens::is_trailing_punct))
+            && !(unspaced_script(&resolved) && piece.trim_start_matches(is_format_char).starts_with(tokens::is_trailing_punct))
             && !(head_is_oh && !(en_cardinal && en_digit_run(&parts, i).is_some()));
         // kn "ನೂರ", he "שני", mn "дөчин": a number only with what follows, so it
         // opens a run only in front of another number word, and alone stays a word.
@@ -4098,7 +4100,7 @@ fn words2num_sentence_walk(
                 || opens_with_punct(tok)
                 // A piece the zh/ja/th segmenter left opening on a glued mark
                 // ("，五" of "二十，五"): the run never crosses the mark (#1028).
-                || (j > i && unspaced_script(&resolved) && tok.starts_with(tokens::is_trailing_punct))
+                || (j > i && unspaced_script(&resolved) && tok.trim_start_matches(is_format_char).starts_with(tokens::is_trailing_punct))
                 || tokens::is_punct_part(&clean)
                 // The raw part too: "\u{200b})" cleans to a bare format
                 // character, still a mark part (#1006).
