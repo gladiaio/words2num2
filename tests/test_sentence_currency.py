@@ -426,6 +426,8 @@ def test_mark_before_format_char_kept_after_amount(text, lang, expected):
         # a mark the walk reads past keeps the article a word (#1162).
         ("x ,a dollar and fifty cents y", "en", "x ,$1.50 y"),
         ("x ,une livre et vingt pence y", "fr", "x ,1,20 £ y"),
+        # Not after a dot: the walk never folds there (#1159 audit).
+        ("x ...a dollar and fifty cents y", "en", "x ...a dollar and 50 cents y"),
         ("x -a dollar and fifty cents y", "en", "x -a dollar and 50 cents y"),
         (
             "x (\u200ba dollar and fifty cents y",

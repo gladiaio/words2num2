@@ -1512,7 +1512,11 @@ fn pieces_for_walk_with(sentence: &str, lang: &str, subunits_only: bool, counts:
     // (",a dollar" -> ",1 dollar", #1161); any other mark leaves it as written.
     let lead_of = |t: &str| -> Option<String> {
         let lead: String = t.chars().take_while(|c| !c.is_alphanumeric()).collect();
-        let clause = lead.chars().all(|c| crate::w2n_sentence::is_format_char(c) || crate::w2n_sentence::is_clause_lead(c));
+        // Not a dot: the walk never folds after ".", "...", "．" (#1159 audit).
+        let clause = lead.chars().all(|c| {
+            crate::w2n_sentence::is_format_char(c)
+                || (crate::w2n_sentence::is_clause_lead(c) && c != '.' && !crate::w2n_sentence::folds_to_dots(c))
+        });
         clause.then_some(lead)
     };
     for (j, text) in renames.into_iter().filter(|_| !subunits_only) {
