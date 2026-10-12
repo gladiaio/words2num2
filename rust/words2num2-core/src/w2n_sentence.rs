@@ -542,7 +542,8 @@ fn continues_punct_led(
     for _ in 0..5 {
         let Some(p) = (0..k).rev().find(|&q| !blank(&parts[q])) else { break };
         let raw = &parts[p];
-        if raw.starts_with(|c: char| !c.is_alphanumeric()) {
+        // Format characters alone in front are no mark ("\u{200b}a").
+        if raw.trim_start_matches(is_format_char).starts_with(|c: char| !c.is_alphanumeric()) {
             found = Some(p);
             break;
         }
@@ -591,7 +592,33 @@ fn continues_punct_led(
         CURRENCY_FOLD.with(|c| {
             c.borrow().as_deref().is_some_and(|cur| {
                 let tail: String = after.iter().take(2).map(String::as_str).collect();
-                let Ok(walked) = words2num_sentence_walk(&format!("{}{}", joined, tail), lang, to, has_kwargs) else { return false };
+                // Through the currency pieces as the pass walks them, so the
+                // article-one before a unit is its count ("a dollar and
+                // fifty cents").
+                // With a mark the walk reads past ("-", "(\u{200b}") in
+                // front, so the pieces rewrite a word only as the pass itself
+                // does ("-a dollar" keeps its "a", #1162); the walk then reads
+                // the words without it.
+                // A mark the walk keeps the word behind (")a", "#a") needs
+                // none: that word stays as written either way.
+                // Probed with the run's own first word: "-fifty" reads as -50,
+                // "#fifty" and "\u{200b})fifty" stay as written (#1163).
+                let lead_raw = &raw[..raw.len() - core.len()];
+                let probe = format!("{}{}", lead_raw, run.split_whitespace().next().unwrap_or(""));
+                let read_past = !lead_raw.is_empty()
+                    && words2num_sentence_walk(&probe, lang, to, has_kwargs).is_ok_and(|w| w != probe);
+                let lead = if read_past { lead_raw } else { "" };
+                let text = format!("{}{}{}", lead, joined, tail);
+                let mut walked = String::new();
+                for (piece, walk) in crate::w2n_currency::pieces_for_walk(&text, cur, matches!(to, "cardinal" | "year" | "currency")) {
+                    let piece = if walked.is_empty() { piece.strip_prefix(lead).map(str::to_string).unwrap_or(piece) } else { piece };
+                    if !walk {
+                        walked.push_str(&piece);
+                        continue;
+                    }
+                    let Ok(w) = words2num_sentence_walk(&piece, lang, to, has_kwargs) else { return false };
+                    walked.push_str(&w);
+                }
                 let folded = crate::w2n_currency::fold_currency(&walked, cur);
                 // The walked words open with the figure: no word before it
                 // ("we paid 50 dollars", "it's 50 dollars" are no amount
@@ -649,6 +676,12 @@ fn trailing_punct(s: &str) -> &str {
     let kept = rstrip_punct(s);
     let kept = if BARE_FORMAT_KEPT.with(|c| c.get()) { kept.trim_end_matches(is_format_char) } else { kept };
     &s[kept.len()..]
+}
+
+/// A clause mark that a spaced language cuts off the front of a word
+/// (",deux", "!five"): the word after it reads as a number (#1041).
+pub(crate) fn is_clause_lead(c: char) -> bool {
+    tokens::is_leading_clause_mark(c)
 }
 
 /// A glued sign with format characters after it ("-\u{200e}twenty five"):

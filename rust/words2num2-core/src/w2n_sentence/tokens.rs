@@ -42,7 +42,7 @@ fn is_leading_punct(c: char) -> bool {
 /// and kept in a spaced language, so the number opens after it (#1041,
 /// #1044, #1049). Not in zh / ja / th, where a lone numeral after a mark
 /// stays as written (#1028, #1048).
-fn is_leading_clause_mark(c: char) -> bool {
+pub(crate) fn is_leading_clause_mark(c: char) -> bool {
     super::folded_mark(c) == Some(super::Mark::Terminal) || matches!(
         c,
         ',' | '.' | ';' | ':' | '!' | '?' | '।' | '॥' | '،' | '؛' | '؟' | '۔' | '։' | '።' | '፣' | '፤'
