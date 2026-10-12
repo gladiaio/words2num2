@@ -331,6 +331,26 @@ def test_leading_clause_mark_issue_1041(lang, text, expected):
 @pytest.mark.parametrize(
     "lang,text,expected",
     [
+        ("en", "x )two thousand twenty four y", "x )two thousand twenty four y"),
+        ("fr", "x )deux cents y", "x )deux cents y"),
+        ("es", "x )dos mil veinticuatro y", "x )dos mil veinticuatro y"),
+        (
+            "hr",
+            "x ]dvije tisuće dvadeset četiri y",
+            "x ]dvije tisuće dvadeset četiri y",
+        ),
+        # Two numbers stay two; the open bracket still reads (control).
+        ("en", ")twenty one twenty one", ")twenty one 21"),
+        ("en", "x (two thousand twenty four) y", "x (2024) y"),
+    ],
+)
+def test_closer_led_number_stays_whole_issue_1114(lang, text, expected):
+    assert words2num_sentence(text, lang=lang) == expected
+
+
+@pytest.mark.parametrize(
+    "lang,text,expected",
+    [
         ("zh", "二十．五", "20．五"),
         ("en", "x 5．5 y", "x 5．5 y"),
         ("ja", "x 五十︒ 二 y", "x 50︒ 2 y"),
