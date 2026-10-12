@@ -563,23 +563,32 @@ fn continues_punct_led(
         // number itself (ar "وخمسة"): zh "，第三" leaves the prefix 第 as
         // written, not a number (#1122).
         let core_number = std::cell::OnceCell::new();
-        let one_number = |text: &str| {
-            words2num_sentence_walk(text, lang, to, has_kwargs).is_ok_and(|w| {
-                let w = w.trim();
-                !w.contains(char::is_whitespace)
-                    && w.chars().any(|c| c.is_ascii_digit())
-                    && (!w.starts_with(char::is_alphabetic)
-                        || *core_number.get_or_init(|| {
-                            words2num_sentence_walk(core, lang, to, has_kwargs)
-                                .is_ok_and(|c| c.chars().any(|c| c.is_ascii_digit()))
-                        }))
-            })
+        let is_one = |w: &str| {
+            let w = w.trim();
+            !w.contains(char::is_whitespace)
+                && w.chars().any(|c| c.is_ascii_digit())
+                && (!w.starts_with(char::is_alphabetic)
+                    || *core_number.get_or_init(|| {
+                        words2num_sentence_walk(core, lang, to, has_kwargs)
+                            .is_ok_and(|c| c.chars().any(|c| c.is_ascii_digit()))
+                    }))
         };
+        let one_number = |text: &str| words2num_sentence_walk(text, lang, to, has_kwargs).is_ok_and(|w| is_one(&w));
         if core.is_empty() || has_trailing_mark(raw) || !out.ends_with(&parts[p..i].concat()) {
             return false;
         }
-        if one_number(&joined) {
+        let Ok(walked) = words2num_sentence_walk(&joined, lang, to, has_kwargs) else { return false };
+        if is_one(&walked) {
             return true;
+        }
+        // The look-ahead is only for a dictation cut short: every word so far
+        // a single digit or left a word ("5 2", "9 one"); anything else costs
+        // walks for nothing (#1137).
+        if !walked
+            .split_whitespace()
+            .all(|t| !t.chars().any(|c| c.is_ascii_digit()) || (t.len() == 1 && t.as_bytes()[0].is_ascii_digit()))
+        {
+            return false;
         }
         // Or with up to 4 words after the run: a digit string reads whole only
         // at three digits ("fife fife" is 5 5, "fife fife fife" 555, #1131).
@@ -596,6 +605,10 @@ fn continues_punct_led(
             ahead.push_str(t);
             if blank(t) {
                 continue;
+            }
+            // Only plain words: a mark-led one opens its own run.
+            if !t.starts_with(char::is_alphanumeric) {
+                break;
             }
             words += 1;
             if words > 4 || one_number(&ahead) {
