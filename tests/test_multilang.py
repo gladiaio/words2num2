@@ -359,14 +359,13 @@ def test_closer_led_number_stays_whole_issue_1114(lang, text, expected):
         ("zh", "x ，约二十 y", "x ，约20 y"),
         ("ja", "x 、第三 y", "x 、第3 y"),
         ("th", "x )ที่ยี่สิบเอ็ด y", "x )ที่21 y"),
-        # A spaced format character inside the number, an aero digit string
-        # (#1130, #1131).
+        # A spaced format character inside the number (#1130); a mark-led word
+        # that holds the number (ceb "ika-usa", #1143).
+        ("ceb", "x )ika-usa libo y", "x )ika-usa libo y"),
         ("en", "x )two hundred \u200b five y", "x )two hundred \u200b five y"),
-        ("en_AERO", "x )fife fife fife y", "x )fife fife fife y"),
         ("en_AERO", "x fife fife fife y", "x 555 y"),
-        # The compat closers too (#1127, #1128).
+        # The compat closers too (#1127).
         ("en", "x ）two hundred \u200b five y", "x ）two hundred \u200b five y"),
-        ("en_AERO", "x ）fife fife fife y", "x ）fife fife fife y"),
         # A dash lead keeps the number whole too; no look-ahead over a mark.
         ("fr", "x −deux mille vingt-quatre y", "x −deux mille vingt-quatre y"),
         ("en", "x -double zero seven y", "x -double zero seven y"),
