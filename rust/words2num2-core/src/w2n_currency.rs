@@ -1139,6 +1139,9 @@ pub fn fold_currency(text: &str, lang: &str) -> String {
         // num2words writes English amounts, #47).
         // Format characters after the comma do not end the pause (#1154).
         let comma = matches!(trailing.trim_end_matches(crate::w2n_sentence::is_format_char), "," | "，" | "、" | "､" | "၊" | "՝" | "،" | "﹐" | "﹑" | "︐" | "︑");
+        // The format characters after a pause comma ride after the amount
+        // when the subunit joins it: "dollars,\u{200b} fifty cents" (#1154).
+        let pause_fmt: String = if comma { trailing.chars().filter(|c| crate::w2n_sentence::is_format_char(*c)).collect() } else { String::new() };
         if (trailing.is_empty() || comma) && frac.is_none() && cur.decimals > 0 {
             if let Some(k) = next_word(&parts, m.end) {
                 let (kkey, _) = word_key(&parts[k].text);
@@ -1160,7 +1163,7 @@ pub fn fold_currency(text: &str, lang: &str) -> String {
                             frac = Some(minor);
                             consumed_end = sw.end;
                             trailing = sw.trailing;
-                            sub_invisible = format!("{}{}", sub_num.lead, sub_num.invisible);
+                            sub_invisible = format!("{}{}{}", pause_fmt, sub_num.lead, sub_num.invisible);
                         }
                     } else if let Some(minor) = minor.filter(|_| !comma) {
                         // "two euros fifty": bare subunit, only when nothing
@@ -1179,7 +1182,7 @@ pub fn fold_currency(text: &str, lang: &str) -> String {
                             frac = Some(minor);
                             consumed_end = s;
                             trailing = sub_num.trailing.clone();
-                            sub_invisible = format!("{}{}", sub_num.lead, sub_num.invisible);
+                            sub_invisible = format!("{}{}{}", pause_fmt, sub_num.lead, sub_num.invisible);
                         }
                     }
                 }
