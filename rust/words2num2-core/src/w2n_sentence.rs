@@ -542,11 +542,7 @@ fn continues_punct_led(
         let Some(p) = (0..k).rev().find(|&q| !blank(&parts[q])) else { break };
         let raw = &parts[p];
         if raw.starts_with(|c: char| !c.is_alphanumeric()) {
-            // A dash in front is a sign or a list bullet, not a closer: "code
-            // -one two three" keeps reading after it (#956).
-            if !raw.starts_with(['-', '\u{2010}', '\u{2011}', '\u{2012}', '\u{2013}', '\u{2014}', '\u{2015}', '\u{2212}', '\u{FF0D}']) {
-                found = Some(p);
-            }
+            found = Some(p);
             break;
         }
         if raw.chars().any(|c| c.is_ascii_digit()) || has_trailing_mark(raw.trim_end_matches(',')) {
@@ -587,6 +583,13 @@ fn continues_punct_led(
         }
         // Or with up to 4 words after the run: a digit string reads whole only
         // at three digits ("fife fife" is 5 5, "fife fife fife" 555, #1131).
+        // Not across a mark that ends the run ("one two. three"), nor after a
+        // dash, a sign or bullet ("code -one 2 3", #956).
+        if next.is_empty()
+            || raw.starts_with(['-', '\u{2010}', '\u{2011}', '\u{2012}', '\u{2013}', '\u{2014}', '\u{2015}', '\u{2212}', '\u{FF0D}'])
+        {
+            return false;
+        }
         let mut ahead = joined;
         let mut words = 0;
         for t in next {
@@ -3991,7 +3994,7 @@ fn words2num_sentence_walk(
         };
         if let Some((digits, end)) = digit_run {
             let run = parts[i..=end].concat();
-            if continues_punct_led(lang, to, has_kwargs, &parts, i, rstrip_punct(py_strip(&run)), &parts[end + 1..], &out) {
+            if continues_punct_led(lang, to, has_kwargs, &parts, i, rstrip_punct(py_strip(&run)), if has_trailing_mark(&parts[end]) { &[] } else { &parts[end + 1..] }, &out) {
                 out.push_str(&run);
                 i = end + 1;
                 continue;
@@ -4428,7 +4431,7 @@ fn words2num_sentence_walk(
             // twenty four" after ")two"): the run stays as written too, no
             // split value (#1112, #1114).
             let stripped_run = rstrip_punct(py_strip(&run)).to_string();
-            let punct_led_join = continues_punct_led(lang, to, has_kwargs, &parts, i, &stripped_run, &parts[best_end + 1..], &out);
+            let punct_led_join = continues_punct_led(lang, to, has_kwargs, &parts, i, &stripped_run, if has_trailing_mark(&parts[best_end]) { &[] } else { &parts[best_end + 1..] }, &out);
             let rendered = if punct_led_join {
                 None
             } else if best_ordinal {
