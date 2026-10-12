@@ -657,8 +657,10 @@ fn sign_format(first: &str, text: &str) -> String {
     let first = first.trim_start_matches(is_format_char);
     let mut chars = first.chars();
     let (Some(sign), Some(c)) = (chars.next(), chars.next()) else { return text.to_string() };
-    // The fullwidth and small forms too: "\u{ff0d}", "\u{fe63}" (#1083 audit).
-    if !matches!(sign, '-' | '+' | '\u{2212}' | '\u{FF0D}' | '\u{FE63}' | '\u{FF0B}' | '\u{FE62}') || !is_format_char(c) || !text.starts_with(['-', '+', '\u{2212}']) {
+    // The other forms read as a glued minus too: fullwidth, small,
+    // superscript, subscript, the hyphens and the figure dash (#1083 audit,
+    // #1158 audit). A glued plus is never absorbed into the figure.
+    if !matches!(sign, '-' | '+' | '\u{2010}'..='\u{2012}' | '\u{2212}' | '\u{207B}' | '\u{208B}' | '\u{FE58}' | '\u{FE63}' | '\u{FF0D}') || !is_format_char(c) || !text.starts_with(['-', '+', '\u{2212}']) {
         return text.to_string();
     }
     let fmt: String = first[sign.len_utf8()..].chars().take_while(|c| is_format_char(*c)).collect();
