@@ -626,7 +626,9 @@ pub(crate) fn is_format_char(c: char) -> bool {
 /// ("(five)", "«six»", "‘seven’"). Re-emitting the value would lose it, so the
 /// walker leaves such a piece as written.
 fn opens_with_punct(s: &str) -> bool {
-    s.chars().next().is_some_and(|c| {
+    // Format characters in front do not hide the mark: "\u{200e})five" is
+    // left as written like ")five" (#1147, #1148).
+    s.trim_start_matches(is_format_char).chars().next().is_some_and(|c| {
         crate::is_clause_punctuation(c)
             || matches!(c, '\u{2018}' | '\u{201B}' | '`' | '_')
             // A compat closer or connector, like its ASCII form: "x ）fifty y"
@@ -804,7 +806,9 @@ fn ends_with_close_quote(s: &str) -> bool {
             .trim_end_matches(is_format_char)
             .chars()
             .next_back()
-            .is_some_and(char::is_alphanumeric)
+            // A combining mark or the tsheg ends a word too: ml "ഇരുപത്\""
+            // (virama), bo "གཅིག་\"" (#1150).
+            .is_some_and(|c| c.is_alphanumeric() || unicode_normalization::char::is_combining_mark(c) || matches!(c, '\u{0F0B}' | '\u{0F0C}'))
 }
 
 /// More sentence and clause marks that end a run and stay in the output:
@@ -4634,6 +4638,8 @@ fn words2num_sentence_walk(
                 ordinal_rendering(&converter, &resolved, &parts, i, best_end, &v)
             } else if plain
                 && !best_ordinal
+                // Not across a quote that ends the run: "сто\" четвърти" (#1149).
+                && !ends_run_mark(&parts[best_end])
                 && fraction_follows(
                     &converter,
                     &resolved,
