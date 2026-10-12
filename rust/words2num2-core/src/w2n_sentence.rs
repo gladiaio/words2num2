@@ -639,10 +639,16 @@ fn ends_with_terminal_punct(s: &str) -> bool {
 
 /// The word closes a straight quote ("\"twenty\"", "twenty'"): the run
 /// ends there, as at a closing bracket, so the quote is not lost inside a
-/// longer number ("x \"twenty\" one y" is "x \"20\" 1 y", #1120).
+/// longer number ("x \"twenty\" three y" is "x \"20\" 3 y", #1120). A
+/// format character before the quote ("twenty\u{200b}\"") does not hide it.
 fn ends_with_close_quote(s: &str) -> bool {
     let t = s.trim_end_matches(is_format_char);
-    t.ends_with(['"', '\'']) && t.trim_end_matches(['"', '\'']).chars().next_back().is_some_and(char::is_alphanumeric)
+    t.ends_with(['"', '\''])
+        && t.trim_end_matches(['"', '\''])
+            .trim_end_matches(is_format_char)
+            .chars()
+            .next_back()
+            .is_some_and(char::is_alphanumeric)
 }
 
 /// More sentence and clause marks that end a run and stay in the output:
