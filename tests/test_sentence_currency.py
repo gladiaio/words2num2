@@ -357,3 +357,15 @@ def test_one_word_count_after_a_glued_mark_issue_1075():
 )
 def test_fold_keeps_cjk_trailing_mark_issue_1067(text, lang, expected):
     assert words2num_sentence(text, lang=lang, currency=True) == expected
+
+
+@pytest.mark.parametrize(
+    "text, lang, expected",
+    [
+        ("x ）fifty dollars y", "en", "x ）$50 y"),
+        ("x twelve dollars ﹚fifty cents y", "en", "x $12.50﹚ y"),
+        ("x ）cinquante euros y", "fr", "x ）50 € y"),
+    ],
+)
+def test_fold_after_a_compat_closer_issue_1102(text, lang, expected):
+    assert words2num_sentence(text, lang=lang, currency=True) == expected

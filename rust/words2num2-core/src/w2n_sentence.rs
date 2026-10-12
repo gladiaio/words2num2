@@ -501,7 +501,6 @@ fn rstrip_punct(s: &str) -> &str {
             || matches!(c, '\u{FF0C}' | '\u{FF01}' | '\u{FF1F}' | '\u{FF1B}' | '\u{FF1A}')
             || more_terminal(c)
             || folded_mark(c).is_some()
-
             || matches!(c, '\u{FF02}' | '\u{FF07}' | '\u{FF63}' | '\u{FE5A}' | '\u{FE5C}' | '\u{FE5E}' | '\u{FF08}') // ＂ ＇ ｣ ﹚ ﹜ ﹞ （
             || crate::is_clause_punctuation(c)
     };

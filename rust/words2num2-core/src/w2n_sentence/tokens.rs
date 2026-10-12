@@ -67,7 +67,6 @@ fn is_legacy_trailing(c: char) -> bool {
 pub(super) fn is_trailing_punct(c: char) -> bool {
     is_legacy_trailing(c)
         || super::folded_mark(c).is_some()
-
         || matches!(
             c,
             ')' | ']' | '}' | '%' | '…' | '»' | '«' | '›' | '‹' | '“' | '”' | '‘' | '’' | '„'
