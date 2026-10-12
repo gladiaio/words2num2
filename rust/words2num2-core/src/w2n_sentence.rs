@@ -682,6 +682,13 @@ fn ends_with_terminal_punct(s: &str) -> bool {
     ) || s.trim_end_matches(is_format_char).chars().next_back().is_some_and(more_terminal)
 }
 
+/// The word ends a run: a terminal mark or a closing straight quote. The
+/// look-ahead tests use it too, so a run neither reads nor joins across
+/// the quote ("x \"iyirmi\" birinci y" is "x \"20\" 1-ci y", #1133).
+fn ends_run_mark(s: &str) -> bool {
+    ends_with_terminal_punct(s) || ends_with_close_quote(s)
+}
+
 /// The kind of punctuation a compatibility form (fullwidth, small, vertical,
 /// superscript, Greek ";") stands for, read from its NFKC fold: "︕" is a
 /// "!", "⁾" a ")", "﹙" a "(" (#1094, #1096, #1099).
@@ -3065,7 +3072,7 @@ fn split_compound_ordinal(
 ) -> Option<usize> {
     let Converter::Table(lang) = converter else { return None };
     let Some(W2nValue::Int(c)) = value else { return None };
-    if ends_with_terminal_punct(&parts[end]) || *c <= BigInt::from(0) {
+    if ends_run_mark(&parts[end]) || *c <= BigInt::from(0) {
         return None;
     }
     let k = (end + 1..parts.len()).find(|&k| !py_str_isspace(&parts[k]))?;
@@ -3978,7 +3985,7 @@ fn words2num_sentence_walk(
         // kn "ನೂರ", he "שני", mn "дөчин": a number only with what follows, so it
         // opens a run only in front of another number word, and alone stays a word.
         let part_head = !starts
-            && !ends_with_terminal_punct(piece)
+            && !ends_run_mark(piece)
             && !includable.contains(&head.as_str())
             && converter.is_number_part(&head)
             && next_word(&parts, i).is_some_and(|t| {
@@ -4012,14 +4019,14 @@ fn words2num_sentence_walk(
                 && !converter.is_ordinal_word(t)
                 && converter.is_number_word(t)
         });
-        let next_starts_run = !ends_with_terminal_punct(piece)
+        let next_starts_run = !ends_run_mark(piece)
             && next.as_deref().is_some_and(|t| starts_run(&converter, t, decimal_heads));
         // A run must START with a real number word, or with an apocope
         // ("un" in es "un mil") followed by one, or — in English — with
         // "a"/"an" in front of a scale word ("a hundred dollars").
         let apocope_head = head_is_apocope && next_starts_run;
         let article_head = (head_is_article
-            && !ends_with_terminal_punct(piece)
+            && !ends_run_mark(piece)
             && next
                 .as_deref()
                 .is_some_and(crate::w2n_lang_en::is_scale_word)
@@ -4030,7 +4037,7 @@ fn words2num_sentence_walk(
             || (article_number
                 && !head_is_apocope
                 && !matches!(converter, Converter::En)
-                && !ends_with_terminal_punct(piece)
+                && !ends_run_mark(piece)
                 && next.as_deref().is_some_and(|t| is_scale_word(&converter, t, 100)));
         // "vingt pour cent": "cent" after "pour" is the percent sign, not 100.
         let percent_tail = head_is_percent
@@ -4097,7 +4104,7 @@ fn words2num_sentence_walk(
             let mut k = i;
             while k < n && (py_str_isspace(&parts[k]) || is_candidate(&converter, &rstrip_punct(&parts[k]).to_lowercase(), includable)) {
                 k += 1;
-                if ends_with_terminal_punct(&parts[k - 1]) {
+                if ends_run_mark(&parts[k - 1]) {
                     break;
                 }
             }
