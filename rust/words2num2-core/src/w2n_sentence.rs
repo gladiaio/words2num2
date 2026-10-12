@@ -4608,8 +4608,29 @@ fn words2num_sentence_walk(
         if en_year {
             // "the nineteen nineties", "the twenty twenties": the decade of that
             // century, one token ("1990s"); the cardinal walk keeps it in words.
+            // A spoken century, 16 to 20 ("eighteen eighties", "twenty
+            // twenties"), no ordinal and no mark before the decade word:
+            // "forty twenties" are banknotes, "nineteen, nineties" two words
+            // (#905, #927).
             let century = match &best_value {
-                Some(W2nValue::Int(c)) => i64::try_from(c).ok().filter(|c| (10..=99).contains(c)),
+                Some(W2nValue::Int(c))
+                    if !best_ordinal
+                        && trailing_punct(&parts[best_end]).trim_matches(is_format_char).is_empty()
+                        && crate::w2n_lang_en::ordinal_cardinal(&rstrip_punct(&parts[best_end]).to_lowercase()).is_none() =>
+                {
+                    // 10..=21 after "the", "early", "mid", "late" ("the fourteen
+                    // nineties"); 16..=20 always (#1172).
+                    // Past format characters and an opening mark ("the (fifteen
+                    // nineties)", "the\u{200e} fifteen nineties").
+                    let cue = parts[..i]
+                        .iter()
+                        .rev()
+                        .map(|t| t.trim_matches(is_format_char))
+                        .find(|t| !t.is_empty() && !py_str_isspace(t) && t.chars().any(char::is_alphanumeric))
+                        .map(|t| rstrip_punct(t.trim_start_matches(|c: char| !c.is_alphanumeric())).to_lowercase());
+                    let cued = cue.is_some_and(|p| matches!(p.as_str(), "the" | "early" | "mid" | "late" | "mid-"));
+                    i64::try_from(c).ok().filter(|c| (16..=20).contains(c) || (cued && (10..=21).contains(c)))
+                }
                 _ => None,
             };
             let decade = next_word_index(&parts, best_end)
@@ -4628,7 +4649,23 @@ fn words2num_sentence_walk(
             // The single-token `words2num(..., to="year")` still reads "nine
             // eleven" as 911, the way num2words2 spells 100..999 (#111).
             let three_digit = matches!(&best_value, Some(W2nValue::Int(v)) if (BigInt::from(100)..BigInt::from(1000)).contains(v));
-            if three_digit && best_end > i && crate::w2n_lang_en::unit_value(&head).is_some_and(|u| (1..=9).contains(&u)) {
+            // Not "nine hundred", "seven hundred fifty", "one oh one": the
+            // scale word or the "oh" digit makes it a year, no time (#903,
+            // #1173).
+            // "oh" only in an isolated "<digit> oh <digit>": inside a longer
+            // dictated string ("five five five oh one two") it groups nothing
+            // (#1171 audit).
+            let digit = |w: Option<String>| {
+                w.is_some_and(|w| crate::w2n_lang_en::unit_value(w.trim_matches(is_format_char)).is_some_and(|u| u <= 9) || w == "zero" || w == "oh")
+            };
+            let oh_alone = next_word(&parts, i).is_some_and(|w| {
+                let w = w.trim_matches(is_format_char);
+                w == "oh" || w.starts_with("oh-")
+            }) && !digit(prev_word(&parts, i))
+                && !digit(next_word(&parts, best_end));
+            let hundred = oh_alone
+                || next_word(&parts, i).is_some_and(|w| w.trim_matches(is_format_char) == "hundred");
+            if three_digit && best_end > i && !hundred && crate::w2n_lang_en::unit_value(&head).is_some_and(|u| (1..=9).contains(&u)) {
                 if let Ok(v) = converter.to_cardinal(&head) {
                     best_value = Some(v);
                     best_end = i;
