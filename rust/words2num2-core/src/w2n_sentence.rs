@@ -559,7 +559,14 @@ fn continues_punct_led(
             && !has_trailing_mark(raw)
             && out.ends_with(&parts[p..i].concat())
             && words2num_sentence_walk(&joined, lang, to, has_kwargs)
-                .is_ok_and(|w| !w.trim().contains(char::is_whitespace) && w.chars().any(|c| c.is_ascii_digit()))
+                .is_ok_and(|w| {
+                    let w = w.trim();
+                    // The number opens at the mark-led word: zh "，第三" leaves
+                    // the prefix 第 as written, not a number (#1122).
+                    !w.contains(char::is_whitespace)
+                        && w.chars().any(|c| c.is_ascii_digit())
+                        && !w.starts_with(char::is_alphabetic)
+                })
     })
 }
 

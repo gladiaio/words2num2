@@ -351,6 +351,20 @@ def test_closer_led_number_stays_whole_issue_1114(lang, text, expected):
     assert words2num_sentence(text, lang=lang) == expected
 
 
+@pytest.mark.parametrize(
+    "lang,text,expected",
+    [
+        ("zh", "x )第二十一 y", "x )第21 y"),
+        ("zh", "比赛结果 ，第三名", "比赛结果 ，第3名"),
+        ("zh", "x ，约二十 y", "x ，约20 y"),
+        ("ja", "x 、第三 y", "x 、第3 y"),
+        ("th", "x )ที่ยี่สิบเอ็ด y", "x )ที่21 y"),
+    ],
+)
+def test_mark_led_prefix_still_reads_issue_1122(lang, text, expected):
+    assert words2num_sentence(text, lang=lang) == expected
+
+
 def test_closer_led_ordinal_stays_whole_issue_1114():
     # was "x )twenty 1 y"
     assert words2num_sentence("x )twenty first y", to="ordinal") == "x )twenty first y"
