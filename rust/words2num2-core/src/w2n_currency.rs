@@ -1505,10 +1505,20 @@ fn pieces_for_walk_with(sentence: &str, lang: &str, subunits_only: bool, counts:
             }
         }
     }
+    // A word a mark opens ("(one", ")a", "«duas") is not rewritten: the
+    // rewrite would drop the mark; it reads as any number word after that
+    // mark does.
+    let lead_mark = |t: &str| t.trim_start_matches(crate::w2n_sentence::is_format_char).starts_with(|c: char| !c.is_alphanumeric());
     for (j, text) in renames.into_iter().filter(|_| !subunits_only) {
+        if lead_mark(&parts[j].text) {
+            continue;
+        }
         parts[j].text = text;
     }
     for (j, text) in count_renames {
+        if lead_mark(&parts[j].text) {
+            continue;
+        }
         let trailing = word_key(&parts[j].text).1;
         parts[j].text = format!("{text}{trailing}");
     }

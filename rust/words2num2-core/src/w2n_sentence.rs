@@ -591,7 +591,19 @@ fn continues_punct_led(
         CURRENCY_FOLD.with(|c| {
             c.borrow().as_deref().is_some_and(|cur| {
                 let tail: String = after.iter().take(2).map(String::as_str).collect();
-                let Ok(walked) = words2num_sentence_walk(&format!("{}{}", joined, tail), lang, to, has_kwargs) else { return false };
+                // Through the currency pieces as the pass walks them, so the
+                // article-one before a unit is its count ("a dollar and
+                // fifty cents").
+                let text = format!("{}{}", joined, tail);
+                let mut walked = String::new();
+                for (piece, walk) in crate::w2n_currency::pieces_for_walk(&text, cur, matches!(to, "cardinal" | "year" | "currency")) {
+                    if !walk {
+                        walked.push_str(&piece);
+                        continue;
+                    }
+                    let Ok(w) = words2num_sentence_walk(&piece, lang, to, has_kwargs) else { return false };
+                    walked.push_str(&w);
+                }
                 let folded = crate::w2n_currency::fold_currency(&walked, cur);
                 // The walked words open with the figure: no word before it
                 // ("we paid 50 dollars", "it's 50 dollars" are no amount

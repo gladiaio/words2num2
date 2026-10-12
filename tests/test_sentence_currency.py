@@ -412,3 +412,21 @@ def test_closer_led_amount_keeps_its_subunit_issue_1123(text, lang, expected):
 def test_mark_before_format_char_kept_after_amount(text, lang, expected):
     """#1083 audit: a mark then a format character after the unit was lost."""
     assert words2num_sentence(text, lang=lang, currency=True) == expected
+
+
+@pytest.mark.parametrize(
+    "text, lang, expected",
+    [
+        ("x )a dollar and fifty cents y", "en", "x )a dollar and fifty cents y"),
+        ("x )one dollar y", "en", "x )one dollar y"),
+        ("x (one dollar and fifty cents y", "en", "x (1 dollar and 50 cents y"),
+        ("x )un dollar y", "fr", "x )un dollar y"),
+        ("x (duas libras y", "pt", "x (2 libras y"),
+        # Unchanged without a mark.
+        ("x a dollar and fifty cents y", "en", "x $1.50 y"),
+        ("x duas libras y", "pt", "x 2 £ y"),
+    ],
+)
+def test_count_rewrite_keeps_a_leading_mark(text, lang, expected):
+    """#1156 audit: the article / count / feminine rewrite dropped the mark."""
+    assert words2num_sentence(text, lang=lang, currency=True) == expected
