@@ -1255,9 +1255,16 @@ fn article_homograph(lang: &str, name: &str) -> bool {
 /// words, then a subunit name ("dollar | and twenty cents", "livre | vingt
 /// pence"). What makes "a dollar" or "une livre" an amount, not an article
 /// before a word.
-fn subunit_follows(lang: &str, conns: &[&str], keys: &[String], named: &[Option<Match>], words: &[usize], v: usize) -> bool {
+fn subunit_follows(lang: &str, conns: &[&str], keys: &[String], named: &[Option<Match>], words: &[usize], parts: &[Part], v: usize) -> bool {
     // After the whole unit name: "a US dollar and twenty cents" (#929).
     let end = named[v].as_ref().map_or(v, |m| words.iter().position(|&j| j == m.end).unwrap_or(v));
+    // Not across a sentence mark after the unit: the fold never joins there
+    // ("a pound sterling. And twenty pence", #1170); a pause comma does.
+    let unit_mark = word_key(&parts[words[end]].text).1;
+    let unit_mark = unit_mark.trim_end_matches(crate::w2n_sentence::is_format_char);
+    if !matches!(unit_mark, "" | "," | "，" | "、" | "､" | "﹐" | "﹑" | "︐" | "︑" | "،" | "၊" | "՝") {
+        return false;
+    }
     let mut x = end + 1;
     if keys.get(x).is_some_and(|k| conns.contains(&k.as_str())) {
         x += 1;
@@ -1266,9 +1273,10 @@ fn subunit_follows(lang: &str, conns: &[&str], keys: &[String], named: &[Option<
     while x < keys.len() && x - first < 4 && crate::token_may_be_number(lang, &keys[x]) {
         x += 1;
     }
-    // A subunit amount, 1 to 99: "a dollar and two hundred cents" is no
-    // dollar and cents, the article stays a word (#930).
-    let amount = matches!(crate::lookup_norm(lang, &keys[first..x].join(" "), false, &[]), Ok(Some(n)) if (1..100).contains(&n));
+    // A subunit amount, 0 to 99: "a dollar and two hundred cents" is no
+    // dollar and cents, the article stays a word (#930); zero is the
+    // renderer's own "a dollar zero cents" (#1166).
+    let amount = matches!(crate::lookup_norm(lang, &keys[first..x].join(" "), false, &[]), Ok(Some(n)) if (0..100).contains(&n));
     x > first && amount && named.get(x).is_some_and(|m| m.as_ref().is_some_and(|m| m.word.sub))
 }
 
@@ -1485,12 +1493,21 @@ fn pieces_for_walk_with(sentence: &str, lang: &str, subunits_only: bool, counts:
         };
         // "a dollar and twenty cents", "une livre et vingt pence": the subunit
         // makes it money, whatever the article or the unit's other reading.
-        let confirmed = |v: usize| is_unit(v) && subunit_follows(base, conns, &keys, &named, &words, v);
+        let confirmed = |v: usize| is_unit(v) && subunit_follows(lang, conns, &keys, &named, &words, &parts, v);
         // "half a dollar", "twice a dollar", "a quarter of a dollar": a
         // share of one unit, not the amount 1 (#906).
+        // Only right before it, no mark between ("half, a dollar …", #1167);
+        // any fraction or multiple ("three quarters of", "a fifth of",
+        // "double", #1168).
+        let bare = |v: usize| word_key(&parts[words[v]].text).1.is_empty();
+        let fraction = |k: &str| {
+            matches!(k, "quarter" | "quarters" | "third" | "thirds" | "half" | "halves" | "fraction" | "fractions" | "part" | "parts" | "percent")
+                || ((k.ends_with("th") || k.ends_with("ths")) && matches!(crate::lookup_norm(base, k.trim_end_matches('s'), true, &[]), Ok(Some(_))))
+        };
         let share = w > 0
-            && (matches!(keys[w - 1].as_str(), "half" | "twice" | "thrice")
-                || (keys[w - 1] == "of" && w > 1 && matches!(keys[w - 2].as_str(), "quarter" | "third" | "half" | "fraction" | "part")));
+            && bare(w - 1)
+            && (matches!(keys[w - 1].as_str(), "half" | "twice" | "thrice" | "double" | "triple")
+                || (keys[w - 1] == "of" && w > 1 && bare(w - 2) && fraction(&keys[w - 2])));
         let article_unit = w + 1 < words.len()
             && ((walker_article(base, &keys[w]) && starts_unit(w + 1))
                 || (article_one(base, &keys[w]) && !share && confirmed(w + 1)));

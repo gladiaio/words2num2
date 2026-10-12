@@ -469,6 +469,19 @@ def test_count_rewrite_keeps_a_leading_mark(text, lang, expected):
         # Only a 1-99 subunit count confirms the article (#930).
         ("a dollar and two hundred cents", "en", "a dollar and 200 cents"),
         ("a dollar and twenty cents", "en", "$1.20"),
+        # Zero cents, regional tens, a mark between, more shares, a
+        # sentence break (#1166-#1170).
+        ("a dollar zero cents", "en", "$1.00"),
+        ("une livre et septante-deux pence", "fr_CH", "1,72 £"),
+        ("he owes me half, a dollar and twenty cents", "en", "he owes me half, $1.20"),
+        (
+            "three quarters of a dollar and five cents",
+            "en",
+            "three quarters of a dollar and 5 cents",
+        ),
+        ("double a dollar and fifty cents", "en", "double a dollar and 50 cents"),
+        ("a month of a dollar and five cents", "en", "a month of $1.05"),
+        ("a pound sterling. And twenty pence", "en", "a pound sterling. And 20 pence"),
     ],
 )
 def test_article_one_counts_only_before_a_subunit_amount(text, lang, expected):
