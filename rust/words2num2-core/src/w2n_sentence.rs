@@ -7406,6 +7406,8 @@ mod script_mark_tests {
         // ‼ ‥ ⁇ ⁈ ⁉ ｡ ､ ﹗ ․ ։ ՝ ፧ end the run and stay (#1080 audit).
         assert_eq!(s("x fifty\u{203C} two y", "en"), "x 50\u{203C} 2 y");
         assert_eq!(s("x fifty\u{FF61} y", "en"), "x 50\u{FF61} y");
+        let c = |t: &str| super::words2num_sentence_opts(t, "en", "cardinal", false, true).unwrap();
+        assert_eq!(c("x five dollars fifty\u{203C} y"), "x $5.50\u{203C} y");
         assert_eq!(s("\u{4E8C}\u{5341}\u{FF61}\u{4E94}", "zh"), "20\u{FF61}\u{4E94}");
         // Unchanged without the mark.
         assert_eq!(s("တစ်ရာ ငါး", "my"), "105");
