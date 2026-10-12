@@ -380,6 +380,17 @@ def test_fold_keeps_cjk_trailing_mark_issue_1067(text, lang, expected):
             "x )it costs $25.50 y",
         ),
         ("x )wij betaalden vijftig euro y", "nl", "x )wij betaalden € 50 y"),
+        # A fullwidth / ideographic pause comma, as "," (#1156 audit).
+        (
+            "x )twelve dollars， fifty cents y",
+            "en",
+            "x )twelve dollars， fifty cents y",
+        ),
+        (
+            "x )douze euros， cinquante centimes y",
+            "fr",
+            "x )douze euros， cinquante centimes y",
+        ),
         ("x )it's fifty dollars y", "en", "x )it's $50 y"),
         ("x )c'est vingt euros y", "fr", "x )c'est 20 € y"),
         (
