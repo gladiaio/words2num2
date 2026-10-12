@@ -574,8 +574,10 @@ fn has_trailing_mark(s: &str) -> bool {
 /// An invisible format character (ZWSP, ZWNJ, ZWJ, word joiner, BOM, soft
 /// hyphen): it rides with the punctuation around it, so "twenty,\u{200b} one"
 /// still ends its number at the comma and keeps the ZWSP (#870).
+/// The bidi marks LRM, RLM and ALM, common after punctuation in ar / fa /
+/// he text, count as such too (#1000).
 pub(crate) fn is_format_char(c: char) -> bool {
-    matches!(c, '\u{200B}'..='\u{200D}' | '\u{2060}' | '\u{FEFF}' | '\u{00AD}')
+    matches!(c, '\u{200B}'..='\u{200F}' | '\u{2060}' | '\u{FEFF}' | '\u{00AD}' | '\u{061C}')
 }
 
 /// The piece opens with a bracket, quote or other mark `normalize` drops
@@ -603,6 +605,44 @@ fn trailing_punct(s: &str) -> &str {
     let kept = rstrip_punct(s);
     let kept = if BARE_FORMAT_KEPT.with(|c| c.get()) { kept.trim_end_matches(is_format_char) } else { kept };
     &s[kept.len()..]
+}
+
+/// A glued sign with format characters after it ("-\u{200e}twenty five"):
+/// they go back after the sign of the figure, "-\u{200e}25", not lost
+/// (#1126).
+fn sign_format(first: &str, text: &str) -> String {
+    // Format characters before the sign went out with lead_format (#1139).
+    let first = first.trim_start_matches(is_format_char);
+    let mut chars = first.chars();
+    let (Some(sign), Some(c)) = (chars.next(), chars.next()) else { return text.to_string() };
+    if !matches!(sign, '-' | '+' | '\u{2212}') || !is_format_char(c) || !text.starts_with(['-', '+', '\u{2212}']) {
+        return text.to_string();
+    }
+    let fmt: String = first[sign.len_utf8()..].chars().take_while(|c| is_format_char(*c)).collect();
+    let k = text.chars().next().map_or(0, char::len_utf8);
+    format!("{}{}{}", &text[..k], fmt, &text[k..])
+}
+
+/// The format characters before a run's first word, written back before its
+/// value: "x \u{200b}five y" is "x \u{200b}5 y" (#1000). Not before a date or
+/// phone pass, as for those after a value (#1020).
+fn lead_format(first: &str) -> String {
+    if BARE_FORMAT_KEPT.with(|c| c.get()) {
+        first.chars().take_while(|c| is_format_char(*c)).collect()
+    } else {
+        String::new()
+    }
+}
+
+thread_local! {
+    /// The aero (spelling-alphabet) variants: a format-only token between two
+    /// digit words ends a dictation there, as their digit words concatenate
+    /// (#1089, #1092). Elsewhere a phone number reads across it (#1083 audit).
+    static AERO_GAPS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+fn aero_gaps() -> bool {
+    AERO_GAPS.with(|c| c.get())
 }
 
 thread_local! {
@@ -2198,7 +2238,8 @@ fn comma_after_scale(converter: &Converter, tok: &str) -> Option<BigInt> {
     if trailing_mark(tok) != "," {
         return None;
     }
-    let clean = rstrip_punct(tok).to_lowercase().replace('-', " ");
+    // "\u{200b}thousand,": a format character is no part of the word (#1121).
+    let clean: String = rstrip_punct(tok).to_lowercase().replace('-', " ").chars().filter(|c| !is_format_char(*c)).collect();
     let last = *py_split_whitespace(&clean).last()?;
     let words = scale_comma_words(converter.n2w_key());
     if words.is_empty() {
@@ -2262,6 +2303,11 @@ fn en_number_words(parts: &[String], i: usize) -> Vec<EnWord> {
         if py_str_isspace(tok) {
             j += 1;
             continue;
+        }
+        // A token of format characters alone is no digit word: "fife \u{200b}
+        // seven" is 5, then 7 (#1089, #1092).
+        if aero_gaps() && tok.chars().all(is_format_char) {
+            break;
         }
         // A dash at either end is a sign or punctuation, no hyphen between two
         // words: "-four five six" is no 456. A trailing one ends the run and
@@ -2414,6 +2460,9 @@ fn table_digit_run(
         if py_str_isspace(tok) {
             j += 1;
             continue;
+        }
+        if aero_gaps() && tok.chars().all(is_format_char) && j > 0 && py_str_isspace(&parts[j - 1]) {
+            break; // a spaced format-only token ends a dictation (#1089)
         }
         let clean = rstrip_punct(tok).to_lowercase();
         // "cinq 5": a token in figures is a literal, not a digit word (#68).
@@ -3844,6 +3893,7 @@ fn words2num_sentence_walk(
     has_kwargs: bool,
 ) -> Result<String, W2nError> {
     let resolved = resolve_lang(lang)?;
+    AERO_GAPS.with(|c| c.set(resolved.to_lowercase().contains("aero")));
     let fmt_key = crate::w2n_formats::format_key(lang, &resolved);
     let converter = converter_for(&resolved);
     let postfix_scales = matches!(converter, Converter::Table(l) if crate::has_postfix_scales(l));
@@ -3930,7 +3980,7 @@ fn words2num_sentence_walk(
         // Nor, in a script written without spaces, does a piece opening on a
         // glued mark ("，五" of "二十，五"): the mark would be lost (#1028).
         let starts = starts_run(&converter, &head, decimal_heads)
-            && !(unspaced_script(&resolved) && piece.starts_with(tokens::is_trailing_punct))
+            && !(unspaced_script(&resolved) && piece.trim_start_matches(is_format_char).starts_with(tokens::is_trailing_punct))
             && !(head_is_oh && !(en_cardinal && en_digit_run(&parts, i).is_some()));
         // kn "ನೂರ", he "שני", mn "дөчин": a number only with what follows, so it
         // opens a run only in front of another number word, and alone stays a word.
@@ -4034,6 +4084,7 @@ fn words2num_sentence_walk(
                 continue;
             }
             out.push_str(sep_before(i));
+            out.push_str(&lead_format(&parts[i]));
             out.push_str(&digits);
             out.push_str(if en_digits { run_tail(&run) } else { trailing_punct(&run) });
             out.push_str(sep_after(end));
@@ -4067,6 +4118,7 @@ fn words2num_sentence_walk(
         let mut best_value: Option<W2nValue> = None;
         let mut best_end = i;
         let mut best_ordinal = false;
+        let mut gap_ended = false;
         // The spoken decimal separator of a table-language decimal run.
         let mut best_sep: Option<char> = None;
         let mut j = i;
@@ -4086,11 +4138,35 @@ fn words2num_sentence_walk(
                 continue;
             }
             let clean = rstrip_punct(tok).to_lowercase();
+            // A format-only token between two single-digit words ends a
+            // dictation: "fife \u{200b} seven" is 5, then 7 (#1089, #1092).
+            let digit_word = |w: Option<String>| {
+                w.is_some_and(|w| matches!(converter.to_cardinal(&w), Ok(W2nValue::Int(v)) if v >= BigInt::from(0) && v <= BigInt::from(9)))
+            };
+            // Only inside a pure dictation: every word so far a single digit,
+            // so a compound or a decimal ("atus ida \u{200b} lima", "three
+            // point one \u{200b} four") is never split (#1100).
+            let dictation_gap = j > i
+                && aero_gaps()
+                && tok.chars().all(is_format_char)
+                && py_str_isspace(&parts[j - 1])
+                && parts.get(j + 1).is_some_and(|t| py_str_isspace(t))
+                && parts[i..j]
+                    .iter()
+                    .filter(|t| !py_str_isspace(t))
+                    .all(|t| digit_word(Some(rstrip_punct(t).to_lowercase())))
+                && digit_word(next_word(&parts, j));
+            if dictation_gap {
+                // The digit before the gap is a digit, no article: "one
+                // \u{200b} two" is "1 \u{200b} 2" (#1101).
+                gap_ended = true;
+            }
             if clean.is_empty()
+                || dictation_gap
                 || opens_with_punct(tok)
                 // A piece the zh/ja/th segmenter left opening on a glued mark
                 // ("，五" of "二十，五"): the run never crosses the mark (#1028).
-                || (j > i && unspaced_script(&resolved) && tok.starts_with(tokens::is_trailing_punct))
+                || (j > i && unspaced_script(&resolved) && tok.trim_start_matches(is_format_char).starts_with(tokens::is_trailing_punct))
                 || tokens::is_punct_part(&clean)
                 // The raw part too: "\u{200b})" cleans to a bare format
                 // character, still a mark part (#1006).
@@ -4175,8 +4251,11 @@ fn words2num_sentence_walk(
                 // cs "tři sta": "sta" is also an inflected ordinal ("stá"), but
                 // the run reads as an ordinal only if its ordinal reading agrees.
                 Ok(v) => {
+                    // Format characters are no part of the word: "\u{200b}third" is
+                    // an ordinal word (#1090, #1091).
+                    let bare: String = clean.chars().filter(|c| !is_format_char(*c)).collect();
                     let ordinal = plain
-                        && converter.is_ordinal_word(&clean)
+                        && converter.is_ordinal_word(&bare)
                         && (matches!(converter, Converter::En)
                             || converter.to_ordinal(&stripped).is_ok_and(|o| o == v));
                     Some((v, ordinal))
@@ -4240,8 +4319,22 @@ fn words2num_sentence_walk(
                 // a half", not "1 half"; "five point" keeps its "point".
                 // fi "viisi kymmentä kuusi kymmentä": the "kuusi" a suffix
                 // morpheme follows is its unit, no end of this run (#988).
+                // Nor on a part of format characters alone glued to the next
+                // word (a zh/ja/th segmenter piece, "二十 \u{200e}二十"): the
+                // run would swallow the space before it (#1083 audit). Nor on
+                // one after a word with a mark ("\"five\" \u{200b}"): the mark
+                // would be lost (#1115, #1117).
                 Some((v, ordinal))
                     if candidate_is_number(&converter, &clean, includable)
+                        && !(tok.chars().all(is_format_char)
+                            && (parts.get(j + 1).is_some_and(|t| !py_str_isspace(t))
+                                || (j > i
+                                    && (!trailing_punct(parts[i..j].concat().trim_end()).is_empty()
+                                        || parts[i..j]
+                                            .iter()
+                                            .rev()
+                                            .find(|t| !py_str_isspace(t) && !t.chars().all(is_format_char))
+                                            .is_some_and(|t| has_trailing_mark(t))))))
                         && !unit_of_next_morpheme(converter.n2w_key(), &parts, j, &clean) =>
                 {
                     best_value = Some(v);
@@ -4310,6 +4403,7 @@ fn words2num_sentence_walk(
         if en_cardinal || en_year {
             if let Some((time, end)) = en_time_run(&parts, i) {
                 out.push_str(sep_before(i));
+                out.push_str(&lead_format(&parts[i]));
                 out.push_str(&time);
                 out.push_str(trailing_punct(&parts[end]));
                 out.push_str(sep_after(end));
@@ -4415,6 +4509,7 @@ fn words2num_sentence_walk(
                 .and_then(|k| en_decade_value(&rstrip_punct(&parts[k]).to_lowercase()).map(|d| (k, d)));
             if let (Some(c), Some((k, d))) = (century, decade) {
                 out.push_str(sep_before(i));
+                out.push_str(&lead_format(&parts[i]));
                 out.push_str(&format!("{c}{d}0s"));
                 out.push_str(trailing_punct(&parts[k]));
                 out.push_str(sep_after(k));
@@ -4485,6 +4580,7 @@ fn words2num_sentence_walk(
                 None
             } else if article_number
                 && best_end == i
+                && !gap_ended
                 && !article_is_count(&resolved, &parts, i, next_is_number)
             {
                 // A lone "one" / "un" / "um" is an article or a pronoun.
@@ -4500,6 +4596,7 @@ fn words2num_sentence_walk(
                 (lexicon::ko_counter_follows(&head, next.as_deref())).then(|| v.text_str())
             } else if plain
                 && best_end == i
+                && !gap_ended
                 && is_homograph(&resolved, &parts, i, piece)
                 && !next_is_number
                 // "sei e trenta": a connector, then a number.
@@ -4548,7 +4645,8 @@ fn words2num_sentence_walk(
                 Some(text) => {
                     after_decimal = matches!(v, W2nValue::Dec(_)) && trailing.chars().all(is_format_char);
                     out.push_str(sep_before(i));
-                    out.push_str(&text);
+                    out.push_str(&lead_format(&parts[i]));
+                    out.push_str(&sign_format(&parts[i], &text));
                     out.push_str(trailing);
                     out.push_str(sep_after(best_end));
                 }
@@ -7229,6 +7327,10 @@ mod format_char_punct_tests {
         assert_eq!(s("five\u{00AD} apples", "en"), "5\u{00AD} apples");
         assert_eq!(s("x f\u{FC}nf\u{200B} y", "de"), "x 5\u{200B} y");
         assert_eq!(s("x twenty\u{200B} one", "en"), "x 21");
+        // A leading format character and the bidi marks are kept (#1000).
+        assert_eq!(s("x \u{200B}five y", "en"), "x \u{200B}5 y");
+        assert_eq!(s("twenty.\u{200E} One", "en"), "20.\u{200E} One");
+        assert_eq!(s("\u{0639}\u{0634}\u{0631}\u{0648}\u{0646}\u{060C}\u{200F} \u{0648}\u{0627}\u{062D}\u{062F}", "ar"), "20\u{060C}\u{200F} 1");
         // currency=True folds the amount, the character after it (#1021); a
         // date or phone pass folds as before, without it (#1020).
         let c = |t: &str, l: &str| super::words2num_sentence_opts(t, l, "cardinal", false, true).unwrap();

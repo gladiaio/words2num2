@@ -85,10 +85,18 @@ fn split_punct(tok: &str) -> Vec<&str> {
 }
 
 fn split_punct_with(tok: &str, clause_lead: bool) -> Vec<&str> {
+    let lead_mark = |c: char| is_leading_punct(c) || (clause_lead && is_leading_clause_mark(c));
+    // Format characters before or between the marks ride with them:
+    // "\u{200e}(two)" cuts "\u{200e}(" like "(", "'\u{200e}'five" cuts
+    // "'\u{200e}'" (#1125, #1129, #1138, #1140). The lead ends at its last
+    // mark.
     let lead_end = tok
         .char_indices()
-        .find(|&(_, c)| !(is_leading_punct(c) || (clause_lead && is_leading_clause_mark(c))))
-        .map_or(tok.len(), |(k, _)| k);
+        .take_while(|&(_, c)| lead_mark(c) || is_format(c))
+        .filter(|&(_, c)| lead_mark(c))
+        .last()
+        .map_or(0, |(k, c)| k + c.len_utf8());
+    let lead_end = if lead_end == 0 { tok.char_indices().find(|&(_, c)| !lead_mark(c)).map_or(tok.len(), |(k, _)| k) } else { lead_end };
     if lead_end == tok.len() {
         return vec![tok];
     }
@@ -143,7 +151,7 @@ pub(super) fn is_punct_part(part: &str) -> bool {
 /// An invisible format character (ZWSP, ZWNJ, ZWJ, word joiner, BOM, soft
 /// hyphen); see `super::is_format_char`.
 fn is_format(c: char) -> bool {
-    matches!(c, '\u{200B}'..='\u{200D}' | '\u{2060}' | '\u{FEFF}' | '\u{00AD}')
+    super::is_format_char(c)
 }
 
 /// [`super::tokenize`], then each word cut at its punctuation, and for the
@@ -197,6 +205,9 @@ fn number_like(converter: &super::Converter, resolved: &str, word: &str) -> bool
     if is_number(converter, word) {
         return true;
     }
+    // A bidi mark or other format character before the conjunction
+    // ("\u{200e}وخمسة") is no part of the word (#1116).
+    let word = word.trim_start_matches(super::is_format_char);
     let rest = match base(resolved) {
         "ar" => word.strip_prefix('و'),
         "he" => word.strip_prefix('ו'),

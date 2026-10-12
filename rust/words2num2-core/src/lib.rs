@@ -269,7 +269,7 @@ pub fn normalize_tail(decomposed: &str) -> String {
             // (soft hyphen, ZWNJ/ZWJ after a virama, word joiner, BOM) are
             // invisible and carry no letter.
             '\u{200B}' => chars.push(' '),
-            '\u{00AD}' | '\u{200C}' | '\u{200D}' | '\u{2060}' | '\u{FEFF}' => {}
+            '\u{00AD}' | '\u{200C}' | '\u{200D}' | '\u{2060}' | '\u{FEFF}' | '\u{200E}' | '\u{200F}' | '\u{061C}' => {}
             c if is_apostrophe(c) || is_clause_punctuation(c) => chars.push(' '),
             c => chars.push(c),
         }

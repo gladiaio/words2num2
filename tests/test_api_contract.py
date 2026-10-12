@@ -239,3 +239,87 @@ def test_folds_still_read_a_format_char_value_issue_1021(text, kwargs, expected)
 )
 def test_sign_word_mark_space_figure_issue_1032(text, lang, expected):
     assert words2num(text, lang=lang) == expected
+
+
+@pytest.mark.parametrize(
+    "text, lang, expected",
+    [
+        ("x \u200bfive y", "en", "x \u200b5 y"),
+        ("twenty.\u200e One", "en", "20.\u200e One"),
+        ("x five \u200bapples y", "en", "x 5 \u200bapples y"),
+        ("ninety \u200enine cents", "en", "99 cents"),
+        ("x \u200bthird y", "en", "x \u200b3rd y"),
+        ("x twenty-first\u200e y", "en", "x 21st\u200e y"),
+        ("x fife \u200b seven", "en_AERO", "x 5 \u200b 7"),
+        ("x one hundred \u200b and five y", "en", "x 105 y"),
+        ("one hundred\u200bfive", "en", "105"),
+        ("x 二十\u200b,一 y", "zh", "x 20\u200b,一 y"),
+        ("x three point one \u200b four y", "en", "x 3.14 y"),
+        ("x one \u200b two y", "en", "x 1\u200b 2 y"),
+        ("x 二十 \u200e二十 y", "zh", "x 20 \u200e20 y"),
+        # A spaced format-only token after a quoted number keeps the quote
+        # (#1115, #1117).
+        ('x "five" \u200b y', "en", 'x "5" \u200b y'),
+        ('he said "five" \u200e and left', "en", 'he said "5" \u200e and left'),
+        # ar / he: a format character before the conjunction (#1116).
+        ("x خمسمائة \u200eوخمسة وخمسون y", "ar", "x 555 y"),
+        ("x ألفان \u200fوأربعة وعشرون y", "ar", "x 2024 y"),
+        ("x מאה \u200eועשרים ושלוש y", "he", "x 123 y"),
+        # A format character before a scale word with its comma (#1121).
+        ("x twelve \u200bthousand, three hundred and forty-five y", "en", "x 12345 y"),
+        # A format character before a leading mark rides with the mark
+        # (#1125, #1129); after a glued sign it stays after the sign (#1126).
+        ("x forty \u200e(two) y", "en", "x 40 \u200e(2) y"),
+        ("x forty \u200b(two) y", "en", "x 40 \u200b(2) y"),
+        ("x vingt \u200f(cinq) y", "fr", "x 20 \u200f(5) y"),
+        ("x -\u200etwenty five y", "en", "x -\u200e25 y"),
+        # Between two leading marks, before a sign, before a zh mark
+        # (#1138, #1139, #1140).
+        ("x '\u200e'twenty five y", "en", "x '\u200e'25 y"),
+        ("x '\u200b'twenty five y", "en", "x '\u200b'25 y"),
+        ("x —\u200e—twenty five y", "en", "x —\u200e—25 y"),
+        ("x \u200e-\u200efive y", "en", "x \u200e-\u200e5 y"),
+        ("四十 \u200b.七", "zh", "40 \u200b.七"),
+    ],
+)
+def test_leading_format_char_and_bidi_marks_issue_1000(text, lang, expected):
+    assert words2num2.words2num_sentence(text, lang=lang) == expected
+
+
+@pytest.mark.parametrize(
+    "text, kwargs, expected",
+    [
+        ("x \u200bfive dollars", {"currency": True}, "x \u200b$5"),
+        ("twelve dollars \u200bfifty", {"currency": True}, "$12.50\u200b"),
+        ("on the \u200bfifth of march", {"date": True}, "on March 5"),
+        ("x 二十 \u200e二十 y", {"date": True, "lang": "zh"}, "x 20 \u200e20 y"),
+        (
+            "call zero \u200b six one two three four five six seven eight",
+            {"phone": True},
+            "call (061) 234 5678",
+        ),
+        # A spaced format-only token stays part of the fold (#1107, #1109).
+        ("it costs twelve \u200b dollars", {"currency": True}, "it costs $12\u200b"),
+        (
+            "twenty dollars and five \u200b cents please",
+            {"currency": True},
+            "$20.05\u200b please",
+        ),
+        (
+            "el primero \u200b de enero de dos mil veinte",
+            {"lang": "es"},
+            "el 1º\u200b de enero de 2020",
+        ),
+        (
+            "el primero \u200b de enero de dos mil veinte",
+            {"lang": "es", "date": True},
+            "el 1 de enero de 2020",
+        ),
+        ("hello \u200b world", {"phone": True}, "hello \u200b world"),
+        # Two spaced tokens after a quote, in every mode (#1115 audit).
+        ('x "five" \u200e \u200e y', {"date": True}, 'x "5" \u200e \u200e y'),
+        ('x "five" \u200b \u200b y', {"phone": True}, 'x "5" \u200b \u200b y'),
+    ],
+)
+def test_leading_format_char_keeps_folds_issue_1000(text, kwargs, expected):
+    assert words2num2.words2num_sentence(text, **kwargs) == expected
