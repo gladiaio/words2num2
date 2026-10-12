@@ -336,6 +336,8 @@ def test_leading_clause_mark_issue_1041(lang, text, expected):
         ("ja", "x 五十︒ 二 y", "x 50︒ 2 y"),
         ("en", "x fifty｣ two y", "x 50｣ 2 y"),
         ("en", "x ﹕fifty y", "x ﹕50 y"),
+        # ｀ splits off like ASCII "`" (#1113).
+        ("en", "x ｀twenty five y", "x ｀25 y"),
         ("el", "x πενήντα; δύο y", "x 50; 2 y"),
         ("uk", "x п＇ять y", "x 5 y"),
     ],
