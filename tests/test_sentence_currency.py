@@ -357,3 +357,22 @@ def test_one_word_count_after_a_glued_mark_issue_1075():
 )
 def test_fold_keeps_cjk_trailing_mark_issue_1067(text, lang, expected):
     assert words2num_sentence(text, lang=lang, currency=True) == expected
+
+
+@pytest.mark.parametrize(
+    "text, lang, expected",
+    [
+        (
+            "x )twenty five dollars and fifty cents y",
+            "en",
+            "x )twenty five dollars and fifty cents y",
+        ),
+        ("x )five dollars fifty cents y", "en", "x )five dollars fifty cents y"),
+        ("x )vingt euros cinquante y", "fr", "x )vingt euros cinquante y"),
+        # Not one amount without the mark either: the tail reads alone.
+        ("x )five dollars and fifty people y", "en", "x )five dollars and 50 people y"),
+        ("x )five apples and fifty cents y", "en", "x )five apples and 50 cents y"),
+    ],
+)
+def test_closer_led_amount_keeps_its_subunit_issue_1123(text, lang, expected):
+    assert words2num_sentence(text, lang=lang, currency=True) == expected
