@@ -538,7 +538,11 @@ pub(crate) fn is_format_char(c: char) -> bool {
 /// walker leaves such a piece as written.
 fn opens_with_punct(s: &str) -> bool {
     s.chars().next().is_some_and(|c| {
-        crate::is_clause_punctuation(c) || matches!(c, '\u{2018}' | '\u{201B}' | '`')
+        crate::is_clause_punctuation(c)
+            || matches!(c, '\u{2018}' | '\u{201B}' | '`' | '_')
+            // A compat closer or connector, like its ASCII form: "x ）fifty y"
+            // stays as written, as "x )fifty y" does (#1103).
+            || matches!(folded_mark(c), Some(Mark::Closing | Mark::Connector))
     })
 }
 

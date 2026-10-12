@@ -861,10 +861,6 @@ fn parse_num(word: &str) -> Option<Num> {
     // Never a dot or a form of it: ".5", "．5" are decimals.
     let body = word.trim_start_matches(|c: char| {
         ",;:!?،؛؟।॥۔։።፣፤，！？；：。、‼⁇⁈⁉｡､﹐﹔﹖﹗፧".contains(c)
-            || matches!(
-                crate::w2n_sentence::folded_mark(c),
-                Some(crate::w2n_sentence::Mark::Closing | crate::w2n_sentence::Mark::Connector)
-            )
             || (crate::w2n_sentence::folded_mark(c) == Some(crate::w2n_sentence::Mark::Terminal)
                 && !crate::w2n_sentence::folds_to_dots(c))
     });
@@ -1146,17 +1142,7 @@ pub fn fold_currency(text: &str, lang: &str) -> String {
                     sub_at = next_word(&parts, k);
                 }
                 let sub_num = sub_at.and_then(|s| parse_num(&parts[s].text).map(|n| (s, n)));
-                if let Some((s, sub_num)) = sub_num.filter(|(_, n)| {
-                    // A compat closer or connector before the subunit count
-                    // rides after the amount (#1102 F6).
-                    n.frac.is_empty()
-                        && n.lead.chars().all(|c| {
-                            matches!(
-                                crate::w2n_sentence::folded_mark(c),
-                                Some(crate::w2n_sentence::Mark::Closing | crate::w2n_sentence::Mark::Connector)
-                            )
-                        })
-                }) {
+                if let Some((s, sub_num)) = sub_num.filter(|(_, n)| n.frac.is_empty() && n.lead.is_empty()) {
                     let minor = minor_digits(&sub_num.int, cur);
                     let after = next_word(&parts, s);
                     // Explicit subunit word after it?
@@ -1168,7 +1154,7 @@ pub fn fold_currency(text: &str, lang: &str) -> String {
                             frac = Some(minor);
                             consumed_end = sw.end;
                             trailing = sw.trailing;
-                            sub_invisible = format!("{}{}", sub_num.lead, sub_num.invisible);
+                            sub_invisible = sub_num.invisible.clone();
                         }
                     } else if let Some(minor) = minor.filter(|_| !comma) {
                         // "two euros fifty": bare subunit, only when nothing
@@ -1187,7 +1173,7 @@ pub fn fold_currency(text: &str, lang: &str) -> String {
                             frac = Some(minor);
                             consumed_end = s;
                             trailing = sub_num.trailing.clone();
-                            sub_invisible = format!("{}{}", sub_num.lead, sub_num.invisible);
+                            sub_invisible = sub_num.invisible.clone();
                         }
                     }
                 }

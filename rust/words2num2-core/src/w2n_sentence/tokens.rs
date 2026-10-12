@@ -30,9 +30,7 @@ pub(super) enum Glue {
 /// quotes (straight, curly, guillemets, CJK corner brackets), the Spanish
 /// inverted marks.
 fn is_leading_punct(c: char) -> bool {
-    // Any compatibility form at the front: an opener, and also a closer or
-    // "＿" glued there ("x ］fifty y"), which would be folded away (#1102 F1).
-    super::folded_mark(c).is_some_and(|m| m != super::Mark::Terminal) || matches!(
+    super::folded_mark(c) == Some(super::Mark::Opening) || matches!(
         c,
         '(' | '[' | '{' | '"' | '\'' | '`' | '«' | '‹' | '“' | '”' | '„' | '‟' | '‘' | '’' | '‚'
             | '‛' | '¿' | '¡' | '（' | '「' | '『' | '【' | '〈' | '《' | '〔' | '…' | '—' | '–'
