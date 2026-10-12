@@ -602,6 +602,20 @@ fn trailing_punct(s: &str) -> &str {
     &s[kept.len()..]
 }
 
+/// A glued sign with format characters after it ("-\u{200e}twenty five"):
+/// they go back after the sign of the figure, "-\u{200e}25", not lost
+/// (#1126).
+fn sign_format(first: &str, text: &str) -> String {
+    let mut chars = first.chars();
+    let (Some(sign), Some(c)) = (chars.next(), chars.next()) else { return text.to_string() };
+    if !matches!(sign, '-' | '+' | '\u{2212}') || !is_format_char(c) || !text.starts_with(['-', '+', '\u{2212}']) {
+        return text.to_string();
+    }
+    let fmt: String = first[sign.len_utf8()..].chars().take_while(|c| is_format_char(*c)).collect();
+    let k = text.chars().next().map_or(0, char::len_utf8);
+    format!("{}{}{}", &text[..k], fmt, &text[k..])
+}
+
 /// The format characters before a run's first word, written back before its
 /// value: "x \u{200b}five y" is "x \u{200b}5 y" (#1000). Not before a date or
 /// phone pass, as for those after a value (#1020).
@@ -4547,7 +4561,7 @@ fn words2num_sentence_walk(
                     after_decimal = matches!(v, W2nValue::Dec(_)) && trailing.chars().all(is_format_char);
                     out.push_str(sep_before(i));
                     out.push_str(&lead_format(&parts[i]));
-                    out.push_str(&text);
+                    out.push_str(&sign_format(&parts[i], &text));
                     out.push_str(trailing);
                     out.push_str(sep_after(best_end));
                 }

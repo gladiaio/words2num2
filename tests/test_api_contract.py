@@ -267,6 +267,12 @@ def test_sign_word_mark_space_figure_issue_1032(text, lang, expected):
         ("x מאה \u200eועשרים ושלוש y", "he", "x 123 y"),
         # A format character before a scale word with its comma (#1121).
         ("x twelve \u200bthousand, three hundred and forty-five y", "en", "x 12345 y"),
+        # A format character before a leading mark rides with the mark
+        # (#1125, #1129); after a glued sign it stays after the sign (#1126).
+        ("x forty \u200e(two) y", "en", "x 40 \u200e(2) y"),
+        ("x forty \u200b(two) y", "en", "x 40 \u200b(2) y"),
+        ("x vingt \u200f(cinq) y", "fr", "x 20 \u200f(5) y"),
+        ("x -\u200etwenty five y", "en", "x -\u200e25 y"),
     ],
 )
 def test_leading_format_char_and_bidi_marks_issue_1000(text, lang, expected):
