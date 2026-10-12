@@ -4181,7 +4181,13 @@ fn words2num_sentence_walk(
                     if candidate_is_number(&converter, &clean, includable)
                         && !(tok.chars().all(is_format_char)
                             && (parts.get(j + 1).is_some_and(|t| !py_str_isspace(t))
-                                || (j > i && !trailing_punct(parts[i..j].concat().trim_end()).is_empty())))
+                                || (j > i
+                                    && (!trailing_punct(parts[i..j].concat().trim_end()).is_empty()
+                                        || parts[i..j]
+                                            .iter()
+                                            .rev()
+                                            .find(|t| !py_str_isspace(t) && !t.chars().all(is_format_char))
+                                            .is_some_and(|t| has_trailing_mark(t))))))
                         && !unit_of_next_morpheme(converter.n2w_key(), &parts, j, &clean) =>
                 {
                     best_value = Some(v);

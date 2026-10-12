@@ -301,6 +301,9 @@ def test_leading_format_char_and_bidi_marks_issue_1000(text, lang, expected):
             "el 1 de enero de 2020",
         ),
         ("hello \u200b world", {"phone": True}, "hello \u200b world"),
+        # Two spaced tokens after a quote, in every mode (#1115 audit).
+        ('x "five" \u200e \u200e y', {"date": True}, 'x "5" \u200e \u200e y'),
+        ('x "five" \u200b \u200b y', {"phone": True}, 'x "5" \u200b \u200b y'),
     ],
 )
 def test_leading_format_char_keeps_folds_issue_1000(text, kwargs, expected):
