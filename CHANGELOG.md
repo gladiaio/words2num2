@@ -6,6 +6,8 @@ follows [Semantic Versioning](https://semver.org/) and uses
 
 ## [Unreleased]
 
+## [0.4.1] — 2026-10-12
+
 ### Fixed
 
 - Sentence mode: a closing bracket glued before a number word (")two", "]deux", "}zwei") keeps that word as written, and now the rest of its number stays as written with it instead of being read as a smaller number: "x )two thousand twenty four y" is unchanged (was "x )two 1024 y"), fr "x )deux cents y" unchanged (was "x )deux 100 y"), also with `currency=True` ("he paid )twenty five dollars", was "he paid )twenty $5") and `date=True` ("x )twenty first of may y", was "x )twenty May 1 y"). Spoken years and digit strings too: "x ]nineteen eighty four y" (was "x ]nineteen 84 y"), "x )oh five y". Two numbers after the mark stay two: ")twenty one twenty one" is ")twenty one 21" (#1114, #1119).
