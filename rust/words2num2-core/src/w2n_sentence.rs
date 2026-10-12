@@ -3649,21 +3649,23 @@ fn label_words(resolved: &str) -> &'static str {
             "number option press dial select choose enter step page room floor line level \
              chapter part section extension ext channel gate terminal platform zone phase \
              round item question unit exhibit table figure seat car bus route grade day week \
-             plan tier code pin"
+             plan tier code pin speaker participant interviewer respondent caller guest \
+             panelist voice person"
         }
         "fr" => {
             "numero option tapez appuyez composez faites etape page chambre ligne niveau \
              chapitre partie section poste quai zone phase question article siege salle voie \
-             porte jour semaine bus code"
+             porte jour semaine bus code locuteur intervenant participant"
         }
         "es" | "gl" => {
             "numero opcion marque pulse presione oprima digite paso pagina habitacion linea \
              nivel capitulo parte seccion extension anden zona fase pregunta articulo asiento \
-             sala puerta dia semana codigo"
+             sala puerta dia semana codigo hablante locutor interlocutor participante"
         }
         "pt" => {
             "numero opcao digite tecle pressione passo pagina quarto linha nivel capitulo \
-             parte secao ramal zona fase pergunta artigo assento sala porta dia semana codigo"
+             parte secao ramal zona fase pergunta artigo assento sala porta dia semana codigo \
+             locutor falante participante"
         }
         "it" => {
             "numero opzione premi prema digiti passo pagina camera linea livello capitolo \
@@ -3701,6 +3703,20 @@ fn article_is_count(resolved: &str, parts: &[String], i: usize, next_is_number: 
     }
     // "one, two, three", "le un janvier".
     if next_is_number || is_month(resolved, next.as_deref()) {
+        return true;
+    }
+    // "three, two, one", "press one one": right after a number, with no
+    // sentence mark between, it counts on; not "two, one of them" (#911).
+    let base = resolved.split(&['_', '-'][..]).next().unwrap_or(resolved);
+    let prev_raw = parts[..i].iter().rev().find(|t| !py_str_isspace(t));
+    // Only as an item that ends its clause ("trois, deux, un, partez",
+    // "the score was two one"): "deux, un instant" keeps the article.
+    let item = !punct.is_empty() || next.is_none();
+    let after_number = item
+        && prev_raw.is_some_and(|r| matches!(trailing_mark(r).as_str(), "" | ","))
+        && prev.as_deref().is_some_and(|p| !p.is_empty() && crate::token_may_be_number(base, p))
+        && !(base == "en" && next.as_deref() == Some("of"));
+    if after_number {
         return true;
     }
     if let Some(n) = next.as_deref() {
@@ -7423,7 +7439,8 @@ mod format_char_punct_tests {
     fn format_char_after_mark_issue_870() {
         let s = |t: &str, l: &str| super::words2num_sentence(t, l, "cardinal", false).unwrap();
         assert_eq!(s("one hundred.\u{200B} Five people", "en"), "100.\u{200B} 5 people");
-        assert_eq!(s("twenty,\u{200B} one", "en"), "20,\u{200B} one");
+        // "one" ending its clause after a number counts (#911), as in "twenty, one".
+        assert_eq!(s("twenty,\u{200B} one", "en"), "20,\u{200B} 1");
         assert_eq!(s("twenty;\u{00AD} one", "en"), "20;\u{00AD} one");
         assert_eq!(s("zwanzig.\u{2060} Drei Leute", "de"), "20.\u{2060} 3 Leute");
         // A bare format character is a word-break hint, no mark (#998).
