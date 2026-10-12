@@ -542,7 +542,8 @@ fn continues_punct_led(
     for _ in 0..5 {
         let Some(p) = (0..k).rev().find(|&q| !blank(&parts[q])) else { break };
         let raw = &parts[p];
-        if raw.starts_with(|c: char| !c.is_alphanumeric()) {
+        // Format characters alone in front are no mark ("\u{200b}a").
+        if raw.trim_start_matches(is_format_char).starts_with(|c: char| !c.is_alphanumeric()) {
             found = Some(p);
             break;
         }
@@ -594,9 +595,17 @@ fn continues_punct_led(
                 // Through the currency pieces as the pass walks them, so the
                 // article-one before a unit is its count ("a dollar and
                 // fifty cents").
-                let text = format!("{}{}", joined, tail);
+                // With a mark the walk reads past ("-", "(\u{200b}") in
+                // front, so the pieces rewrite a word only as the pass itself
+                // does ("-a dollar" keeps its "a", #1162); the walk then reads
+                // the words without it.
+                // A mark the walk keeps the word behind (")a") needs none:
+                // that word stays as written either way.
+                let lead = if opens_with_punct(raw) { "" } else { &raw[..raw.len() - core.len()] };
+                let text = format!("{}{}{}", lead, joined, tail);
                 let mut walked = String::new();
                 for (piece, walk) in crate::w2n_currency::pieces_for_walk(&text, cur, matches!(to, "cardinal" | "year" | "currency")) {
+                    let piece = if walked.is_empty() { piece.strip_prefix(lead).map(str::to_string).unwrap_or(piece) } else { piece };
                     if !walk {
                         walked.push_str(&piece);
                         continue;
@@ -659,6 +668,12 @@ fn trailing_punct(s: &str) -> &str {
     let kept = rstrip_punct(s);
     let kept = if BARE_FORMAT_KEPT.with(|c| c.get()) { kept.trim_end_matches(is_format_char) } else { kept };
     &s[kept.len()..]
+}
+
+/// A clause mark that a spaced language cuts off the front of a word
+/// (",deux", "!five"): the word after it reads as a number (#1041).
+pub(crate) fn is_clause_lead(c: char) -> bool {
+    tokens::is_leading_clause_mark(c)
 }
 
 /// A glued sign with format characters after it ("-\u{200e}twenty five"):

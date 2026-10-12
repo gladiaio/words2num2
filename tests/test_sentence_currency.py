@@ -422,6 +422,17 @@ def test_mark_before_format_char_kept_after_amount(text, lang, expected):
         ("x (one dollar and fifty cents y", "en", "x (1 dollar and 50 cents y"),
         ("x )un dollar y", "fr", "x )un dollar y"),
         ("x (duas libras y", "pt", "x (2 libras y"),
+        # A glued clause mark is kept and the article still counts (#1161);
+        # a mark the walk reads past keeps the article a word (#1162).
+        ("x ,a dollar and fifty cents y", "en", "x ,$1.50 y"),
+        ("x ,une livre et vingt pence y", "fr", "x ,1,20 £ y"),
+        ("x -a dollar and fifty cents y", "en", "x -a dollar and 50 cents y"),
+        (
+            "x (\u200ba dollar and fifty cents y",
+            "en",
+            "x (\u200ba dollar and 50 cents y",
+        ),
+        ("x \u200ba dollar and fifty cents y", "en", "x \u200b$1.50 y"),
         # Unchanged without a mark.
         ("x a dollar and fifty cents y", "en", "x $1.50 y"),
         ("x duas libras y", "pt", "x 2 £ y"),

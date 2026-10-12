@@ -1508,19 +1508,21 @@ fn pieces_for_walk_with(sentence: &str, lang: &str, subunits_only: bool, counts:
     // A word a mark opens ("(one", ")a", "«duas") is not rewritten: the
     // rewrite would drop the mark; it reads as any number word after that
     // mark does.
-    let lead_mark = |t: &str| t.trim_start_matches(crate::w2n_sentence::is_format_char).starts_with(|c: char| !c.is_alphanumeric());
+    // A glued clause mark is cut off and kept, the word after it read
+    // (",a dollar" -> ",1 dollar", #1161); any other mark leaves it as written.
+    let lead_of = |t: &str| -> Option<String> {
+        let lead: String = t.chars().take_while(|c| !c.is_alphanumeric()).collect();
+        let clause = lead.chars().all(|c| crate::w2n_sentence::is_format_char(c) || crate::w2n_sentence::is_clause_lead(c));
+        clause.then_some(lead)
+    };
     for (j, text) in renames.into_iter().filter(|_| !subunits_only) {
-        if lead_mark(&parts[j].text) {
-            continue;
-        }
-        parts[j].text = text;
+        let Some(lead) = lead_of(&parts[j].text) else { continue };
+        parts[j].text = format!("{lead}{text}");
     }
     for (j, text) in count_renames {
-        if lead_mark(&parts[j].text) {
-            continue;
-        }
+        let Some(lead) = lead_of(&parts[j].text) else { continue };
         let trailing = word_key(&parts[j].text).1;
-        parts[j].text = format!("{text}{trailing}");
+        parts[j].text = format!("{lead}{text}{trailing}");
     }
     let mut pieces = Vec::new();
     let mut cur = String::new();
