@@ -364,6 +364,9 @@ def test_closer_led_number_stays_whole_issue_1114(lang, text, expected):
         ("en", "x )two hundred \u200b five y", "x )two hundred \u200b five y"),
         ("en_AERO", "x )fife fife fife y", "x )fife fife fife y"),
         ("en_AERO", "x fife fife fife y", "x 555 y"),
+        # The compat closers too (#1127, #1128).
+        ("en", "x ）two hundred \u200b five y", "x ）two hundred \u200b five y"),
+        ("en_AERO", "x ）fife fife fife y", "x ）fife fife fife y"),
         # A dash lead keeps the number whole too; no look-ahead over a mark.
         ("fr", "x −deux mille vingt-quatre y", "x −deux mille vingt-quatre y"),
         ("en", "x -double zero seven y", "x -double zero seven y"),
