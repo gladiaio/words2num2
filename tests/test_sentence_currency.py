@@ -451,3 +451,25 @@ def test_mark_before_format_char_kept_after_amount(text, lang, expected):
 def test_count_rewrite_keeps_a_leading_mark(text, lang, expected):
     """#1156 audit: the article / count / feminine rewrite dropped the mark."""
     assert words2num_sentence(text, lang=lang, currency=True) == expected
+
+
+@pytest.mark.parametrize(
+    "text, lang, expected",
+    [
+        # A share of one unit is no amount 1 (#906).
+        ("half a dollar and twenty cents", "en", "half a dollar and 20 cents"),
+        (
+            "a quarter of a dollar and five cents",
+            "en",
+            "a quarter of a dollar and 5 cents",
+        ),
+        # A multi-word unit name (#929).
+        ("a US dollar and twenty cents", "en", "$1.20"),
+        ("une livre sterling et vingt pence", "fr", "1,20 £"),
+        # Only a 1-99 subunit count confirms the article (#930).
+        ("a dollar and two hundred cents", "en", "a dollar and 200 cents"),
+        ("a dollar and twenty cents", "en", "$1.20"),
+    ],
+)
+def test_article_one_counts_only_before_a_subunit_amount(text, lang, expected):
+    assert words2num_sentence(text, lang=lang, currency=True) == expected
