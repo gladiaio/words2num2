@@ -501,7 +501,7 @@ fn rstrip_punct(s: &str) -> &str {
             || matches!(c, '\u{FF0C}' | '\u{FF01}' | '\u{FF1F}' | '\u{FF1B}' | '\u{FF1A}')
             || more_terminal(c)
             || folded_mark(c).is_some()
-            || c == '\u{FF3F}' // ＿
+
             || matches!(c, '\u{FF02}' | '\u{FF07}' | '\u{FF63}' | '\u{FE5A}' | '\u{FE5C}' | '\u{FE5E}' | '\u{FF08}') // ＂ ＇ ｣ ﹚ ﹜ ﹞ （
             || crate::is_clause_punctuation(c)
     };
@@ -605,6 +605,8 @@ pub(crate) enum Mark {
     Closing,
     /// Folds to an opening bracket.
     Opening,
+    /// Folds to "_" or "`": cut off either side, like "_" (#1102 F2).
+    Connector,
 }
 
 pub(crate) fn folded_mark(c: char) -> Option<Mark> {
@@ -612,6 +614,12 @@ pub(crate) fn folded_mark(c: char) -> Option<Mark> {
     // ASCII and letters are handled by the explicit lists; the ellipsis "…"
     // stays a trailing mark that does not end a run.
     if c.is_ascii() || c.is_alphanumeric() || c == '\u{2026}' {
+        return None;
+    }
+    // Only these blocks hold compatibility forms of ASCII or CJK punctuation;
+    // skip the NFKC fold for everything else (#1102 F4).
+    let cp = c as u32;
+    if !matches!(cp, 0x037E | 0x2024..=0x2025 | 0x203C..=0x2049 | 0x207D..=0x208E | 0x2329..=0x232A | 0xFE10..=0xFE6F | 0xFF00..=0xFFEF) {
         return None;
     }
     let f: String = std::iter::once(c).nfkc().collect();
@@ -625,6 +633,8 @@ pub(crate) fn folded_mark(c: char) -> Option<Mark> {
         Some(Mark::Closing)
     } else if all("([{\u{300C}\u{300E}\u{3010}\u{300A}\u{3014}\u{3008}\u{3016}\u{3018}\u{301A}") {
         Some(Mark::Opening)
+    } else if all("_`") {
+        Some(Mark::Connector)
     } else {
         None
     }

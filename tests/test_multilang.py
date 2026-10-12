@@ -354,6 +354,9 @@ def test_folded_marks_issue_1088(lang, text, expected):
         ("en", "x fifty︙ two y", "x 50︙ 2 y"),
         ("en", "x fifty﹙ apples", "x 50﹙ apples"),
         ("en", "x forty… two y", "x 40… 2 y"),
+        ("en", "x ］fifty y", "x ］50 y"),
+        ("en", "x fifty﹍ two y", "x 50﹍ 2 y"),
+        ("en", "x fifty｀ two y", "x 50｀ 2 y"),
     ],
 )
 def test_marks_by_nfkc_fold_issue_1096(lang, text, expected):
