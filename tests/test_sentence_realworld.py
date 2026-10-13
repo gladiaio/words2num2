@@ -373,7 +373,7 @@ def test_fractions_stay_words(lang, text, expected):
         ("fr", "dix-huit cents euros", "1800 euros"),
         ("fr", "mille", "1000"),
         ("fr", "C'est quarante-deux ?", "C'est 42 ?"),
-        ("fr", "un million et demi", "1000000 et demi"),
+        ("fr", "un million et demi", "1500000"),  # #859
         ("es", "millones de personas", "millones de personas"),
         ("es", "medio millón", "medio millón"),
         ("es", "dos coma cinco millones", "2,5 millones"),
@@ -391,7 +391,7 @@ def test_fractions_stay_words(lang, text, expected):
         ("nl", "negentien negenennegentig", "1999"),
         ("it", "ventitremila", "23000"),
         ("it", "centomila", "100000"),
-        ("it", "un milione e mezzo", "1000000 e mezzo"),
+        ("it", "un milione e mezzo", "1500000"),  # #859
         ("it", "un attimo", "un attimo"),
     ],
 )
