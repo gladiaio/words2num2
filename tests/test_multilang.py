@@ -565,6 +565,66 @@ def test_written_compounds_reject_non_numbers(lang, text):
 
 
 @pytest.mark.parametrize(
+    "text, expected",
+    [
+        # es split teens 16..19, RAE-accepted (#866).
+        ("tenía diez y ocho años", "tenía 18 años"),
+        ("diez y nueve mil", "19000"),
+        ("diez y seis, diez y siete", "16, 17"),
+        # A clock time and 13..15 stay.
+        ("a las diez y seis", "a las 10:06"),
+        ("diez y tres", "10 y 3"),
+        # A list after "<number>,", "las … minutos", a glued symbol (#1213
+        # audit).
+        ("los números cinco, diez y seis", "los números 5, 10 y 6"),
+        ("a las diez y seis minutos", "a las 10 y 6 minutos"),
+        ("diez y seis€", "10 y seis€"),
+        ("¿diez y seis?", "¿16?"),
+        # Only an opener leads; a duration and "Sí," read the teen (#1213
+        # audit).
+        ("#diez y seis", "#diez y 6"),
+        ("esperé diez y seis minutos", "esperé 16 minutos"),
+        ("Sí, diez y seis", "Sí, 16"),
+        # A mark on "diez" is a boundary or would be lost (#1213 audit).
+        ("Fueron diez, y seis se quedaron", "Fueron 10, y 6 se quedaron"),
+        ("…diez y ocho años", "…10 y 8 años"),
+    ],
+)
+def test_es_split_teens(text, expected):
+    assert words2num_sentence(text, lang="es") == expected
+
+
+def test_es_split_teens_modes():
+    # Not rewritten where nothing reads the teen (#1213 audit).
+    assert (
+        words2num_sentence("tenía diez y ocho años", lang="es", to="ordinal")
+        == "tenía diez y ocho años"
+    )
+    assert (
+        words2num_sentence(
+            "diez y seis dólares con diez y nueve centavos", lang="es_MX", currency=True
+        )
+        == "$16.19"
+    )
+    assert (
+        words2num_sentence(
+            "el diez y seis de mayo de dos mil diez y nueve", lang="es", date=True
+        )
+        == "el 16 de mayo de 2019"
+    )
+    assert (
+        words2num_sentence("a las diez y seis", lang="es", to="currency")
+        == "a las 10 y 6"
+    )
+
+
+def test_es_split_teens_cardinal():
+    assert words2num("diez y seis", lang="es") == 16
+    assert words2num("diez y nueve", lang="es") == 19
+    assert words2num("mil novecientos diez y ocho", lang="es", to="year") == 1918
+
+
+@pytest.mark.parametrize(
     "lang, text, expected",
     [
         # "un poco" / "um pouco" after the tens is the quantifier (#861).

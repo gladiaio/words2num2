@@ -8,13 +8,14 @@ follows [Semantic Versioning](https://semver.org/) and uses
 
 ### Fixed
 
+- es: the split teens "diez y seis" .. "diez y nueve" (RAE-accepted) are 16..19 ("tenía diez y ocho años" is "tenía 18 años", was "tenía 10 y 8 años"; `words2num("diez y seis")` is 16, was an error); a clock time ("a las diez y seis", 10:06; "las diez y seis minutos") is read first, and after a number and a comma it stays a list of two numbers ("cinco, diez y seis") (#866).
+- `currency=True` (es/pt/fr/it/ca): a spelled-out amount "and a half" folds to the half amount ("cinco pesos y medio" is "$5.50", was "$5 y medio"; pt_BR "cinco reais e meio" "R$ 5,50"); a half that is the next noun's ("y medio kilo"), a subunit ("centavos y medio"), a currency with no minor unit ("yenes") or a figure as written ("5 euros y medio") stays (#860).
 - th: the official "หนึ่ง" after the hundreds reads like "เอ็ด" ("สองร้อยหนึ่ง" is 201, was an error; "ห้องสองร้อยหนึ่ง" is "ห้อง201"); my: the ten without its "တစ်" ("ဆယ်" 10, "ဆယ့်ငါး" 15, "ဆယ်သိန်း" 1000000) (#877, #879).
 
 ## [0.4.2] — 2026-10-13
 
 ### Fixed
 
-- `currency=True` (es/pt/fr/it/ca): a spelled-out amount "and a half" folds to the half amount ("cinco pesos y medio" is "$5.50", was "$5 y medio"; pt_BR "cinco reais e meio" "R$ 5,50"); a half that is the next noun's ("y medio kilo"), a subunit ("centavos y medio"), a currency with no minor unit ("yenes") or a figure as written ("5 euros y medio") stays (#860).
 - Sentence mode (es): "un poco" after the tens is the quantifier, not part of the compound ("pesaba ochenta y un poco más" is "pesaba 80 y un poco más", was "pesaba 81 poco más") (#861).
 - es/pt/fr/it/ca: whole millions or more "and a half" read as one number ("dos millones y medio de personas" is "2500000 de personas", was "2000000 y medio de personas"; pt_BR "um bilhão e meio" 1500000000; `words2num("un millón y medio")` is 1500000, was an error) (#859).
 - Sentence mode, de clock times: "eine Uhr" (a watch) is no time without a cue ("Er kaufte eine Uhr" stays, was "Er kaufte 1 Uhr"), "ein Uhr" is 1 o'clock ("um 1 Uhr", was left in words), and "und" opens no minutes ("zwischen zwei Uhr und drei Uhr" is "zwischen 2 Uhr und 3 Uhr", was "2:03 Uhr Uhr") (#936).
