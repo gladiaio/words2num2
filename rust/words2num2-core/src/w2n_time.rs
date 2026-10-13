@@ -77,6 +77,11 @@ fn number_at(lang: &str, toks: &[Tok], i: usize, range: std::ops::RangeInclusive
             return None;
         }
         let words: Vec<&str> = span.iter().map(|t| t.word.as_str()).collect();
+        // A connector after the number is no part of it: "diez y | las tres"
+        // kept its "y" (#937).
+        if n > 1 && matches!(words[n - 1], "y" | "et" | "und" | "e") {
+            return None;
+        }
         number(lang, &words).filter(|v| range.contains(v)).map(|v| (v, n))
     })
 }
@@ -157,6 +162,10 @@ fn word(toks: &[Tok], k: usize) -> Option<&str> {
 fn minutes_fr(lang: &str, toks: &[Tok], k: usize) -> Option<(i64, usize)> {
     match (word(toks, k), word(toks, k + 1), word(toks, k + 2)) {
         (Some("et"), Some("quart"), _) => Some((15, 2)),
+        // Three quarters of an hour (#934).
+        // Not across a mark ("trois. quarts", #1200 audit).
+        (Some("et"), Some("trois"), Some("quarts")) if toks[k + 1].trail.is_empty() && toks[k].trail.is_empty() => Some((45, 3)),
+        (Some("trois"), Some("quarts"), _) if toks[k].trail.is_empty() => Some((45, 2)),
         (Some("et"), Some("demie" | "demi"), _) => Some((30, 2)),
         (Some("moins"), Some("le"), Some("quart")) => Some((-15, 3)),
         (Some("moins"), Some("quart"), _) => Some((-15, 2)),
@@ -172,6 +181,8 @@ fn minutes_fr(lang: &str, toks: &[Tok], k: usize) -> Option<(i64, usize)> {
 fn minutes_es(lang: &str, toks: &[Tok], k: usize) -> Option<(i64, usize)> {
     match (word(toks, k), word(toks, k + 1)) {
         (Some("y"), Some("cuarto")) => Some((15, 2)),
+        // "y tres cuartos": three quarters of an hour (#934).
+        (Some("y"), Some("tres")) if word(toks, k + 2) == Some("cuartos") && toks[k].trail.is_empty() && toks[k + 1].trail.is_empty() => Some((45, 3)),
         (Some("y"), Some("media")) => Some((30, 2)),
         (Some("menos"), Some("cuarto")) => Some((-15, 2)),
         (Some("en"), Some("punto")) => Some((0, 2)),
@@ -210,6 +221,11 @@ fn hour_at(lang: &str, toks: &[Tok], i: usize, max: i64, then: impl Fn(usize) ->
             return None;
         }
         let words: Vec<&str> = span.iter().map(|t| t.word.as_str()).collect();
+        // A connector after the number is no part of it: "diez y | las tres"
+        // kept its "y" (#937).
+        if n > 1 && matches!(words[n - 1], "y" | "et" | "und" | "e") {
+            return None;
+        }
         number(lang, &words).filter(|h| (0..=max).contains(h)).map(|h| (h, n))
     })
 }
@@ -293,6 +309,23 @@ fn span_es(toks: &[Tok], i: usize) -> Option<Span> {
     }
     if cuts_number("es", toks, i + 1, key + m) {
         return None; // "las dos menos treinta y uno" (#935)
+    }
+    // "entre las dos y tres": after "entre" a "y" and an hour is the end of
+    // a range, not minutes, unless the range goes on ("entre las dos y diez
+    // y las tres") (#937).
+    let range = i > 0
+        && word(toks, i - 1) == Some("entre")
+        && word(toks, key) == Some("y")
+        && plain
+        && (1..=12).contains(&add)
+        // "entre las cinco y dos" is 5:02, not 5 to 2; a later hour, or an
+        // earlier one past noon ("entre las once y una") (#1200 audit).
+        && (add > h || (add < h && h >= 8))
+        && !matches!(word(toks, key + m), Some("y" | "minutos"));
+    if range {
+        // Both hours in figures: "entre las 11 y 1", not "y una" left a word.
+        let article = &toks[i].word;
+        return Some(Span { len: 1 + n + m, text: format!("{article} {h} y {add}") });
     }
     let (h, mm) = clock(h, add, 24);
     let article = &toks[i].word;
