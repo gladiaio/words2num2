@@ -562,3 +562,25 @@ def test_written_compounds_read(lang, text, expected):
 def test_written_compounds_reject_non_numbers(lang, text):
     with pytest.raises(Words2NumError):
         words2num(text, lang=lang)
+
+
+@pytest.mark.parametrize(
+    "lang, text, expected",
+    [
+        # "un"/"um" after the tens' connector is the article of a singular
+        # noun, not part of the compound (#861).
+        ("es_MX", "pesaba ochenta y un poco más", "pesaba 80 y un poco más"),
+        ("es_AR", "llegaron veinte y una señora", "llegaron 20 y una señora"),
+        ("pt_BR", "pesava oitenta e um pouco", "pesava 80 e um pouco"),
+        ("pt_BR", "chegaram vinte e um homem", "chegaram 20 e um homem"),
+        # The compound stays before a plural, a number, a function word or
+        # the end.
+        ("es_MX", "llegaron treinta y una personas", "llegaron 31 personas"),
+        ("es", "tiene treinta y un años", "tiene 31 años"),
+        ("es", "cuarenta y un mil", "41000"),
+        ("es", "treinta y un por ciento", "31 por ciento"),
+        ("es", "treinta y una", "31"),
+    ],
+)
+def test_tens_and_article(lang, text, expected):
+    assert words2num_sentence(text, lang=lang) == expected

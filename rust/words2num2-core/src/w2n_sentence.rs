@@ -4758,6 +4758,41 @@ fn words2num_sentence_walk(
             }
         }
 
+        // es/pt "veinte y una señora", "oitenta e um pouco": "un"/"um" after
+        // the tens' connector is the article of a singular noun, not 21
+        // ("veintiún hombres", "treinta y un años" keep the compound, #861).
+        if plain && !best_ordinal && best_end > i {
+            let base = resolved.split(['_', '-']).next().unwrap_or(&resolved);
+            let w = |k: usize| crate::normalize(rstrip_punct(&parts[k]).trim());
+            let prev = (i..best_end).rev().find(|&k| !py_str_isspace(&parts[k]));
+            let article = matches!(base, "es" | "pt" | "gl" | "ca")
+                && matches!(w(best_end).as_str(), "un" | "una" | "um" | "uma")
+                && trailing_mark(&parts[best_end]).is_empty()
+                && prev.is_some_and(|k| matches!(w(k).as_str(), "y" | "e" | "i"));
+            let singular = next_word(&parts, best_end).is_some_and(|n| {
+                let n = crate::normalize(&n);
+                !n.is_empty()
+                    && n.chars().all(char::is_alphabetic)
+                    && !n.ends_with('s')
+                    // Function words: "treinta y un por ciento" is 31 % (#861).
+                    && !matches!(
+                        n.as_str(),
+                        "por" | "de" | "del" | "en" | "y" | "e" | "o" | "a" | "al" | "con" | "para" | "sobre" | "que" | "entre" | "ou"
+                            | "em" | "no" | "na" | "do" | "da" | "mais" | "menos" | "mas" | "com" | "pra" | "per" | "di" | "in"
+                            | "su" | "tra" | "fra" | "i" | "amb" | "total" | "medio" | "meio" | "mezzo" | "mig"
+                    )
+                    && !matches!(crate::lookup_norm(&resolved, &n, false, &[]), Ok(Some(_)))
+            });
+            if article && singular {
+                if let Some(k) = prev.and_then(|c| (i..c).rev().find(|&k| !py_str_isspace(&parts[k]))) {
+                    if let Ok(v) = converter.to_cardinal(parts[i..=k].concat().trim()) {
+                        best_value = Some(v);
+                        best_end = k;
+                    }
+                }
+            }
+        }
+
         // ru "двадцать первый", pl "dwadzieścia pierwszy": a cardinal followed
         // by the ordinal of a smaller unit is one compound ordinal. When it
         // did not read as one, converting the cardinal alone would split it
