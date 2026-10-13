@@ -4930,6 +4930,36 @@ fn words2num_sentence_walk(
             }
         }
 
+        // es "ochenta y un poco más": "un" after the tens' "y" opens the
+        // quantifier "a little", not 81 (#861).
+        if plain && !best_ordinal && best_end > i {
+            let base = resolved.split(['_', '-']).next().unwrap_or(&resolved);
+            let w = |k: usize| crate::normalize(rstrip_punct(&parts[k]).trim());
+            let prev = (i..best_end).rev().find(|&k| !py_str_isspace(&parts[k]));
+            // es only, masculine "un": the standalone number is "uno", so "un
+            // poco" is the quantifier. pt/gl/ca "um"/"un" is also the number
+            // and "pouco"/"poc" also the adverb ("vinte e um pouco mudou"),
+            // and "una poco" is never the quantifier (#1210 audit).
+            let article = base == "es"
+                && w(best_end) == "un"
+                && trailing_mark(&parts[best_end]).is_empty()
+                && prev.is_some_and(|k| w(k) == "y");
+            // Only on positive evidence: "un poco" / "um pouco" is the
+            // quantifier, never a count of it. A noun, a verb or a pronoun
+            // after it is as often the compound's ("trinta e um passaram",
+            // "vinte e um anos", "treinta y un km"), and pt "um" is also the
+            // pronoun (#1210 audit).
+            let singular = next_word(&parts, best_end).is_some_and(|n| crate::normalize(&n) == "poco");
+            if article && singular {
+                if let Some(k) = prev.and_then(|c| (i..c).rev().find(|&k| !py_str_isspace(&parts[k]))) {
+                    if let Ok(v) = converter.to_cardinal(parts[i..=k].concat().trim()) {
+                        best_value = Some(v);
+                        best_end = k;
+                    }
+                }
+            }
+        }
+
         // ru "двадцать первый", pl "dwadzieścia pierwszy": a cardinal followed
         // by the ordinal of a smaller unit is one compound ordinal. When it
         // did not read as one, converting the cardinal alone would split it
