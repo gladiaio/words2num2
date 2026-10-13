@@ -4764,8 +4764,12 @@ fn words2num_sentence_walk(
             let base = resolved.split(['_', '-']).next().unwrap_or(&resolved);
             let w = |k: usize| crate::normalize(rstrip_punct(&parts[k]).trim());
             let prev = (i..best_end).rev().find(|&k| !py_str_isspace(&parts[k]));
-            let article = matches!(base, "es" | "pt" | "gl" | "ca")
-                && matches!(w(best_end).as_str(), "un" | "una" | "um" | "uma")
+            // es only, masculine "un": the standalone number is "uno", so "un
+            // poco" is the quantifier. pt/gl/ca "um"/"un" is also the number
+            // and "pouco"/"poc" also the adverb ("vinte e um pouco mudou"),
+            // and "una poco" is never the quantifier (#1210 audit).
+            let article = base == "es"
+                && w(best_end) == "un"
                 && trailing_mark(&parts[best_end]).is_empty()
                 && prev.is_some_and(|k| matches!(w(k).as_str(), "y" | "e" | "i"));
             // Only on positive evidence: "un poco" / "um pouco" is the
@@ -4773,7 +4777,7 @@ fn words2num_sentence_walk(
             // after it is as often the compound's ("trinta e um passaram",
             // "vinte e um anos", "treinta y un km"), and pt "um" is also the
             // pronoun (#1210 audit).
-            let singular = next_word(&parts, best_end).is_some_and(|n| matches!(crate::normalize(&n).as_str(), "poco" | "pouco" | "poc"));
+            let singular = next_word(&parts, best_end).is_some_and(|n| crate::normalize(&n) == "poco");
             if article && singular {
                 if let Some(k) = prev.and_then(|c| (i..c).rev().find(|&k| !py_str_isspace(&parts[k]))) {
                     if let Ok(v) = converter.to_cardinal(parts[i..=k].concat().trim()) {

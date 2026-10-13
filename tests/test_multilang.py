@@ -569,7 +569,9 @@ def test_written_compounds_reject_non_numbers(lang, text):
     [
         # "un poco" / "um pouco" after the tens is the quantifier (#861).
         ("es_MX", "pesaba ochenta y un poco más", "pesaba 80 y un poco más"),
-        ("pt_BR", "pesava oitenta e um pouco", "pesava 80 e um pouco"),
+        # pt "um" is also the number and "pouco" also the adverb (#1210 audit).
+        ("pt_BR", "em dois mil e vinte e um pouco mudou", "em 2021 pouco mudou"),
+        ("es", "treinta y una poco", "31 poco"),
         # Everything else keeps the compound: nouns, verbs, pronouns, units,
         # currencies, years (#1210 audit).
         ("es_AR", "llegaron veinte y una señora", "llegaron 21 señora"),
