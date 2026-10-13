@@ -73,7 +73,7 @@ struct Run {
     trail: String,
 }
 
-fn run_at(toks: &[&str], i: usize) -> Option<Run> {
+fn run_at(toks: &[&str], i: usize, in_list: bool) -> Option<Run> {
     let first = split_trail(toks.get(i)?).0.to_lowercase();
     let word_plus = first == "plus" || first == "+";
     let mut k = i + usize::from(word_plus);
@@ -95,8 +95,11 @@ fn run_at(toks: &[&str], i: usize) -> Option<Run> {
         digits.push_str(core);
         trail = t.to_string();
         k += 1;
-        // A comma may sit between groups ("06, 12, 34"); anything else ends it.
-        if !(t.is_empty() || t == ",") {
+        // A comma may sit between the groups of a number dialled from its
+        // trunk prefix or "+" ("06, 12, 34"); elsewhere it ends a list item
+        // ("2019, 312000 cars", "twenty one, twenty four", #939). Anything
+        // else ends the run.
+        if !(t.is_empty() || (t == "," && !in_list && (plus || digits.starts_with('0')))) {
             break;
         }
     }
@@ -127,6 +130,18 @@ fn written(run: &Run, candidates: &[Id]) -> Option<String> {
     .filter(|w| w.contains(|c: char| !c.is_ascii_digit()))
 }
 
+/// Three figures that read as a day and a month in either order and a year
+/// ("23 10 2026", "02 20 1984").
+fn date_shape(toks: &[&str]) -> bool {
+    let nums: Vec<u32> = toks.iter().filter_map(|t| split_trail(t).0.parse().ok()).collect();
+    if toks.len() != 3 || nums.len() != 3 || split_trail(toks[2]).0.len() != 4 {
+        return false;
+    }
+    let (a, b, y) = (nums[0], nums[1], nums[2]);
+    let dm = |d: u32, m: u32| (1..=31).contains(&d) && (1..=12).contains(&m);
+    (1000..=2999).contains(&y) && (dm(a, b) || dm(b, a))
+}
+
 /// Rewrite every phone number of `text` (the walk's output) as its country
 /// writes it. A run no numbering plan knows comes back unchanged.
 pub fn fold_phones(text: &str, lang: &str, region: Option<&str>) -> String {
@@ -135,7 +150,19 @@ pub fn fold_phones(text: &str, lang: &str, region: Option<&str>) -> String {
     let mut out: Vec<String> = Vec::with_capacity(toks.len());
     let mut i = 0;
     while i < toks.len() {
-        match run_at(&toks, i) {
+        // Right after a figure and its comma, a run is the next item of that
+        // list ("28, 08, 41"): its own commas join nothing.
+        let in_list = i > 0 && {
+            let (core, t) = split_trail(toks[i - 1]);
+            t == "," && !core.is_empty() && core.bytes().all(|b| b.is_ascii_digit())
+        };
+        match run_at(&toks, i, in_list) {
+            // A day, a month and a year ("23 10 2026", "02 20 1984") is a
+            // date, read so or left alone (#940).
+            Some(run) if date_shape(&toks[i..i + run.taken]) => {
+                out.extend(toks[i..i + run.taken].iter().map(|t| t.to_string()));
+                i += run.taken;
+            }
             Some(run) => {
                 match written(&run, &candidates) {
                     Some(w) => {

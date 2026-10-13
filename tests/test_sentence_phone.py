@@ -88,3 +88,37 @@ def test_off_by_default():
         words2num_sentence("two one two four five six seven eight nine oh")
         == "2124567890"
     )
+
+
+@pytest.mark.parametrize(
+    "text, lang, kwargs, expected",
+    [
+        # A year and a count, a list: no phone number (#939).
+        ("In 2019, 312000 cars were sold", "en", {}, "In 2019, 312000 cars were sold"),
+        (
+            "the lottery numbers are twenty one, twenty four, thirty five, forty seven, fifty nine",
+            "en",
+            {},
+            "the lottery numbers are 21, 24, 35, 47, 59",
+        ),
+        (
+            "pages 12, 34, 56, 78, 90 and 91",
+            "en",
+            {},
+            "pages 12, 34, 56, 78, 90 and 91",
+        ),
+        # Groups from the trunk prefix still join.
+        ("appelez le 06, 12, 34, 56, 78", "fr", {}, "appelez le 06 12 34 56 78"),
+        # A date is read first, or left alone (#940).
+        (
+            "né le vingt-trois dix deux mille vingt-six",
+            "fr",
+            {"date": True},
+            "né le 23/10/2026",
+        ),
+        ("né le vingt-trois dix deux mille vingt-six", "fr", {}, "né le 23 10 2026"),
+        ("on 02 20 1984", "en", {"date": True}, "on 2/20/1984"),
+    ],
+)
+def test_phone_leaves_lists_and_dates(text, lang, kwargs, expected):
+    assert words2num_sentence(text, lang=lang, phone=True, **kwargs) == expected

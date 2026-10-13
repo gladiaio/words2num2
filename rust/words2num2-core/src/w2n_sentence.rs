@@ -3900,10 +3900,12 @@ pub fn words2num_sentence_full(
     // The currency pass reads a figure with its format character (#1021).
     let folds = date || phone;
     let mut out = with_bare_format(!folds, || words2num_sentence_folded(sentence, lang, to, has_kwargs, currency))?;
-    if phone {
-        out = crate::w2n_phone::fold_phones(&out, lang, region);
+    // Dates first: a day-month-year run of figures is no phone number
+    // ("né le 23 10 2026", #940).
+    if date {
+        out = crate::w2n_date::fold_dates_with(&out, lang, region, iso);
     }
-    Ok(if date { crate::w2n_date::fold_dates_with(&out, lang, region, iso) } else { out })
+    Ok(if phone { crate::w2n_phone::fold_phones(&out, lang, region) } else { out })
 }
 
 fn words2num_sentence_folded(
