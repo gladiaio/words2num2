@@ -181,6 +181,45 @@ fn en_homograph(m: &str) -> bool {
     m == "may" || m == "march" || (m.len() <= 4 && !matches!(m.as_str(), "june" | "july"))
 }
 
+/// An English plural noun a number before it counts: "june twelve people
+/// died" is twelve people, not June 12 (#931). An explicit list: a word in
+/// "-s" is as often a verb or a name ("june twelve works for me").
+fn en_counted(w: &str) -> bool {
+    matches!(w.to_lowercase().as_str(), "people" | "persons" | "men" | "women" | "children" | "kids" | "students" | "soldiers" | "workers" | "trucks" | "cars" | "times")
+}
+
+/// "may"/"march" read as verbs: after a count ("all three may come") or a
+/// subject ("they march 2000 miles"), before a verb-like word (#907). Short
+/// forms ("jan", "sept") are never verbs.
+fn en_verb_month(m: &str) -> bool {
+    matches!(m.to_lowercase().as_str(), "may" | "march")
+}
+
+/// What follows the modal "may" or the verb "march" (not a noun as in "the 3
+/// may meeting").
+fn en_verb_next(m: &str, w: &str) -> bool {
+    if m.eq_ignore_ascii_case("march") {
+        // Not "to"/"through"/"in"/"on": "from 3 march to 5 april", "on 3
+        // march in london" (#1203 audit).
+        matches!(w, "together" | "into" | "down" | "up" | "along" | "forward" | "past" | "across" | "off" | "back" | "out" | "around" | "home" | "away")
+    } else {
+        matches!(
+            w,
+            // Not the adverbs that also follow a date ("on 3 may now").
+            "be" | "have" | "come" | "go" | "take" | "not" | "need" | "want" | "get" | "see" | "help" | "find" | "make" | "use"
+                | "never" | "arrive" | "leave" | "win" | "lose"
+                | "stay" | "join" | "apply" | "vary" | "differ" | "change" | "include" | "require" | "cause" | "contain"
+        )
+    }
+}
+
+/// A subject before "may"/"march" with a figure: "they march 2000 miles"
+/// (#907).
+fn en_subject(w: &str) -> bool {
+    // Not "you": mostly an object ("see you may 2020").
+    matches!(w, "i" | "we" | "they" | "he" | "she" | "who" | "people" | "soldiers" | "troops" | "protesters" | "students" | "workers")
+}
+
 /// The month as the language writes it: capitalised in en and de.
 fn written_month(st: Style, m: &str) -> String {
     let lower = m.to_lowercase();
@@ -525,7 +564,20 @@ fn span_at(lang: &str, st: Style, toks: &[&str], i: usize, chained: bool) -> Opt
             let link = (en && low(d_at + 1).as_deref() == Some("of")) || (de_of && low(d_at + 1).as_deref() == Some("de"));
             let m_at = d_at + 1 + usize::from(link);
             if let Some((m, m_trail)) = at(m_at).and_then(|t| month(lang, t)) {
+                // en: a cardinal day ("three may come", "chapter twelve of
+                // march") is the date only before a plain month: "of" takes
+                // an ordinal, and "may"/"march" after a count are verbs (#907).
+                let ordinal = en && split_trail(at(d_at).unwrap_or("")).0.ends_with(|c: char| c.is_ascii_alphabetic());
                 let (y, trail, n) = with_year(m_at + 1, &m_trail);
+                // "may"/"march" after a count are verbs only before a verb-like
+                // word ("all three may come"); at the end, before a mark or a
+                // noun ("12 march", "the 3 may meeting") it is the date.
+                // After a cue it is the date ("on 3 march", "from 3 march").
+                let cued = i > 0 && low(i - 1).is_some_and(|w| matches!(w.as_str(), "on" | "by" | "since" | "until" | "till" | "from" | "before" | "after"));
+                let verb = !cued && en_verb_month(&m) && open(&m_trail) && n == 0 && low(m_at + 1).is_some_and(|w| en_verb_next(&m, &w));
+                if en && !ordinal && (link || verb) {
+                    return None;
+                }
                 let trail = if n == 0 { m_trail } else { trail };
                 return Some(Span { day: Some(d), month_no: month_number(lang, &m), month: m, year: y, trail, len: m_at + 1 + n - i });
             }
@@ -547,12 +599,25 @@ fn span_at(lang: &str, st: Style, toks: &[&str], i: usize, chained: bool) -> Opt
                 if en_homograph(&m) && !(ordinal || skip == 1 || n > 0) {
                     return None;
                 }
+                // "in june twelve people died": a cardinal day before a plural
+                // noun counts it (#931).
+                // After "on" the date is the likelier reading (#1203 audit);
+                // "by july fifteen trucks had left" is the count (#931).
+                let on = i > 0 && low(i - 1).as_deref() == Some("on");
+                if !ordinal && !on && n == 0 && open(&d_trail) && low(i + 2 + skip).is_some_and(|w| en_counted(&w)) {
+                    return None;
+                }
                 let trail = if n == 0 { d_trail } else { trail };
                 return Some(Span { day: Some(d), month_no: month_number(lang, &m), month: m, year: y, trail, len: 2 + skip + n });
             }
         }
         // A month and a year: "march 2026", "mars 2026", "marzo de 2026".
         let (y, trail, n) = with_year(i + 1, &m_trail);
+        // "they march 2000 miles": "may"/"march" after a subject are the verb
+        // (#907); after anything else, "born march 1990", the month.
+        if n > 0 && en && en_verb_month(&m) && i > 0 && low(i - 1).is_some_and(|w| en_subject(&w)) {
+            return None;
+        }
         if n > 0 {
             return Some(Span { day: None, month_no: month_number(lang, &m), month: m, year: y, trail, len: 1 + n });
         }
