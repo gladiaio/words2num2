@@ -806,6 +806,30 @@ def test_lo_billion_sentence():
         ("es", "5 o seis mil", "5 o 6000"),
         ("en", "two and three thousand", "2 and 3000"),
         ("es", "veinte o dos mil", "20 o 2000"),
+        # Figures as written are never multiplied, even next to a spelled
+        # range (#1217); compound scales (#1218); chains (#1219); gl "ou"
+        # (#1220); "one" (#1222); an opener before the first bound.
+        (
+            "es",
+            "Tenía 2 o 3000 pesos y cinco o seis mil",
+            "Tenía 2 o 3000 pesos y 5000 o 6000",
+        ),
+        (
+            "en",
+            "two and three thousand, between five and six thousand",
+            "2 and 3000, between 5000 and 6000",
+        ),
+        (
+            "es",
+            "dos o tres mil millones de personas",
+            "2000000000 o 3000000000 de personas",
+        ),
+        ("en", "five or six or seven thousand", "5000 or 6000 or 7000"),
+        ("es", "cinco, seis o siete mil", "5, 6 o 7000"),
+        ("gl", "dous ou tres mil", "2000 ou 3000"),
+        ("en", "one or two thousand people", "1000 or 2000 people"),
+        ("de", "ein oder zwei Millionen", "1000000 oder 2000000"),
+        ("es", "(cinco o seis mil)", "(5000 o 6000)"),
     ],
 )
 def test_shared_scale_range(lang, text, expected):
