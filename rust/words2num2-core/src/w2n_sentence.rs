@@ -4758,8 +4758,8 @@ fn words2num_sentence_walk(
             }
         }
 
-        // es/pt "ochenta y un poco más", "oitenta e um pouco": "un"/"um" after
-        // the tens' connector opens the quantifier "a little", not 81 (#861).
+        // es "ochenta y un poco más": "un" after the tens' "y" opens the
+        // quantifier "a little", not 81 (#861).
         if plain && !best_ordinal && best_end > i {
             let base = resolved.split(['_', '-']).next().unwrap_or(&resolved);
             let w = |k: usize| crate::normalize(rstrip_punct(&parts[k]).trim());
@@ -4771,7 +4771,7 @@ fn words2num_sentence_walk(
             let article = base == "es"
                 && w(best_end) == "un"
                 && trailing_mark(&parts[best_end]).is_empty()
-                && prev.is_some_and(|k| matches!(w(k).as_str(), "y" | "e" | "i"));
+                && prev.is_some_and(|k| w(k) == "y");
             // Only on positive evidence: "un poco" / "um pouco" is the
             // quantifier, never a count of it. A noun, a verb or a pronoun
             // after it is as often the compound's ("trinta e um passaram",
