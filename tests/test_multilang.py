@@ -469,3 +469,34 @@ def test_marks_by_nfkc_fold_issue_1096(lang, text, expected):
 )
 def test_currency_marks_by_nfkc_fold_issue_1099(text, expected):
     assert words2num_sentence(text, currency=True) == expected
+
+
+@pytest.mark.parametrize(
+    "lang,text,expected",
+    [
+        # After a number, ending its clause, the article-one counts (#911).
+        ("en", "three, two, one, go", "3, 2, 1, go"),
+        ("en", "the score was two one", "the score was 2 1"),
+        ("fr", "trois, deux, un, partez", "3, 2, 1, partez"),
+        ("es", "tres, dos, uno", "3, 2, 1"),
+        ("fr", "deux, un instant", "2, un instant"),
+        ("en", "I saw two, one of them ran", "I saw 2, one of them ran"),
+        # Speaker labels (#912).
+        ("en", "Speaker one: hello", "Speaker 1: hello"),
+        ("fr", "Locuteur un : bonjour", "Locuteur 1 : bonjour"),
+        ("es", "Hablante uno: hola", "Hablante 1: hola"),
+        ("it", "Parlante uno: ciao", "Parlante 1: ciao"),
+        # Not a pronoun after a person noun, nor after an ordinal (#1175,
+        # #1176); a sentence mark after the item is fine (#1177).
+        ("en", "he was a guest, one of hundreds", "he was a guest, one of hundreds"),
+        ("en", "give each person one", "give each person one"),
+        ("en", "the hundredth one, not the first", "the 100th one, not the first"),
+        ("fr", "dans la famille, un", "dans la famille, un"),
+        ("en", "three, two, one!", "3, 2, 1!"),
+        ("fr", "trois, deux, un !", "3, 2, 1 !"),
+        # de "ein" is also a verb particle (#1174 audit).
+        ("de", "Er schläft um zwei ein", "Er schläft um 2 ein"),
+    ],
+)
+def test_article_one_after_a_number_or_speaker_label(lang, text, expected):
+    assert words2num_sentence(text, lang=lang) == expected

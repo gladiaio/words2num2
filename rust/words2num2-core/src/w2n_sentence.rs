@@ -3682,6 +3682,11 @@ fn label_words(resolved: &str) -> &'static str {
     }
 }
 
+/// Is the next non-space part after `i` exactly `text` (a spaced ":")?
+fn next_part_is(parts: &[String], i: usize, text: &str) -> bool {
+    parts[i + 1..].iter().find(|t| !py_str_isspace(t)).is_some_and(|t| t == text)
+}
+
 /// Is the lone article-number at `i` a count? Yes in front of a unit or
 /// currency, in front of the percent phrase, after a label word or after a
 /// month ("december one"). "one of them", "no one", "un instant", "one
@@ -3696,6 +3701,38 @@ fn article_is_count(resolved: &str, parts: &[String], i: usize, next_is_number: 
         label_words(resolved).split_whitespace().any(|l| l == p) || is_month(resolved, Some(p))
     });
     let punct = trailing_mark(&parts[i]);
+    let base = resolved.split(&['_', '-'][..]).next().unwrap_or(resolved);
+    // "Speaker one:", fr "Locuteur un :": a speaker label, only before its
+    // colon ("a guest, one of hundreds" keeps the pronoun, #912, #1175).
+    let colon = punct.starts_with(':') || next_part_is(parts, i, ":");
+    let speaker = colon
+        && prev.as_deref().is_some_and(|p| {
+            matches!(
+                p,
+                "speaker" | "participant" | "interviewer" | "respondent" | "panelist" | "caller" | "guest"
+                    | "voice" | "person" | "locuteur" | "intervenant" | "hablante" | "locutor"
+                    | "interlocutor" | "participante" | "falante" | "parlante" | "oratore" | "relatore"
+                    | "partecipante" | "interlocutore"
+            )
+        });
+    // "three, two, one", "press one one": right after a cardinal number,
+    // with no sentence mark between, it counts on when it ends its clause
+    // ("trois, deux, un, partez", "three, two, one!"); "deux, un instant",
+    // "two, one of them" keep the article (#911, #1176, #1177).
+    let prev_raw = parts[..i].iter().rev().find(|t| !py_str_isspace(t));
+    let next_raw = parts[i + 1..].iter().find(|t| !py_str_isspace(t));
+    let item = !punct.is_empty() || next.is_none() || next_raw.is_some_and(|t| !t.chars().any(char::is_alphanumeric));
+    let after_number = item
+        && prev_raw.is_some_and(|r| matches!(trailing_mark(r).as_str(), "" | ","))
+        && prev.as_deref().is_some_and(|p| !p.is_empty() && matches!(crate::lookup_norm(resolved, p, false, &[]), Ok(Some(_))))
+        && !(base == "en" && next.as_deref() == Some("of"))
+        // de "ein" is also a verb particle ("er schläft um zwei ein"), and
+        // counts as "eins"; ro "o" is the article (#1174 audit).
+        && !(base == "de" && crate::normalize(&parts[i]).trim().starts_with("ein") && crate::normalize(&parts[i]).trim() != "eins")
+        && !(base == "ro" && crate::normalize(&parts[i]).trim() == "o");
+    if after_number || speaker {
+        return true;
+    }
     if !punct.is_empty() && punct != "," {
         return labelled;
     }
@@ -7460,7 +7497,8 @@ mod format_char_punct_tests {
     fn format_char_after_mark_issue_870() {
         let s = |t: &str, l: &str| super::words2num_sentence(t, l, "cardinal", false).unwrap();
         assert_eq!(s("one hundred.\u{200B} Five people", "en"), "100.\u{200B} 5 people");
-        assert_eq!(s("twenty,\u{200B} one", "en"), "20,\u{200B} one");
+        // "one" ending its clause after a number counts (#911), as in "twenty, one".
+        assert_eq!(s("twenty,\u{200B} one", "en"), "20,\u{200B} 1");
         assert_eq!(s("twenty;\u{00AD} one", "en"), "20;\u{00AD} one");
         assert_eq!(s("zwanzig.\u{2060} Drei Leute", "de"), "20.\u{2060} 3 Leute");
         // A bare format character is a word-break hint, no mark (#998).
