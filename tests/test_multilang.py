@@ -596,6 +596,13 @@ def test_written_compounds_reject_non_numbers(lang, text):
         ("fr", "trois millions et demi d\u2019habitants", "3500000 d\u2019habitants"),
         ("pt", "um bilião e meio", "1500000000000"),
         ("fr", "un million et demi !", "1500000 !"),
+        ("es", "dos millones y medio  ambiente", "2000000 y medio  ambiente"),
+        (
+            "es",
+            "dos millones y medio  de comunicación",
+            "2000000 y medio  de comunicación",
+        ),
+        ("pt_BR", "um trilhão e meio", "1500000000000"),
     ],
 )
 def test_scale_and_a_half_sentence(lang, text, expected):

@@ -4015,7 +4015,7 @@ fn fold_scale_half(text: &str, lang: &str, input: &str) -> String {
     const SCALES: &[&str] = &[
         "millon", "millones", "billon", "billones", "milhao", "milhoes", "bilhao", "bilhoes", "biliao", "bilioes", "million", "millions",
         "milliard", "milliards", "billion", "billions", "milione", "milioni", "miliardo", "miliardi", "bilione", "bilioni", "milio",
-        "milions", "bilio", "bilions",
+        "milions", "bilio", "bilions", "trilhao", "trilhoes", "billiard", "billiards", "biliardo", "biliardi",
     ];
     let words: Vec<&str> = input.split_whitespace().collect();
     let spelled: Vec<bool> = (1..words.len().saturating_sub(1))
@@ -4047,18 +4047,23 @@ fn fold_scale_half(text: &str, lang: &str, input: &str) -> String {
         // A conjunction or a currency name may follow ("y medio y …", "y
         // medio euros").
         let ends = |trail: &str| {
+            // The next real token: a double space leaves empty ones
+            // ("y medio  ambiente", #1207 audit).
+            let real = |from: usize| (from..toks.len()).find(|&k| !toks[k].trim().is_empty());
+            let next_k = real(i + 3);
+            let next = next_k.map(|k| toks[k]);
             !trail.is_empty()
-                || toks.get(i + 3).is_none_or(|n| {
+                || next.is_none_or(|n| {
                     // An elided partitive ("d'euros", "d’habitants") and a
                     // spaced mark (fr "et demi !") end it too (#1207 audit).
                     let lower = n.to_lowercase();
-                    if lower.starts_with("d'") || lower.starts_with("d\u{2019}") || !n.chars().any(char::is_alphanumeric) {
+                    if lower.starts_with("d'") || lower.starts_with("d\u{2019}") || lower.starts_with("d\u{2018}") || lower.starts_with("d\u{2bc}") || !n.chars().any(char::is_alphanumeric) {
                         return true;
                     }
                     let w = core(n);
                     // Not "medio de comunicación", "meio de transporte": the
                     // half of a set phrase (#1207 audit).
-                    let set_phrase = toks.get(i + 4).is_some_and(|x| {
+                    let set_phrase = next_k.and_then(|k| real(k + 1)).map(|k| toks[k]).is_some_and(|x| {
                         matches!(core(x).as_str(), "comunicacion" | "comunicacao" | "transporte" | "transportes" | "vida" | "pago" | "pagos" | "pagamento" | "prueba" | "prova" | "cultivo" | "trasporto" | "comunicazione" | "transport" | "communication")
                     });
                     (matches!(w.as_str(), "de" | "del" | "di" | "do" | "da" | "dos" | "das" | "des" | "du" | "d") && !set_phrase)
