@@ -77,6 +77,10 @@ fn number_at(lang: &str, toks: &[Tok], i: usize, range: std::ops::RangeInclusive
             return None;
         }
         let words: Vec<&str> = span.iter().map(|t| t.word.as_str()).collect();
+        // Nor a connector before it: "Uhr | und zwei Bücher" (#936).
+        if matches!(words[0], "und" | "et" | "y" | "e") {
+            return None;
+        }
         // A connector after the number is no part of it: "diez y | las tres"
         // kept its "y" (#937).
         if n > 1 && matches!(words[n - 1], "y" | "et" | "und" | "e") {
@@ -281,7 +285,19 @@ fn span_de(toks: &[Tok], i: usize) -> Option<Span> {
             }
         }
     }
-    let (h, n) = hour_at("de", toks, i, 24, |k| word(toks, k) == Some("uhr"))?;
+    // "eine Uhr" is a watch (the time is "ein Uhr"): the article of the noun
+    // is no hour (#936).
+    // After a cue it is the hour still ("um eine Uhr", as transcripts write
+    // it).
+    let eine = matches!(word(toks, i)?, "eine" | "einer" | "einen" | "einem");
+    if eine && !cue("de", prev) {
+        return None;
+    }
+    let (h, n) = if (word(toks, i) == Some("ein") || (eine && word(toks, i) == Some("eine"))) && toks[i].trail.is_empty() && word(toks, i + 1) == Some("uhr") {
+        (1, 1)
+    } else {
+        hour_at("de", toks, i, 24, |k| word(toks, k) == Some("uhr"))?
+    };
     let key = i + n;
     let uhr = &toks[key];
     let after = if uhr.trail.is_empty() { number_at("de", toks, key + 1, 1..=59) } else { None };

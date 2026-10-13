@@ -219,3 +219,23 @@ def test_time_reader_leaves_currency_and_counted_nouns(text, lang, kwargs, expec
 )
 def test_time_ranges_and_quarters(text, lang, expected):
     assert words2num_sentence(text, lang=lang) == expected
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        # "eine Uhr" is a watch; the time is "ein Uhr" (#936).
+        ("Er kaufte eine Uhr", "Er kaufte eine Uhr"),
+        ("Ich habe eine Uhr gekauft", "Ich habe eine Uhr gekauft"),
+        ("eine Uhr für zwanzig Euro", "eine Uhr für 20 Euro"),
+        ("um ein Uhr", "um 1 Uhr"),
+        ("um ein Uhr dreißig", "um 1:30 Uhr"),
+        ("um eine Uhr", "um 1 Uhr"),
+        # "und" opens no minutes: two hours, or the next count (#936).
+        ("Er kaufte eine Uhr und zwei Bücher", "Er kaufte eine Uhr und 2 Bücher"),
+        ("zwischen zwei Uhr und drei Uhr", "zwischen 2 Uhr und 3 Uhr"),
+        ("um neun Uhr und zwei Bücher", "um 9 Uhr und 2 Bücher"),
+    ],
+)
+def test_de_eine_uhr_and_und(text, expected):
+    assert words2num_sentence(text, lang="de") == expected
