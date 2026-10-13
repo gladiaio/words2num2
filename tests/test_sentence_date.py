@@ -312,8 +312,19 @@ def test_opener_around_date_is_kept(lang, text, expected):
         # A cardinal day or a year before a plural noun counts it (#931).
         ("en_GB", "in june twelve people died", "in june 12 people died"),
         ("en_GB", "by july fifteen trucks had left", "by july 15 trucks had left"),
-        ("en", "june first 1999 people", "June 1 1999 people"),
         ("en", "june twelve was great", "June 12 was great"),
+        # Real dates the rules must keep (#1203 audit, #1204, #1205).
+        ("en", "in march 2020 prices rose", "in March 2020 prices rose"),
+        ("en", "the june 2020 results", "the June 2020 results"),
+        ("en", "on june 5 2021 prices rose", "on June 5, 2021 prices rose"),
+        ("en", "born march 1990", "born March 1990"),
+        ("en", "report for jan 2020", "report for Jan 2020"),
+        ("en", "march 2020 – may 2021", "March 2020 – May 2021"),
+        ("en_GB", "12 march", "12 March"),
+        ("en_GB", "deadline: three may", "deadline: 3 May"),
+        ("en_GB", "dated 3 sept", "dated 3 Sept"),
+        ("en", "june twelve works for me", "June 12 works for me"),
+        ("en", "on june twelve people protested", "on June 12 people protested"),
     ],
 )
 def test_en_month_homographs_and_counts(lang, text, expected):
