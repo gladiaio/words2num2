@@ -123,3 +123,68 @@ def test_only_plain_modes():
 )
 def test_time_reader_leaves_longer_numbers_and_counts(text, lang, expected):
     assert words2num_sentence(text, lang=lang) == expected
+
+
+@pytest.mark.parametrize(
+    "text, lang, kwargs, expected",
+    [
+        # Minutes before a currency name of the language or a counted noun
+        # are an amount or a count, not a clock time (#1194).
+        (
+            "shares closed at nine fifty pence",
+            "en",
+            {"currency": True},
+            "shares closed at 9 £0.50",
+        ),
+        ("at nine fifty rupees", "en", {}, "at 9 50 rupees"),
+        ("six heures dix livres", "fr", {"currency": True}, "6 heures 10 £"),
+        ("huit heures trois kilos", "fr", {}, "8 heures 3 kilos"),
+        ("um neun Uhr zwanzig Kinder", "de", {}, "um 9 Uhr 20 Kinder"),
+        ("um neun Uhr zwanzig Pfund", "de", {"currency": True}, "um 9 Uhr 20 £"),
+        ("las dos y cinco pesos", "es", {"currency": True}, "las 2 y $5"),
+        ("las dos y cinco niños", "es", {}, "las 2 y 5 niños"),
+        # A name that is mostly another word keeps the time.
+        ("at nine fifteen won the race", "en", {}, "at 9:15 won the race"),
+        ("a las dos y cinco real", "es", {}, "a las 2:05 real"),
+        # A spaced "p m", a capitalised name and the clearest homographs
+        # keep the time (#1197 audit).
+        ("at nine fifteen p. m.", "en", {}, "at 9:15 p. m."),
+        ("at nine fifteen p m", "en", {"currency": True}, "at 9:15 p m"),
+        (
+            "at nine fifteen Penny called",
+            "en",
+            {"currency": True},
+            "at 9:15 Penny called",
+        ),
+        (
+            "at nine fifteen pound the table",
+            "en",
+            {"currency": True},
+            "at 9:15 pound the table",
+        ),
+        (
+            "a las nueve y diez Franco llamó",
+            "es",
+            {"currency": True},
+            "a las 9:10 Franco llamó",
+        ),
+        (
+            "a las nueve y diez peso la harina",
+            "es",
+            {"currency": True},
+            "a las 9:10 peso la harina",
+        ),
+        (
+            "um neun Uhr zwanzig Rand des Waldes",
+            "de",
+            {"currency": True},
+            "um 9:20 Uhr Rand des Waldes",
+        ),
+        ("six heures dix francs", "fr", {}, "6 heures 10 francs"),
+        # Upper or title case still counts (#1197 audit).
+        ("AT NINE FIFTY RUPEES", "en", {"currency": True}, "AT 9 ₹50"),
+        ("a las dos y cinco Pesos", "es", {"currency": True}, "a las 2 y $5"),
+    ],
+)
+def test_time_reader_leaves_currency_and_counted_nouns(text, lang, kwargs, expected):
+    assert words2num_sentence(text, lang=lang, **kwargs) == expected

@@ -3864,8 +3864,15 @@ fn en_time_run(parts: &[String], i: usize) -> Option<(String, usize)> {
                         | "dollars" | "dollar" | "cents" | "euros" | "pounds" | "pence" | "yen" | "minutes"
                         | "seconds" | "hours" | "days" | "weeks" | "months" | "items" | "units" | "grams"
                         | "kilograms" | "kg" | "miles" | "kilometers" | "kilometres" | "km" | "meters" | "metres"
-                        | "feet" | "inches" | "pounds-force" | "litres" | "liters"
+                        | "feet" | "inches" | "pounds-force" | "litres" | "liters" | "children" | "men"
+                        | "women" | "students" | "pieces" | "kilos"
                 )
+                // Any currency name ("rupees", "francs") (#1194), not a
+                // homograph or name ("pound the table", "Penny") or "p" of a
+                // spaced "p m" (#1197 audit).
+                || (crate::w2n_currency::is_currency_word("en", w)
+                    && !crate::w2n_currency::time_homograph(w)
+                    && !(w == "p" && then.as_deref().is_some_and(|t| t == "m" || t == "m.")))
                 // "twenty first": the minutes and the ordinal are one ordinal;
                 // "fifteen first" is not (#1190 audit).
                 || (minutes % 10 == 0
