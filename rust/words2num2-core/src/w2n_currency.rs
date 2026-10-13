@@ -281,6 +281,13 @@ fn default_currency(lang: &str) -> Currency {
 /// Is `norm` (normalized) a subunit word of `lang`: "cents", "centimes",
 /// "centesimi"? The walker asks before reading it as an ordinal (it
 /// "centesimo" is both the hundredth and the cent).
+/// A currency name that, after the minutes of a time, is more often another
+/// word or a name ("pound the table", "Penny", "Rand des Waldes", es "peso
+/// la harina"): the time is kept (#1197 audit).
+pub fn time_homograph(norm: &str) -> bool {
+    matches!(norm, "pound" | "penny" | "buck" | "quid" | "sterling" | "peso" | "rand" | "franken" | "krone" | "franco" | "fen")
+}
+
 /// A currency or subunit name of the language ("pesos", "Pfund", "rupees"):
 /// minutes before one count it, they are no clock time (#1194).
 /// Not the names that are mostly other words ("won", "real", "corona").

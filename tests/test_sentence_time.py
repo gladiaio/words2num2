@@ -146,6 +146,41 @@ def test_time_reader_leaves_longer_numbers_and_counts(text, lang, expected):
         # A name that is mostly another word keeps the time.
         ("at nine fifteen won the race", "en", {}, "at 9:15 won the race"),
         ("a las dos y cinco real", "es", {}, "a las 2:05 real"),
+        # A spaced "p m", a capitalised name and the clearest homographs
+        # keep the time (#1197 audit).
+        ("at nine fifteen p. m.", "en", {}, "at 9:15 p. m."),
+        ("at nine fifteen p m", "en", {"currency": True}, "at 9:15 p m"),
+        (
+            "at nine fifteen Penny called",
+            "en",
+            {"currency": True},
+            "at 9:15 Penny called",
+        ),
+        (
+            "at nine fifteen pound the table",
+            "en",
+            {"currency": True},
+            "at 9:15 pound the table",
+        ),
+        (
+            "a las nueve y diez Franco llamó",
+            "es",
+            {"currency": True},
+            "a las 9:10 Franco llamó",
+        ),
+        (
+            "a las nueve y diez peso la harina",
+            "es",
+            {"currency": True},
+            "a las 9:10 peso la harina",
+        ),
+        (
+            "um neun Uhr zwanzig Rand des Waldes",
+            "de",
+            {"currency": True},
+            "um 9:20 Uhr Rand des Waldes",
+        ),
+        ("six heures dix francs", "fr", {}, "6 heures 10 francs"),
     ],
 )
 def test_time_reader_leaves_currency_and_counted_nouns(text, lang, kwargs, expected):

@@ -3854,6 +3854,7 @@ fn en_time_run(parts: &[String], i: usize) -> Option<(String, usize)> {
         // "each" / "per" count only when they end the clause ("nine fifty
         // each"); "each morning", "per the schedule" keep the time (#1192).
         let then = next_word_index(parts, end).and_then(|k| next_word(parts, k));
+        let next_raw = next_word_index(parts, end).map_or("", |k| parts[k].as_str());
         let ends_after = next_word_index(parts, end).is_none_or(|k| !trailing_mark(&parts[k]).is_empty() || then.is_none());
         next.as_deref().is_none_or(|w| {
             !(crate::w2n_lang_en::is_scale_word(w)
@@ -3867,8 +3868,13 @@ fn en_time_run(parts: &[String], i: usize) -> Option<(String, usize)> {
                         | "feet" | "inches" | "pounds-force" | "litres" | "liters" | "children" | "men"
                         | "women" | "students" | "pieces" | "kilos"
                 )
-                // Any currency name ("rupees", "francs") (#1194).
-                || crate::w2n_currency::is_currency_word("en", w)
+                // Any currency name ("rupees", "francs") (#1194), not a
+                // capitalised one ("Penny"), a homograph ("pound the table")
+                // or "p" of a spaced "p m" (#1197 audit).
+                || (crate::w2n_currency::is_currency_word("en", w)
+                    && !crate::w2n_currency::time_homograph(w)
+                    && !next_raw.starts_with(char::is_uppercase)
+                    && !(w == "p" && then.as_deref().is_some_and(|t| t == "m" || t == "m.")))
                 // "twenty first": the minutes and the ordinal are one ordinal;
                 // "fifteen first" is not (#1190 audit).
                 || (minutes % 10 == 0
