@@ -4049,10 +4049,13 @@ fn fold_scale_half(text: &str, lang: &str, input: &str) -> String {
         let ends = |trail: &str| {
             // The next real token: a double space leaves empty ones
             // ("y medio  ambiente", #1207 audit).
-            let real = |from: usize| (from..toks.len()).find(|&k| !toks[k].trim().is_empty());
+            // Whitespace and format characters are no token ("medio\u{200b}",
+            // "\u{a0}", "\t").
+            let blank = |t: &str| t.chars().all(|c| c.is_whitespace() || is_format_char(c));
+            let real = |from: usize| (from..toks.len()).find(|&k| !blank(toks[k]));
             let next_k = real(i + 3);
             let next = next_k.map(|k| toks[k]);
-            !trail.is_empty()
+            !trail.chars().all(|c| c.is_whitespace() || is_format_char(c))
                 || next.is_none_or(|n| {
                     // An elided partitive ("d'euros", "d’habitants") and a
                     // spaced mark (fr "et demi !") end it too (#1207 audit).
