@@ -3966,6 +3966,9 @@ pub fn words2num_sentence_full(
     // The currency pass reads a figure with its format character (#1021).
     let folds = date || phone;
     let mut out = with_bare_format(!folds, || words2num_sentence_folded(sentence, lang, to, has_kwargs, currency))?;
+    // The phone pass leaves a day-month-year run of figures to the date pass
+    // ("né le 23 10 2026", #940), and reads a longer number whole first
+    // ("06 12 2024 56", #1181).
     if phone {
         out = crate::w2n_phone::fold_phones(&out, lang, region);
     }
