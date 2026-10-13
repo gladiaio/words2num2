@@ -4013,8 +4013,9 @@ fn fold_scale_half(text: &str, lang: &str, input: &str) -> String {
     // written stays (#1208). Each "<conn> <half>" of the input, in order:
     // was a scale word before it?
     const SCALES: &[&str] = &[
-        "millon", "millones", "billon", "billones", "milhao", "milhoes", "bilhao", "bilhoes", "million", "millions", "milliard",
-        "milliards", "milione", "milioni", "miliardo", "miliardi", "milio", "milions",
+        "millon", "millones", "billon", "billones", "milhao", "milhoes", "bilhao", "bilhoes", "biliao", "bilioes", "million", "millions",
+        "milliard", "milliards", "billion", "billions", "milione", "milioni", "miliardo", "miliardi", "bilione", "bilioni", "milio",
+        "milions", "bilio", "bilions",
     ];
     let words: Vec<&str> = input.split_whitespace().collect();
     let spelled: Vec<bool> = (1..words.len().saturating_sub(1))
@@ -4048,6 +4049,12 @@ fn fold_scale_half(text: &str, lang: &str, input: &str) -> String {
         let ends = |trail: &str| {
             !trail.is_empty()
                 || toks.get(i + 3).is_none_or(|n| {
+                    // An elided partitive ("d'euros", "d’habitants") and a
+                    // spaced mark (fr "et demi !") end it too (#1207 audit).
+                    let lower = n.to_lowercase();
+                    if lower.starts_with("d'") || lower.starts_with("d\u{2019}") || !n.chars().any(char::is_alphanumeric) {
+                        return true;
+                    }
                     let w = core(n);
                     // Not "medio de comunicación", "meio de transporte": the
                     // half of a set phrase (#1207 audit).
