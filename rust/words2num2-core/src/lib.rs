@@ -1146,6 +1146,9 @@ fn scale_aliases(lang: &str) -> &'static [(&'static str, i64)] {
             ("trillion", 1_000_000_000_000_000_000),
         ],
         "sl" => &[("milijonov", 1_000_000), ("milijard", 1_000_000_000)],
+        // num2words2 writes lo 10^9 and up in figures, so the billion is never
+        // probed (#878).
+        "lo" => &[("ຕື້", 1_000_000_000)],
         _ => &[],
     }
 }
@@ -1420,7 +1423,7 @@ fn derive_scales(lang: &str) -> Scales {
         add(&mut sc.words, joined, *mag);
     }
     for (w, mag) in scale_aliases(lang) {
-        add(&mut sc.words, w, *mag);
+        add(&mut sc.words, &normalize(w), *mag);
     }
     sc.words.retain(|(w, _)| !short_postfix.contains(w));
     // Plus grande magnitude d'abord : « million » se scinde avant « mille ».
