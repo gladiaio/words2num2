@@ -567,22 +567,24 @@ def test_written_compounds_reject_non_numbers(lang, text):
 @pytest.mark.parametrize(
     "lang, text, expected",
     [
-        # "un"/"um" after the tens' connector is the article of a singular
-        # noun, not part of the compound (#861).
+        # "un poco" / "um pouco" after the tens is the quantifier (#861).
         ("es_MX", "pesaba ochenta y un poco más", "pesaba 80 y un poco más"),
-        ("es_AR", "llegaron veinte y una señora", "llegaron 20 y una señora"),
         ("pt_BR", "pesava oitenta e um pouco", "pesava 80 e um pouco"),
-        ("pt_BR", "chegaram vinte e um homem", "chegaram 20 e um homem"),
-        # The compound stays before a plural, a number, a function word or
-        # the end.
-        ("es_MX", "llegaron treinta y una personas", "llegaron 31 personas"),
-        ("es", "tiene treinta y un años", "tiene 31 años"),
-        ("es", "cuarenta y un mil", "41000"),
-        ("es", "treinta y un por ciento", "31 por ciento"),
-        ("es", "treinta y una", "31"),
-        # A unit or a currency keeps the compound (#1211).
-        ("es", "cuarenta y un kilómetro", "41 kilómetro"),
+        # Everything else keeps the compound: nouns, verbs, pronouns, units,
+        # currencies, years (#1210 audit).
+        ("es_AR", "llegaron veinte y una señora", "llegaron 21 señora"),
+        ("pt_BR", "trinta e um passaram na prova", "31 passaram na prova"),
+        (
+            "pt",
+            "o ano de dois mil e vinte e um foi difícil",
+            "o ano de 2021 foi difícil",
+        ),
+        ("es", "de los cincuenta, treinta y una aprobaron", "de los 50, 31 aprobaron"),
+        ("pt", "cem libras e cinquenta e um pence", "100 libras e 51 pence"),
+        ("es", "treinta y un km", "31 km"),
         ("es", "cuarenta y un euro", "41 euro"),
+        ("es_MX", "llegaron treinta y una personas", "llegaron 31 personas"),
+        ("es", "cuarenta y un mil", "41000"),
     ],
 )
 def test_tens_and_article(lang, text, expected):

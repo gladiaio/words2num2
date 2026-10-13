@@ -4758,9 +4758,8 @@ fn words2num_sentence_walk(
             }
         }
 
-        // es/pt "veinte y una señora", "oitenta e um pouco": "un"/"um" after
-        // the tens' connector is the article of a singular noun, not 21
-        // ("veintiún hombres", "treinta y un años" keep the compound, #861).
+        // es/pt "ochenta y un poco más", "oitenta e um pouco": "un"/"um" after
+        // the tens' connector opens the quantifier "a little", not 81 (#861).
         if plain && !best_ordinal && best_end > i {
             let base = resolved.split(['_', '-']).next().unwrap_or(&resolved);
             let w = |k: usize| crate::normalize(rstrip_punct(&parts[k]).trim());
@@ -4769,25 +4768,12 @@ fn words2num_sentence_walk(
                 && matches!(w(best_end).as_str(), "un" | "una" | "um" | "uma")
                 && trailing_mark(&parts[best_end]).is_empty()
                 && prev.is_some_and(|k| matches!(w(k).as_str(), "y" | "e" | "i"));
-            let singular = next_word(&parts, best_end).is_some_and(|n| {
-                let n = crate::normalize(&n);
-                !n.is_empty()
-                    && n.chars().all(char::is_alphabetic)
-                    && !n.ends_with('s')
-                    // Function words: "treinta y un por ciento" is 31 % (#861).
-                    && !matches!(
-                        n.as_str(),
-                        "por" | "de" | "del" | "en" | "y" | "e" | "o" | "a" | "al" | "con" | "para" | "sobre" | "que" | "entre" | "ou"
-                            | "em" | "no" | "na" | "do" | "da" | "mais" | "menos" | "mas" | "com" | "pra" | "per" | "di" | "in"
-                            | "su" | "tra" | "fra" | "i" | "amb" | "total" | "medio" | "meio" | "mezzo" | "mig"
-                    )
-                    && !matches!(crate::lookup_norm(&resolved, &n, false, &[]), Ok(Some(_)))
-                    // A unit or a currency the compound counts ("cuarenta y
-                    // un euro", "kilómetro"): the left-over "un" would read as
-                    // a second 1 (#1211).
-                    && !unit_words(&resolved).split_whitespace().any(|u| u == n)
-                    && !crate::w2n_currency::is_currency_word(&resolved, &n)
-            });
+            // Only on positive evidence: "un poco" / "um pouco" is the
+            // quantifier, never a count of it. A noun, a verb or a pronoun
+            // after it is as often the compound's ("trinta e um passaram",
+            // "vinte e um anos", "treinta y un km"), and pt "um" is also the
+            // pronoun (#1210 audit).
+            let singular = next_word(&parts, best_end).is_some_and(|n| matches!(crate::normalize(&n).as_str(), "poco" | "pouco" | "poc"));
             if article && singular {
                 if let Some(k) = prev.and_then(|c| (i..c).rev().find(|&k| !py_str_isspace(&parts[k]))) {
                     if let Ok(v) = converter.to_cardinal(parts[i..=k].concat().trim()) {
