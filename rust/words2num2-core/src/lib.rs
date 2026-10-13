@@ -124,6 +124,13 @@ fn ka_cardinal(text: &str) -> Option<i64> {
     const TENS: [(&str, i64); 4] = [("ოც", 20), ("ორმოც", 40), ("სამოც", 60), ("ოთხმოც", 80)];
     const HUNDREDS: [&str; 9] = ["ას", "ორას", "სამას", "ოთხას", "ხუთას", "ექვსას", "შვიდას", "რვაას", "ცხრაას"];
     let unit = |w: &str| UNITS.iter().position(|&u| u == w).map(|k| k as i64 + 1);
+    // A sign word and trailing punctuation, as the table path reads them
+    // ("მინუს ოცდაერთი", "ოცდაერთი.", #1198 audit).
+    let text = text.trim().trim_end_matches(['.', ',', '!', '?', ';', ':']);
+    let (sign, text) = match text.strip_prefix("მინუს") {
+        Some(rest) if rest.starts_with(char::is_whitespace) => (-1, rest),
+        _ => (1, text),
+    };
     // "ოცდა ათი": the joining "და" ends a word only before its unit.
     let mut words: Vec<String> = Vec::new();
     for w in text.split_whitespace() {
@@ -163,7 +170,7 @@ fn ka_cardinal(text: &str) -> Option<i64> {
             return None;
         }
     }
-    Some(total + group)
+    Some(sign * (total + group))
 }
 
 /// A numerical symbol, no digit of a figure: a superscript or subscript

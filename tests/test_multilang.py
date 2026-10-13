@@ -514,6 +514,8 @@ def test_article_one_after_a_number_or_speaker_label(lang, text, expected):
         ("ka", "ას ოცდაერთი", 121),
         ("ka", "ათას ოცდაერთი", 1021),
         ("ka", "ორი ათას ხუთასი", 2500),
+        ("ka", "მინუს ოცდაერთი", -21),
+        ("ka", "ოცდაერთი.", 21),
         # Burmese spaced inside one number (#989).
         ("my", "တစ်ဆယ့် တစ်", 11),
         ("my", "တစ်ဆယ့် နှစ်", 12),
