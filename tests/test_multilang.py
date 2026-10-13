@@ -652,3 +652,23 @@ def test_scale_and_a_half_sentence(lang, text, expected):
 )
 def test_scale_and_a_half_cardinal(lang, text, expected):
     assert words2num(text, lang=lang) == expected
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        # lo billion "ຕື້" (#878).
+        ("ຫ້າຕື້", 5000000000),
+        ("ໜຶ່ງຕື້", 1000000000),
+        ("ສອງຕື້ສາມ", 2000000003),
+    ],
+)
+def test_lo_billion(text, expected):
+    assert words2num(text, lang="lo") == expected
+
+
+def test_lo_billion_sentence():
+    assert (
+        words2num_sentence("ງົບປະມານ ຫ້າຕື້ ກີບ", lang="lo")
+        == "ງົບປະມານ 5000000000 ກີບ"
+    )
