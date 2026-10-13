@@ -68,3 +68,33 @@ def test_only_plain_modes():
     assert ":" not in words2num_sentence(
         "a las nueve y cuarto", lang="es", to="ordinal"
     )
+
+
+@pytest.mark.parametrize(
+    "text, lang, expected",
+    [
+        # The number goes on after the time (#928, #935).
+        ("at nine fifteen thousand", "en", "at 9 15000"),
+        ("at nine twenty first", "en", "at 9 21st"),
+        ("cent vingt heures quinze", "fr", "120 heures 15"),
+        ("pendant trente et une heures quinze", "fr", "pendant 31 heures 15"),
+        ("las dos menos treinta y uno", "es", "las 2 menos 31"),
+        # The minutes count something (#933, #904).
+        (
+            "il travaille huit heures trois fois par semaine",
+            "fr",
+            "il travaille 8 heures 3 fois par semaine",
+        ),
+        ("um neun Uhr zwanzig Leute kamen", "de", "um 9 Uhr 20 Leute kamen"),
+        ("las dos y cinco personas", "es", "las 2 y 5 personas"),
+        ("sold at nine fifty each", "en", "sold at 9 50 each"),
+        ("rates at five twenty five percent", "en", "rates at 5 25 percent"),
+        # Times still read.
+        ("at nine fifteen and then lunch", "en", "at 9:15 and then lunch"),
+        ("à neuf heures quinze demain", "fr", "à 9h15 demain"),
+        ("um neun Uhr fünfzehn", "de", "um 9:15 Uhr"),
+        ("a las nueve y cuarto", "es", "a las 9:15"),
+    ],
+)
+def test_time_reader_leaves_longer_numbers_and_counts(text, lang, expected):
+    assert words2num_sentence(text, lang=lang) == expected

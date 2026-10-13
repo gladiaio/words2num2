@@ -3835,9 +3835,20 @@ fn en_time_run(parts: &[String], i: usize) -> Option<(String, usize)> {
     }
     let end = words[n - 1].part;
     let cue = prev_word(parts, i).is_some_and(|p| EN_TIME_CUES.contains(&p.as_str()));
-    let meridiem =
-        next_word(parts, end).is_some_and(|w| matches!(w.as_str(), "am" | "pm" | "a.m" | "p.m"));
-    (cue || meridiem).then(|| (format!("{hour}:{minutes:02}"), end))
+    let next = next_word(parts, end);
+    let meridiem = next.as_deref().is_some_and(|w| matches!(w, "am" | "pm" | "a.m" | "p.m"));
+    // After a cue only, not when the next word goes on with the number
+    // ("nine fifteen thousand", "point five", "twenty first") or counts
+    // something ("nine fifty each", "five twenty five percent", "twelve
+    // fifteen times") (#928, #904).
+    let ends_cleanly = trailing_mark(&parts[end]).is_empty().then_some(()).map_or(true, |_| {
+        next.as_deref().is_none_or(|w| {
+            !(crate::w2n_lang_en::is_scale_word(w)
+                || matches!(w, "hundred" | "thousand" | "point" | "each" | "per" | "percent" | "times" | "year" | "years" | "people" | "dollars" | "dollar" | "cents" | "euros" | "pounds" | "minutes" | "seconds" | "hours" | "days" | "weeks" | "months" | "items" | "units")
+                || crate::w2n_lang_en::ordinal_cardinal(w).is_some())
+        })
+    });
+    (meridiem || (cue && ends_cleanly)).then(|| (format!("{hour}:{minutes:02}"), end))
 }
 
 /// en "nineties" -> 9: the decade a decade word names, for `to="year"`.
