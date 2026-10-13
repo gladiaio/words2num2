@@ -777,6 +777,21 @@ pub fn lookup_norm(
     if ordinal {
         return Ok(None);
     }
+    // th "สองร้อยหนึ่ง" (official "หนึ่ง" after the hundreds, = "สองร้อยเอ็ด") and
+    // my "ဆယ့်ငါး" (the ten without its "တစ်"), as the table spells them (#877,
+    // #879).
+    let base = lang.split(&['_', '-'][..]).next();
+    let written = match base {
+        Some("th") => normalized
+            .strip_suffix(normalize("หนึ่ง").as_str())
+            .filter(|h| h.ends_with(normalize("ร้อย").as_str()))
+            .map(|h| format!("{h}{}", normalize("เอ็ด"))),
+        Some("my") => normalized.starts_with(normalize("ဆယ").as_str()).then(|| format!("{}{normalized}", normalize("တစ်"))),
+        _ => None,
+    };
+    if let Some(v) = written.as_deref().and_then(|w| tab.get(w)) {
+        return Ok(Some(sign * v));
+    }
     // Gender / construct / attributive forms and glued connectors (ru "две",
     // he "שני" before מיליון, ar "وواحد" after a scale word).
     Ok(w2n_forms::fragment_value(lang, &tab, normalized).map(|(v, _)| sign * v))
@@ -1850,11 +1865,28 @@ fn glued_number(lang: &str, s: &str, sc: &Scales) -> Option<i64> {
     if let Some(v) = lookup_plain(lang, s) {
         return Some(v);
     }
-    if lang.split(&['_', '-'][..]).next() == Some("th") {
+    let base = lang.split(&['_', '-'][..]).next();
+    if base == Some("th") {
         let ed = normalize("เอ็ด");
+        let one = normalize("หนึ่ง");
         if let Some(head) = s.strip_suffix(ed.as_str()) {
-            let one = format!("{head}{}", normalize("หนึ่ง"));
-            if let Some(v) = lookup_plain(lang, &one) {
+            if let Some(v) = lookup_plain(lang, &format!("{head}{one}")) {
+                return Some(v);
+            }
+        }
+        // The official form writes the final one as "หนึ่ง" after the
+        // hundreds too: "สองร้อยหนึ่ง" is "สองร้อยเอ็ด", 201 (#879).
+        if let Some(head) = s.strip_suffix(one.as_str()).filter(|h| h.ends_with(normalize("ร้อย").as_str())) {
+            if let Some(v) = glued_number(lang, &format!("{head}{ed}"), sc) {
+                return Some(v);
+            }
+        }
+    }
+    // my "ဆယ်" (10), "ဆယ့်ငါး" (15): the ten without its "တစ်" (#877).
+    if base == Some("my") {
+        let ten = normalize("ဆယ");
+        if s.starts_with(ten.as_str()) {
+            if let Some(v) = glued_number(lang, &format!("{}{s}", normalize("တစ်")), sc) {
                 return Some(v);
             }
         }
@@ -2065,8 +2097,11 @@ fn parse_scaled_inner(lang: &str, text: &str, sc: &Scales, conns: &[&str]) -> Op
     if let Some(v) = lookup_plain(lang, text) {
         return Some(v);
     }
-    if !text.contains(' ') {
-        if let Some(v) = split_glued_scale(lang, text, sc) {
+    // One token: a scale split, or a th / my written form (#877, #879). Not
+    // a bare th "เอ็ด" (the verb "to scold"): it is the one only after a place
+    // (#1214 audit).
+    if !text.contains(' ') && text != normalize("เอ็ด") {
+        if let Some(v) = glued_number(lang, text, sc) {
             return Some(v);
         }
     }

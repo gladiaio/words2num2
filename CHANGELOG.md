@@ -10,6 +10,7 @@ follows [Semantic Versioning](https://semver.org/) and uses
 
 - es: the split teens "diez y seis" .. "diez y nueve" (RAE-accepted) are 16..19 ("tenía diez y ocho años" is "tenía 18 años", was "tenía 10 y 8 años"; `words2num("diez y seis")` is 16, was an error); a clock time ("a las diez y seis", 10:06; "las diez y seis minutos") is read first, and after a number and a comma it stays a list of two numbers ("cinco, diez y seis") (#866).
 - `currency=True` (es/pt/fr/it/ca): a spelled-out amount "and a half" folds to the half amount ("cinco pesos y medio" is "$5.50", was "$5 y medio"; pt_BR "cinco reais e meio" "R$ 5,50"); a half that is the next noun's ("y medio kilo"), a subunit ("centavos y medio"), a currency with no minor unit ("yenes") or a figure as written ("5 euros y medio") stays (#860).
+- th: the official "หนึ่ง" after the hundreds reads like "เอ็ด" ("สองร้อยหนึ่ง" is 201, was an error; "ห้องสองร้อยหนึ่ง" is "ห้อง201"); my: the ten without its "တစ်" ("ဆယ်" 10, "ဆယ့်ငါး" 15, "ဆယ်သိန်း" 1000000) (#877, #879).
 
 ## [0.4.2] — 2026-10-13
 
