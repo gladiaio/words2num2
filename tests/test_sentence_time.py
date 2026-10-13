@@ -188,3 +188,26 @@ def test_time_reader_leaves_longer_numbers_and_counts(text, lang, expected):
 )
 def test_time_reader_leaves_currency_and_counted_nouns(text, lang, kwargs, expected):
     assert words2num_sentence(text, lang=lang, **kwargs) == expected
+
+
+@pytest.mark.parametrize(
+    "text, lang, expected",
+    [
+        # "entre las N y M": a range of two hours, not N:0M (#937).
+        ("entre las dos y tres", "es", "entre las 2 y 3"),
+        ("te llamo entre las cinco y seis", "es", "te llamo entre las 5 y 6"),
+        ("entre la una y tres", "es", "entre la 1 y 3"),
+        ("entre las dos y veinte", "es", "entre las 2:20"),
+        ("a las dos y tres", "es", "a las 2:03"),
+        # Three quarters of an hour (#934).
+        ("a las dos y tres cuartos", "es", "a las 2:45"),
+        ("à trois heures trois quarts", "fr", "à 3h45"),
+        ("à neuf heures et trois quarts", "fr", "à 9h45"),
+        # A connector after the minutes is kept (#937).
+        ("entre las dos y diez y las tres", "es", "entre las 2:10 y las 3"),
+        ("à neuf heures cinq et quart", "fr", "à 9h05 et quart"),
+        ("um fünf Uhr zwölf und sechs Uhr", "de", "um 5:12 Uhr und 6 Uhr"),
+    ],
+)
+def test_time_ranges_and_quarters(text, lang, expected):
+    assert words2num_sentence(text, lang=lang) == expected
