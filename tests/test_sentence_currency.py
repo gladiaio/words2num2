@@ -430,9 +430,11 @@ def test_mark_before_format_char_kept_after_amount(text, lang, expected):
     [
         ("x )a dollar and fifty cents y", "en", "x )a dollar and fifty cents y"),
         ("x )one dollar y", "en", "x )one dollar y"),
-        ("x (one dollar and fifty cents y", "en", "x (1 dollar and 50 cents y"),
+        # An opener is kept and the amount folds, as before a figure (#1105).
+        ("x (one dollar and fifty cents y", "en", "x ($1.50 y"),
+        ("x (a dollar and fifty cents y", "en", "x ($1.50 y"),
         ("x )un dollar y", "fr", "x )un dollar y"),
-        ("x (duas libras y", "pt", "x (2 libras y"),
+        ("x (duas libras y", "pt", "x (2 £ y"),
         # A glued clause mark is kept and the article still counts (#1161);
         # a mark the walk reads past keeps the article a word (#1162).
         ("x ,a dollar and fifty cents y", "en", "x ,$1.50 y"),
@@ -451,7 +453,7 @@ def test_mark_before_format_char_kept_after_amount(text, lang, expected):
         (
             "x (\u200ba dollar and fifty cents y",
             "en",
-            "x (\u200ba dollar and 50 cents y",
+            "x (\u200b$1.50 y",
         ),
         ("x \u200ba dollar and fifty cents y", "en", "x \u200b$1.50 y"),
         # Unchanged without a mark.
@@ -498,4 +500,36 @@ def test_count_rewrite_keeps_a_leading_mark(text, lang, expected):
     ],
 )
 def test_article_one_counts_only_before_a_subunit_amount(text, lang, expected):
+    assert words2num_sentence(text, lang=lang, currency=True) == expected
+
+
+@pytest.mark.parametrize(
+    "text, lang, expected",
+    [
+        # An opener glued before the amount goes back before it (#1105).
+        ("x (fifty dollars) y", "en", "x ($50) y"),
+        ("x ［fifty dollars y", "en", "x ［$50 y"),
+        ("x ⁽fifty dollars y", "en", "x ⁽$50 y"),
+        ("x ︵five dollars fifty y", "en", "x ︵$5.50 y"),
+        ("x «cinquante euros» y", "fr", "x «50 €» y"),
+        ("x ︵quinze euros y", "fr", "x ︵15 € y"),
+        ("x ［fünfzig Euro y", "de", "x ［50 € y"),
+        ("x (doce euros con cincuenta céntimos y", "es", "x (12,50 € y"),
+        # An opener glued after the unit is kept after the amount (#1104).
+        ("x fifty dollars（ y", "en", "x $50（ y"),
+        ("x fifty dollars( y", "en", "x $50( y"),
+        ("x five dollars fifty（ y", "en", "x $5.50（ y"),
+        # A bracket closed on the figure still blocks the fold.
+        ("x (fifty) dollars y", "en", "x (50) dollars y"),
+        # A connector with a mark after it links nothing (#1195 audit).
+        ("x (five dollars and) fifty cents y", "en", "x ($5 and) 50 cents y"),
+        ("x «five dollars and» fifty cents y", "en", "x «$5 and» 50 cents y"),
+        ("x (five dollars and. fifty cents y", "en", "x ($5 and. 50 cents y"),
+        ("x (a dollar and) fifty cents y", "en", "x (a dollar and) 50 cents y"),
+        ("x five dollars and) fifty cents y", "en", "x $5 and) 50 cents y"),
+        ("x (cinq euros et) cinquante centimes y", "fr", "x (5 € et) 50 centimes y"),
+        ("x (fünf Euro und) fünfzig Cent y", "de", "x (5 € und) 50 Cent y"),
+    ],
+)
+def test_opener_around_amount_is_kept(text, lang, expected):
     assert words2num_sentence(text, lang=lang, currency=True) == expected

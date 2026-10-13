@@ -852,8 +852,9 @@ struct Num {
     frac: String,
     trailing: String,
     invisible: String,
-    /// A clause mark the walker kept before the figure (",5" of ",five",
-    /// #1047); never "." , which would be a decimal point.
+    /// A clause mark or an opener the walker kept before the figure (",5"
+    /// of ",five", #1047; "(5", #1105); never "." , which would be a
+    /// decimal point.
     lead: String,
 }
 
@@ -864,12 +865,16 @@ fn parse_num(word: &str) -> Option<Num> {
             || (crate::w2n_sentence::folded_mark(c) == Some(crate::w2n_sentence::Mark::Terminal)
                 && !crate::w2n_sentence::folds_to_dots(c))
             || crate::w2n_sentence::is_format_char(c)
+            // An opening bracket or quote glued before the figure
+            // ("(fifty dollars)", "«quinze euros»", "［fifty dollars") goes
+            // back before the amount (#1104, #1105).
+            || crate::w2n_sentence::is_opener(c)
     });
     let lead = word[..word.len() - body.len()].to_string();
     let word = body;
     let core = word.trim_end_matches(crate::w2n_sentence::is_format_char);
     let invisible = word[core.len()..].to_string();
-    let trimmed = core.trim_end_matches(trailing_mark);
+    let trimmed = core.trim_end_matches(|c: char| trailing_mark(c) || crate::w2n_sentence::is_opener(c));
     let trailing = core[trimmed.len()..].to_string();
     if trimmed.is_empty() || !trimmed.chars().next().is_some_and(|c| c.is_ascii_digit()) {
         return None;
@@ -917,7 +922,7 @@ fn legacy_trailing(word: &str) -> bool {
 fn word_key(word: &str) -> (String, String) {
     // Format characters after the mark ride with it: "dollars,\u{200e}" keeps
     // ",\u{200e}", not lost to normalize (#1083 audit).
-    let trimmed = word.trim_end_matches(|c: char| trailing_mark(c) || crate::w2n_sentence::is_format_char(c));
+    let trimmed = word.trim_end_matches(|c: char| trailing_mark(c) || crate::w2n_sentence::is_opener(c) || crate::w2n_sentence::is_format_char(c));
     let trimmed = &word[..trimmed.len() + word[trimmed.len()..].find(|c: char| !crate::w2n_sentence::is_format_char(c)).unwrap_or(word.len() - trimmed.len())];
     let trailing = word[trimmed.len()..].to_string();
     (crate::normalize(trimmed).trim().to_string(), trailing)
@@ -1144,11 +1149,13 @@ pub fn fold_currency(text: &str, lang: &str) -> String {
         let pause_fmt: String = if comma { trailing.chars().filter(|c| crate::w2n_sentence::is_format_char(*c)).collect() } else { String::new() };
         if (trailing.is_empty() || comma) && frac.is_none() && cur.decimals > 0 {
             if let Some(k) = next_word(&parts, m.end) {
-                let (kkey, _) = word_key(&parts[k].text);
+                let (kkey, ktrail) = word_key(&parts[k].text);
                 let (mut sub_at, mut had_conn) = (Some(k), false);
                 if conns.contains(&kkey.as_str()) {
                     had_conn = true;
-                    sub_at = next_word(&parts, k);
+                    // A connector with a mark after it ("and)", "and.") links
+                    // nothing: the mark would be lost (#1195 audit).
+                    sub_at = next_word(&parts, k).filter(|_| ktrail.trim_end_matches(crate::w2n_sentence::is_format_char).is_empty());
                 }
                 let sub_num = sub_at.and_then(|s| parse_num(&parts[s].text).map(|n| (s, n)));
                 if let Some((s, sub_num)) = sub_num.filter(|(_, n)| n.frac.is_empty() && n.lead.chars().all(crate::w2n_sentence::is_format_char)) {
@@ -1267,6 +1274,10 @@ fn subunit_follows(lang: &str, conns: &[&str], keys: &[String], named: &[Option<
     }
     let mut x = end + 1;
     if keys.get(x).is_some_and(|k| conns.contains(&k.as_str())) {
+        // Not past a connector with a mark after it ("and)") (#1195 audit).
+        if !word_key(&parts[words[x]].text).1.trim_end_matches(crate::w2n_sentence::is_format_char).is_empty() {
+            return false;
+        }
         x += 1;
     }
     let first = x;
@@ -1536,16 +1547,17 @@ fn pieces_for_walk_with(sentence: &str, lang: &str, subunits_only: bool, counts:
             }
         }
     }
-    // A word a mark opens ("(one", ")a", "«duas") is not rewritten: the
-    // rewrite would drop the mark; it reads as any number word after that
-    // mark does.
-    // A glued clause mark is cut off and kept, the word after it read
-    // (",a dollar" -> ",1 dollar", #1161); any other mark leaves it as written.
+    // A glued clause mark or opener is cut off and kept, the word after it
+    // read (",a dollar" -> ",1 dollar", #1161; "(a dollar", #1105); any other
+    // mark (")a") leaves it as written: the rewrite would drop the mark.
     let lead_of = |t: &str| -> Option<String> {
         let lead: String = t.chars().take_while(|c| !c.is_alphanumeric()).collect();
         // Not a dot: the walk never folds after ".", "...", "．" (#1159 audit).
         let clause = lead.chars().all(|c| {
             crate::w2n_sentence::is_format_char(c)
+                // An opener is kept too, as before a figure ("(a dollar",
+                // "«une livre", #1105).
+                || crate::w2n_sentence::is_opener(c)
                 || (crate::w2n_sentence::is_clause_lead(c) && c != '.' && !crate::w2n_sentence::folds_to_dots(c))
         });
         clause.then_some(lead)
