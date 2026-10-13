@@ -325,6 +325,12 @@ def test_opener_around_date_is_kept(lang, text, expected):
         ("en_GB", "dated 3 sept", "dated 3 Sept"),
         ("en", "june twelve works for me", "June 12 works for me"),
         ("en", "on june twelve people protested", "on June 12 people protested"),
+        # Ranges, cues and adverbs after "may"/"march" (#1203 audit).
+        ("en", "from 3 march to 5 april", "from March 3 to April 5"),
+        ("en", "1 march to 30 april", "March 1 to April 30"),
+        ("en", "on 3 march in london", "on March 3 in london"),
+        ("en", "on 3 may now", "on May 3 now"),
+        ("en", "see you may 2020", "see you May 2020"),
     ],
 )
 def test_en_month_homographs_and_counts(lang, text, expected):

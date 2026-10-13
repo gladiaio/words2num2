@@ -199,12 +199,15 @@ fn en_verb_month(m: &str) -> bool {
 /// may meeting").
 fn en_verb_next(m: &str, w: &str) -> bool {
     if m.eq_ignore_ascii_case("march") {
-        matches!(w, "on" | "together" | "through" | "into" | "to" | "down" | "up" | "along" | "forward" | "past" | "across" | "off" | "back" | "in" | "out" | "around" | "home" | "away")
+        // Not "to"/"through"/"in"/"on": "from 3 march to 5 april", "on 3
+        // march in london" (#1203 audit).
+        matches!(w, "together" | "into" | "down" | "up" | "along" | "forward" | "past" | "across" | "off" | "back" | "out" | "around" | "home" | "away")
     } else {
         matches!(
             w,
+            // Not the adverbs that also follow a date ("on 3 may now").
             "be" | "have" | "come" | "go" | "take" | "not" | "also" | "need" | "want" | "get" | "see" | "help" | "find" | "make" | "use"
-                | "well" | "still" | "never" | "only" | "even" | "just" | "now" | "soon" | "already" | "arrive" | "leave" | "win" | "lose"
+                | "never" | "arrive" | "leave" | "win" | "lose"
                 | "stay" | "join" | "apply" | "vary" | "differ" | "change" | "include" | "require" | "cause" | "contain"
         )
     }
@@ -213,7 +216,8 @@ fn en_verb_next(m: &str, w: &str) -> bool {
 /// A subject before "may"/"march" with a figure: "they march 2000 miles"
 /// (#907).
 fn en_subject(w: &str) -> bool {
-    matches!(w, "i" | "you" | "we" | "they" | "he" | "she" | "who" | "people" | "soldiers" | "troops" | "protesters" | "students" | "workers")
+    // Not "you": mostly an object ("see you may 2020").
+    matches!(w, "i" | "we" | "they" | "he" | "she" | "who" | "people" | "soldiers" | "troops" | "protesters" | "students" | "workers")
 }
 
 /// The month as the language writes it: capitalised in en and de.
@@ -568,7 +572,9 @@ fn span_at(lang: &str, st: Style, toks: &[&str], i: usize, chained: bool) -> Opt
                 // "may"/"march" after a count are verbs only before a verb-like
                 // word ("all three may come"); at the end, before a mark or a
                 // noun ("12 march", "the 3 may meeting") it is the date.
-                let verb = en_verb_month(&m) && open(&m_trail) && n == 0 && low(m_at + 1).is_some_and(|w| en_verb_next(&m, &w));
+                // After a cue it is the date ("on 3 march", "from 3 march").
+                let cued = i > 0 && low(i - 1).is_some_and(|w| matches!(w.as_str(), "on" | "by" | "since" | "until" | "till" | "from" | "before" | "after"));
+                let verb = !cued && en_verb_month(&m) && open(&m_trail) && n == 0 && low(m_at + 1).is_some_and(|w| en_verb_next(&m, &w));
                 if en && !ordinal && (link || verb) {
                     return None;
                 }
