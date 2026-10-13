@@ -97,12 +97,20 @@ pub fn words2num(
             // Burmese writes a number unspaced: "တစ်ဆယ့် တစ်" is
             // "တစ်ဆယ့်တစ်" (11, #989).
             "my" => {
-                let glued: String = text.split_whitespace().collect();
+                // A sign and punctuation at the edges ride along, read as the
+                // glued form reads them ("-တစ်ဆယ့် တစ်", "တစ်ဆယ့် တစ်.").
+                let (lead, core, trail) = edges(text);
+                // A sign word stays a word before the glued number.
+                let (lead, core) = match core.get(..5).filter(|w| w.eq_ignore_ascii_case("minus")).map(|_| &core[5..]) {
+                    Some(rest) if rest.starts_with(char::is_whitespace) => (format!("{lead}minus "), rest.trim_start()),
+                    _ => (lead.to_string(), core),
+                };
+                let glued: String = core.split_whitespace().collect();
                 // Number words only: separate figures ("1 2", "၁ ၂", "2 3.5")
                 // stay separate (#1199).
-                let words_only = text.split_whitespace().all(|p| p.chars().all(|c| !c.is_numeric() && !c.is_ascii_punctuation()));
-                if glued != text.trim() && words_only {
-                    if let Ok(v) = w2n_sentence::words2num(&glued, lang, to) {
+                let words_only = core.split_whitespace().all(|p| p.chars().all(|c| !c.is_numeric() && !c.is_ascii_punctuation()));
+                if glued != core && words_only {
+                    if let Ok(v) = w2n_sentence::words2num(&format!("{lead}{glued}{trail}"), lang, to) {
                         return Ok(v);
                     }
                 }
@@ -111,6 +119,26 @@ pub fn words2num(
         }
     }
     res
+}
+
+/// A minus sign: ASCII, the minus and the hyphens and dashes the table
+/// path reads as one ("–21").
+fn is_minus(c: char) -> bool {
+    matches!(c, '-' | '\u{2212}' | '\u{2010}' | '\u{2011}' | '\u{2012}' | '\u{2013}' | '\u{2014}' | '\u{2015}')
+}
+
+/// `text` cut into its leading punctuation or sign, its core and its
+/// trailing punctuation.
+/// Only the marks the table path reads there: brackets, quotes, sentence
+/// marks, and a minus in front ("%", "#", "$" are no edge).
+fn edges(text: &str) -> (&str, &str, &str) {
+    const MARKS: &str = "()[]{}\"'«»“”„‘’‚….,!?;:¡¿（）「」『』【】၊။";
+    let mark = |c: char| MARKS.contains(c) || c.is_whitespace() || w2n_sentence::is_format_char(c);
+    let t = text.trim();
+    let core = t.trim_start_matches(|c: char| mark(c) || is_minus(c));
+    let lead = &t[..t.len() - core.len()];
+    let core2 = core.trim_end_matches(mark);
+    (lead, core2, &core[core2.len()..])
 }
 
 /// A Georgian cardinal below a million in its standard spelling: units and
@@ -126,10 +154,24 @@ fn ka_cardinal(text: &str) -> Option<i64> {
     let unit = |w: &str| UNITS.iter().position(|&u| u == w).map(|k| k as i64 + 1);
     // A sign word and trailing punctuation, as the table path reads them
     // ("მინუს ოცდაერთი", "ოცდაერთი.", #1198 audit).
-    let text = text.trim().trim_end_matches(['.', ',', '!', '?', ';', ':']);
-    let (sign, text) = match text.strip_prefix("მინუს") {
-        Some(rest) if rest.starts_with(char::is_whitespace) => (-1, rest),
-        _ => (1, text),
+    // Punctuation at the edges and a sign, as the table path reads them
+    // ("-ოცდაერთი", "minus ოცდაერთი", "(ოცდაერთი)", "ოცდაერთი…").
+    let (lead, text, _) = edges(text);
+    // One minus at most, as the table reads it ("--" raises; "+" is no edge
+    // and stays in the core).
+    let minuses = lead.chars().filter(|&c| is_minus(c)).count();
+    if minuses > 1 {
+        return None;
+    }
+    let mut sign = if minuses == 1 { -1 } else { 1 };
+    let lower = text.to_lowercase();
+    let word_len = ["მინუს", "minus"].iter().find(|w| lower.starts_with(*w)).map(|w| w.len());
+    let text = match word_len.map(|n| &text[n..]) {
+        Some(rest) if rest.starts_with(char::is_whitespace) && sign == 1 => {
+            sign = -1;
+            rest
+        }
+        _ => text,
     };
     // "ოცდა ათი": the joining "და" ends a word only before its unit.
     let mut words: Vec<String> = Vec::new();
