@@ -711,6 +711,13 @@ def test_lo_billion(text, expected):
     assert words2num(text, lang="lo") == expected
 
 
+def test_lo_billion_elided_place():
+    # "ຕື້ສອງ" is 1.2 billion, as "ລ້ານສອງ" is 1.2 million; "ສອງຕື້ຫ້າ" (2.5
+    # billion or 2 000 000 005) stays, as "ສອງລ້ານຫ້າ" does (#1215 audit).
+    assert words2num("ຕື້ສອງ", lang="lo") == 1200000000
+    assert words2num_sentence("ສອງຕື້ຫ້າ ກີບ", lang="lo") == "ສອງຕື້ຫ້າ ກີບ"
+
+
 def test_lo_billion_sentence():
     assert (
         words2num_sentence("ງົບປະມານ ຫ້າຕື້ ກີບ", lang="lo")
