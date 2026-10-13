@@ -3982,8 +3982,14 @@ pub fn words2num_sentence_full(
     // The currency pass reads a figure with its format character (#1021).
     let folds = date || phone;
     let mut out = with_bare_format(!folds, || words2num_sentence_folded(sentence, lang, to, has_kwargs, currency))?;
+    // The range mark of `share_scale_words` (#865); never in the input's own
+    // text unless the caller wrote it, and then only where it is glued to a
+    // connector the rewrite produced.
+    if out.contains(SHARE_MARK) && !sentence.contains(SHARE_MARK) {
+        out = out.replace(SHARE_MARK, "");
+    }
     if !currency {
-        out = fold_shared_scale(&fold_scale_half(&out, lang, sentence), lang, sentence);
+        out = fold_scale_half(&out, lang, sentence);
     }
     // The phone pass leaves a day-month-year run of figures to the date pass
     // ("né le 23 10 2026", #940), and reads a longer number whole first
@@ -4099,88 +4105,6 @@ fn fold_currency_half(text: &str, lang: &str, input: &str) -> String {
     out.join(" ")
 }
 
-/// "cinco o seis mil personas" -> "5000 o 6000", not "5 o 6000" (#865): in a
-/// spelled-out alternative or range whose second bound carries the scale
-/// ("<A> or <B> thousand", "between <A> and <B> million"), the first bound
-/// takes the scale too. Only where the input spells it so; a figure as
-/// written is never multiplied.
-fn fold_shared_scale(text: &str, lang: &str, input: &str) -> String {
-    let base = lang.split(['_', '-']).next().unwrap_or(lang).to_lowercase();
-    let (or_words, and_words, range_cues): (&[&str], &[&str], &[&str]) = match base.as_str() {
-        "en" => (&["or"], &["and"], &["between"]),
-        "es" | "gl" => (&["o", "u"], &["y", "e"], &["entre"]),
-        "pt" => (&["ou"], &["e"], &["entre"]),
-        "fr" => (&["ou"], &["et"], &["entre"]),
-        "it" => (&["o", "oppure"], &["e"], &["tra", "fra"]),
-        "ca" => (&["o"], &["i"], &["entre"]),
-        "de" => (&["oder"], &["und"], &["zwischen"]),
-        "nl" => (&["of"], &["en"], &["tussen"]),
-        _ => return text.to_string(),
-    };
-    let resolved = resolve_lang(lang).unwrap_or_else(|_| lang.to_string());
-    let core = |t: &str| crate::normalize(t.trim_end_matches(|c: char| !c.is_alphanumeric()));
-    let scale_of = |w: &str| -> Option<u64> {
-        Some(match core(w).as_str() {
-            "thousand" | "mil" | "mille" | "mila" | "tausend" | "duizend" => 1_000,
-            "million" | "millions" | "millon" | "millones" | "milhao" | "milhoes" | "milione" | "milioni" | "milio" | "milions"
-            | "millionen" | "miljoen" | "miljoenen" => 1_000_000,
-            "billion" | "billions" | "milliard" | "milliards" | "bilhao" | "bilhoes" | "miliardo" | "miliardi" | "milliarde"
-            | "milliarden" | "miljard" | "miljarden" => 1_000_000_000,
-            _ => return None,
-        })
-    };
-    // A bound spelled as one number word below the scale (no mark, no figure).
-    let small = |w: &str| {
-        !w.chars().any(|c| c.is_numeric())
-            && w.trim_end_matches(|c: char| c.is_alphanumeric()).is_empty()
-            && matches!(crate::lookup_norm(&resolved, &core(w), false, &[]), Ok(Some(v)) if (1..1000).contains(&v))
-    };
-    // Each "<A> <conn> <B> <scale>" of the input, in order, with its scale.
-    let words: Vec<&str> = input.split_whitespace().collect();
-    let mut wanted: Vec<u64> = Vec::new();
-    for k in 1..words.len().saturating_sub(2) {
-        let conn = core(words[k]);
-        let or = or_words.contains(&conn.as_str());
-        let and = and_words.contains(&conn.as_str()) && k >= 2 && range_cues.contains(&core(words[k - 2]).as_str());
-        if (or || and) && small(words[k - 1]) && small(words[k + 1]) {
-            if let Some(sc) = scale_of(words[k + 2]) {
-                wanted.push(sc);
-            }
-        }
-    }
-    if wanted.is_empty() {
-        return text.to_string();
-    }
-    let toks: Vec<&str> = text.split(' ').collect();
-    let figure = |t: &str| (!t.is_empty() && t.len() <= 15 && t.bytes().all(|b| b.is_ascii_digit())).then(|| t.parse::<u64>().ok()).flatten();
-    let conn_at = |t: &str| {
-        let c = core(t);
-        t.chars().all(char::is_alphanumeric) && (or_words.contains(&c.as_str()) || and_words.contains(&c.as_str()))
-    };
-    // The same shape in the output: "<a> <conn> <b·scale>"; if the counts
-    // differ, fold nothing.
-    let pairs: Vec<usize> = (1..toks.len().saturating_sub(1))
-        .filter(|&k| conn_at(toks[k]) && figure(toks[k - 1]).is_some() && toks[k + 1].starts_with(|c: char| c.is_ascii_digit()))
-        .collect();
-    let mut out: Vec<String> = toks.iter().map(|t| t.to_string()).collect();
-    let mut w = 0;
-    for k in pairs {
-        let (Some(a), Some(&sc)) = (figure(toks[k - 1]), wanted.get(w)) else { break };
-        let b_core = toks[k + 1].trim_end_matches(|c: char| !c.is_ascii_digit());
-        let Some(b) = figure(b_core) else { continue };
-        if b % sc != 0 || a >= 1000 {
-            continue;
-        }
-        w += 1;
-        // An alternative or range rises: "cinco o seis mil", not "veinte o
-        // dos mil".
-        if a < b / sc {
-            out[k - 1] = (a * sc).to_string();
-        }
-    }
-    out.join(" ")
-}
-
 /// "un millón y medio" -> 1500000, not "1000000 y medio" (#859): a figure
 /// that is a whole number of millions (or more) followed by "and a half" in
 /// the language takes half of its largest scale.
@@ -4250,6 +4174,102 @@ fn fold_scale_half(text: &str, lang: &str, input: &str) -> String {
         }
     }
     out.join(" ")
+}
+
+/// "cinco o seis mil millones" -> "cinco mil millones o seis mil millones"
+/// (#865): in a spelled-out alternative or range whose last bound carries the
+/// scale words, every earlier bound takes the same scale words, so the walk
+/// reads each bound whole. A bound is one number word below 1000 with no
+/// mark ("5" as written is never multiplied, #1217); the whole run of scale
+/// words is copied ("mil millones", #1218); a chain "five or six or seven
+/// thousand" shares it right to left (#1219); a comma list ("cinco, seis o
+/// siete mil") is left alone. Rising pairs only ("veinte o dos mil" stays).
+/// Glued to a range's "and" by [`share_scale_words`], removed after the walk.
+pub(crate) const SHARE_MARK: char = '\u{E000}';
+
+pub(crate) fn share_scale_words(text: &str, lang: &str) -> Option<String> {
+    let base = lang.split(['_', '-']).next().unwrap_or(lang).to_lowercase();
+    let (or_words, and_words, range_cues): (&[&str], &[&str], &[&str]) = match base.as_str() {
+        "en" => (&["or"], &["and"], &["between"]),
+        "es" => (&["o", "u"], &["y", "e"], &["entre"]),
+        "gl" => (&["ou", "o"], &["e"], &["entre"]),
+        "pt" => (&["ou"], &["e"], &["entre"]),
+        "fr" => (&["ou"], &["et"], &["entre"]),
+        "it" => (&["o", "oppure"], &["e"], &["tra", "fra"]),
+        "ca" => (&["o"], &["i"], &["entre"]),
+        "de" => (&["oder"], &["und"], &["zwischen"]),
+        "nl" => (&["of"], &["en"], &["tussen"]),
+        _ => return None,
+    };
+    let core = |t: &str| crate::normalize(t);
+    let scale = |t: &str| {
+        t.chars().all(char::is_alphabetic)
+            && matches!(
+                core(t).as_str(),
+                "thousand" | "mil" | "mille" | "mila" | "tausend" | "duizend" | "million" | "millions" | "millon" | "millones" | "milhao"
+                    | "milhoes" | "milione" | "milioni" | "milio" | "milions" | "millionen" | "miljoen" | "miljoenen" | "billion"
+                    | "billions" | "milliard" | "milliards" | "bilhao" | "bilhoes" | "miliardo" | "miliardi" | "milliarde"
+                    | "milliarden" | "miljard" | "miljarden" | "millons" | "millos"
+            )
+    };
+    let value = |t: &str| -> Option<i64> {
+        if !t.chars().all(char::is_alphabetic) {
+            return None;
+        }
+        let w = core(t);
+        // "one", "un", "ein": the article form the table may leave out.
+        if matches!(w.as_str(), "one" | "un" | "uno" | "una" | "um" | "uma" | "ein" | "eine" | "een" | "een" | "unha") {
+            return Some(1);
+        }
+        match crate::lookup_norm(lang, &w, false, &[]) {
+            Ok(Some(v)) if (1..1000).contains(&v) => Some(v),
+            _ => None,
+        }
+    };
+    let mut toks: Vec<String> = text.split(' ').map(str::to_string).collect();
+    let mut changed = false;
+    // Right to left: the scale words of a later bound reach every earlier one.
+    let mut k = toks.len();
+    while k > 1 {
+        k -= 1;
+        let conn = core(&toks[k]);
+        let is_or = or_words.contains(&conn.as_str());
+        let is_and = and_words.contains(&conn.as_str()) && k >= 2 && range_cues.contains(&core(&toks[k - 2]).as_str());
+        if !(is_or || is_and) || !toks[k].chars().all(char::is_alphabetic) {
+            continue;
+        }
+        // An opener may stand before the first bound ("(cinco o seis mil)").
+        let (Some(a), Some(b)) = (value(toks[k - 1].trim_start_matches(is_opener)), toks.get(k + 1).and_then(|t| value(t))) else { continue };
+        // The scale words right after the second bound.
+        let mut j = k + 2;
+        while j < toks.len() && scale(toks[j].trim_end_matches(|c: char| !c.is_alphanumeric())) {
+            let last = toks[j].trim_end_matches(|c: char| !c.is_alphanumeric()).len() != toks[j].len();
+            j += 1;
+            if last {
+                break;
+            }
+        }
+        if j == k + 2 || a >= b {
+            continue;
+        }
+        // A comma list ("cinco, seis o siete mil") is no pair.
+        if k >= 2 && toks[k - 2].ends_with(',') && value(toks[k - 2].trim_end_matches(',')).is_some() {
+            continue;
+        }
+        let words: Vec<String> = toks[k + 2..j].iter().map(|t| t.trim_end_matches(|c: char| !c.is_alphanumeric()).to_string()).collect();
+        // "and" would join the bounds into one number ("five thousand and
+        // six" is 5006): a private-use mark glued to it keeps them apart, and
+        // `SHARE_MARK` is stripped after the walk.
+        if is_and {
+            toks[k] = format!("{SHARE_MARK}{}", toks[k]);
+        }
+        let at = k;
+        for (n, w) in words.into_iter().enumerate() {
+            toks.insert(at + n, w);
+        }
+        changed = true;
+    }
+    changed.then(|| toks.join(" "))
 }
 
 /// es "diez y seis" -> "dieciséis" (16..19, #866), or None when the text
@@ -4361,6 +4381,16 @@ fn words2num_sentence_folded(
         }
         None => sentence,
     };
+    // "cinco o seis mil" -> "cinco mil o seis mil": the first bound of an
+    // alternative or range takes the scale words of the second (#865).
+    let shared;
+    let sentence = match share_scale_words(sentence, &resolved_lang).filter(|_| matches!(to, "cardinal" | "currency")) {
+        Some(t) => {
+            shared = t;
+            shared.as_str()
+        }
+        None => sentence,
+    };
     if currency {
         let resolved = resolved_lang.clone();
         // Walked piece by piece: fr "trente-quatre cents" after "dollars et"
@@ -4389,7 +4419,7 @@ fn words2num_sentence_folded(
         walked?;
         // Scale-half first: the currency half consumes no pair it counts
         // (#1212 audit).
-        let halved = fold_currency_half(&fold_shared_scale(&fold_scale_half(&out, &resolved, sentence), &resolved, sentence), &resolved, sentence);
+        let halved = fold_currency_half(&fold_scale_half(&out, &resolved, sentence), &resolved, sentence);
         return Ok(crate::w2n_currency::fold_currency(&halved, &resolved));
     }
     // The plain walk cuts the same subunit off: fr "douze dollars et
