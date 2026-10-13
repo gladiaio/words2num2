@@ -84,7 +84,10 @@ fn split_trail(tok: &str) -> (&str, &str) {
 /// A day of the month as the walk writes it: "12", "12th", "1er", "1º",
 /// "12." (de). Returns the day and the punctuation after it.
 fn day(st: Style, tok: &str) -> Option<(u32, String)> {
-    let (core, trail) = split_trail(tok);
+    // An opener glued after the day ("fifth(") goes after the date, as after
+    // the month (#1195 audit).
+    let core = tok.trim_end_matches(|c: char| trail_mark(c) || crate::w2n_sentence::is_opener(c));
+    let (core, trail) = (core, &tok[core.len()..]);
     let (digits, trail) = if st == Style::De && trail.starts_with('.') {
         (core, &trail[1..]) // "12." is the German ordinal
     } else {
@@ -509,7 +512,10 @@ fn span_at(lang: &str, st: Style, toks: &[&str], i: usize, chained: bool) -> Opt
         }
     };
     // en "the 12th of march", "12th of march"; es/pt "12 de marzo"; others "12 mars".
-    let d_at = if en && low(i).as_deref() == Some("the") && at(i + 1).and_then(|t| day(st, t)).is_some() {
+    // "the" with a mark after it ("(the) fifth of may", "the, fifth") is no
+    // article of the date: skipping it would lose the mark (#1195 audit).
+    let the = |k: usize| low(k).as_deref() == Some("the") && at(k).is_some_and(|t| split_trail(t).1.is_empty());
+    let d_at = if en && the(i) && at(i + 1).and_then(|t| day(st, t)).is_some() {
         i + 1
     } else {
         i
@@ -529,13 +535,15 @@ fn span_at(lang: &str, st: Style, toks: &[&str], i: usize, chained: bool) -> Opt
     let (m, m_trail) = at(i).and_then(|t| month(lang, t))?;
     if open(&m_trail) {
         if en {
-            let skip = usize::from(low(i + 1).as_deref() == Some("the"));
+            let skip = usize::from(the(i + 1));
             let d_tok = at(i + 1 + skip);
             if let Some((d, d_trail)) = d_tok.and_then(|t| day(st, t)) {
                 let (y, trail, n) = with_year(i + 2 + skip, &d_trail);
                 // "they march 12 miles", "you may 2": a verb, unless the day is an
                 // ordinal ("march 12th"), "the" opens it, or a year follows.
-                let ordinal = d_tok.is_some_and(|t| split_trail(t).0.ends_with(|c: char| c.is_ascii_alphabetic()));
+                let ordinal = d_tok.is_some_and(|t| {
+                    t.trim_end_matches(|c: char| trail_mark(c) || crate::w2n_sentence::is_opener(c)).ends_with(|c: char| c.is_ascii_alphabetic())
+                });
                 if en_homograph(&m) && !(ordinal || skip == 1 || n > 0) {
                     return None;
                 }
@@ -575,9 +583,11 @@ pub fn fold_dates_with(text: &str, lang: &str, region: Option<&str>, iso: bool) 
         let chained = after_date.is_some_and(|k| k < i && i - k <= 3 && range_link(st, &toks[k..i]));
         // An opener glued before the date ("［fifth of may") goes back
         // before it (#1106).
-        let body = toks[i].trim_start_matches(crate::w2n_sentence::is_opener);
+        // Format characters around it ride with it ("\u{200b}(fifth of may",
+        // "(\u{200b}the fifth of may") (#1195 audit).
+        let body = toks[i].trim_start_matches(|c: char| crate::w2n_sentence::is_opener(c) || crate::w2n_sentence::is_format_char(c));
         let lead = &toks[i][..toks[i].len() - body.len()];
-        let span = if lead.is_empty() || body.is_empty() {
+        let span = if !lead.contains(crate::w2n_sentence::is_opener) || body.is_empty() {
             span_at(lang, st, &toks, i, chained)
         } else {
             let mut bare = toks.clone();

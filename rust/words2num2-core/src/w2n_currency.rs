@@ -1149,11 +1149,13 @@ pub fn fold_currency(text: &str, lang: &str) -> String {
         let pause_fmt: String = if comma { trailing.chars().filter(|c| crate::w2n_sentence::is_format_char(*c)).collect() } else { String::new() };
         if (trailing.is_empty() || comma) && frac.is_none() && cur.decimals > 0 {
             if let Some(k) = next_word(&parts, m.end) {
-                let (kkey, _) = word_key(&parts[k].text);
+                let (kkey, ktrail) = word_key(&parts[k].text);
                 let (mut sub_at, mut had_conn) = (Some(k), false);
                 if conns.contains(&kkey.as_str()) {
                     had_conn = true;
-                    sub_at = next_word(&parts, k);
+                    // A connector with a mark after it ("and)", "and.") links
+                    // nothing: the mark would be lost (#1195 audit).
+                    sub_at = next_word(&parts, k).filter(|_| ktrail.trim_end_matches(crate::w2n_sentence::is_format_char).is_empty());
                 }
                 let sub_num = sub_at.and_then(|s| parse_num(&parts[s].text).map(|n| (s, n)));
                 if let Some((s, sub_num)) = sub_num.filter(|(_, n)| n.frac.is_empty() && n.lead.chars().all(crate::w2n_sentence::is_format_char)) {
@@ -1272,6 +1274,10 @@ fn subunit_follows(lang: &str, conns: &[&str], keys: &[String], named: &[Option<
     }
     let mut x = end + 1;
     if keys.get(x).is_some_and(|k| conns.contains(&k.as_str())) {
+        // Not past a connector with a mark after it ("and)") (#1195 audit).
+        if !word_key(&parts[words[x]].text).1.trim_end_matches(crate::w2n_sentence::is_format_char).is_empty() {
+            return false;
+        }
         x += 1;
     }
     let first = x;

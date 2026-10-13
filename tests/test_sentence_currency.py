@@ -521,6 +521,14 @@ def test_article_one_counts_only_before_a_subunit_amount(text, lang, expected):
         ("x five dollars fifty（ y", "en", "x $5.50（ y"),
         # A bracket closed on the figure still blocks the fold.
         ("x (fifty) dollars y", "en", "x (50) dollars y"),
+        # A connector with a mark after it links nothing (#1195 audit).
+        ("x (five dollars and) fifty cents y", "en", "x ($5 and) 50 cents y"),
+        ("x «five dollars and» fifty cents y", "en", "x «$5 and» 50 cents y"),
+        ("x (five dollars and. fifty cents y", "en", "x ($5 and. 50 cents y"),
+        ("x (a dollar and) fifty cents y", "en", "x (a dollar and) 50 cents y"),
+        ("x five dollars and) fifty cents y", "en", "x $5 and) 50 cents y"),
+        ("x (cinq euros et) cinquante centimes y", "fr", "x (5 € et) 50 centimes y"),
+        ("x (fünf Euro und) fünfzig Cent y", "de", "x (5 € und) 50 Cent y"),
     ],
 )
 def test_opener_around_amount_is_kept(text, lang, expected):
