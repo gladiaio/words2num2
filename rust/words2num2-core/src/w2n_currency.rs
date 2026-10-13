@@ -292,6 +292,16 @@ pub fn is_currency_word(lang: &str, norm: &str) -> bool {
     !matches!(norm, "won" | "real" | "corona") && lexicon(lang).iter().any(|(name, _)| name == norm)
 }
 
+/// A main-unit currency word the currency pass renders with two decimals in
+/// `lang` ("euros", "pesos", "reais"): an amount and a half of it can be
+/// written ("5,50 €"). Not a subunit ("centavos"), a currency with no
+/// minor unit ("yenes"), or a language with no currency rendering (#1212
+/// audit).
+pub fn half_renders(lang: &str, norm: &str) -> bool {
+    let base = lang.split(&['_', '-'][..]).next().unwrap_or(lang);
+    !hand_lexicon(base).is_empty() && lexicon(lang).iter().any(|(name, w)| name == norm && !w.sub && w.cur.decimals == 2)
+}
+
 /// Is `norm` (normalized) a subunit word of `lang`: "cents", "centimes",
 /// "centesimi"? The walker asks before reading it as an ordinal (it
 /// "centesimo" is both the hundredth and the cent).

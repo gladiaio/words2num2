@@ -3982,6 +3982,9 @@ pub fn words2num_sentence_full(
     // The currency pass reads a figure with its format character (#1021).
     let folds = date || phone;
     let mut out = with_bare_format(!folds, || words2num_sentence_folded(sentence, lang, to, has_kwargs, currency))?;
+    if !currency {
+        out = fold_scale_half(&out, lang, sentence);
+    }
     // The phone pass leaves a day-month-year run of figures to the date pass
     // ("né le 23 10 2026", #940), and reads a longer number whole first
     // ("06 12 2024 56", #1181).
@@ -3991,14 +3994,52 @@ pub fn words2num_sentence_full(
     Ok(if date { crate::w2n_date::fold_dates_with(&out, lang, region, iso) } else { out })
 }
 
+/// "un millón y medio" -> 1500000, not "1000000 y medio" (#859): a figure
+/// that is a whole number of millions (or more) followed by "and a half" in
+/// the language takes half of its largest scale.
+/// Does "<conn> <half>" end the quantity, given the half word's glued
+/// `trail` and the tokens from `from` on? The end, a mark, an (elided)
+/// partitive, the language's conjunction or a currency name; not a noun of
+/// its own ("y medio kilo", "y medio millón", #1209) nor a set phrase ("medio
+/// de comunicación"). Whitespace and format characters are no token and no
+/// mark ("y medio  ambiente", "medio\t ambiente", #1207 audit).
+fn half_ends(toks: &[&str], from: usize, trail: &str, lang: &str, conn: &str) -> bool {
+    let core = |t: &str| crate::normalize(t.trim_end_matches(|c: char| !c.is_alphanumeric()));
+    let blank = |t: &str| t.chars().all(|c| c.is_whitespace() || is_format_char(c));
+    let real = |from: usize| (from..toks.len()).find(|&k| !blank(toks[k]));
+    if !blank(trail) {
+        return true;
+    }
+    let Some(next_k) = real(from) else { return true };
+    let n = toks[next_k];
+    let lower = n.to_lowercase();
+    if lower.starts_with("d'") || lower.starts_with("d\u{2019}") || lower.starts_with("d\u{2018}") || lower.starts_with("d\u{2bc}") || !n.chars().any(char::is_alphanumeric) {
+        return true;
+    }
+    let w = core(n);
+    let set_phrase = real(next_k + 1).map(|k| toks[k]).is_some_and(|x| {
+        matches!(
+            core(x).as_str(),
+            "comunicacion" | "comunicacao" | "transporte" | "transportes" | "vida" | "pago" | "pagos" | "pagamento" | "prueba" | "prova"
+                | "cultivo" | "trasporto" | "comunicazione" | "transport" | "communication"
+        )
+    });
+    (matches!(w.as_str(), "de" | "del" | "di" | "do" | "da" | "dos" | "das" | "des" | "du" | "d") && !set_phrase)
+        // The language's own conjunction: it "i" is the article (#1212 audit).
+        || w == conn
+        || matches!(w.as_str(), "o" | "ou" | "que")
+        || crate::w2n_currency::is_currency_word(lang, &w)
+}
+
 /// "cinco pesos y medio" -> "$5.50", not "$5 y medio" (#860): a spelled-out
 /// whole amount, its currency word and "and a half" read as the amount and
-/// a half. The figure gets ".5" before the currency pass renders it.
+/// a half. The figure gets ".5" before the currency pass renders it; only a
+/// main unit the pass renders with two decimals (not "centavos y medio",
+/// "yenes", gl, #1212 audit).
 fn fold_currency_half(text: &str, lang: &str, input: &str) -> String {
     let base = lang.split(['_', '-']).next().unwrap_or(lang).to_lowercase();
     let (conn, halves): (&str, &[&str]) = match base.as_str() {
         "es" => ("y", &["medio", "media"]),
-        "gl" => ("e", &["medio", "media"]),
         "pt" => ("e", &["meio", "meia"]),
         "fr" => ("et", &["demi", "demie"]),
         "it" => ("e", &["mezzo", "mezza"]),
@@ -4022,7 +4063,6 @@ fn fold_currency_half(text: &str, lang: &str, input: &str) -> String {
     if pairs != spelled.len() || pairs == 0 {
         return text.to_string();
     }
-    let real = |from: usize| (from..toks.len()).find(|&k| !toks[k].trim().is_empty());
     let mut seen = 0;
     let mut out: Vec<String> = Vec::with_capacity(toks.len());
     let mut i = 0;
@@ -4031,26 +4071,95 @@ fn fold_currency_half(text: &str, lang: &str, input: &str) -> String {
         if i + 2 < toks.len() && currency(toks[i + 1]) && half_at(&toks, i + 2) {
             seen += 1;
             let h = toks[i + 3];
-            let h_core = h.trim_end_matches(|c: char| !c.is_alphanumeric());
-            let trail = &h[h_core.len()..];
-            // "y medio" ends the amount: the end, a mark, "de" or a
-            // conjunction ("cinco euros y medio kilo" keeps its words).
-            let ends = !trail.is_empty()
-                || real(i + 4).map(|k| toks[k]).is_none_or(|n| {
-                    !n.chars().any(char::is_alphanumeric)
-                        || matches!(core(n).as_str(), "de" | "del" | "di" | "do" | "da" | "des" | "du" | "y" | "e" | "et" | "i" | "o" | "ou" | "que")
-                });
-            let whole = !t.is_empty() && t.len() <= 15 && t.bytes().all(|b| b.is_ascii_digit()) && toks[i + 1].trim_end_matches(|c: char| !c.is_alphanumeric()).len() == toks[i + 1].len();
-            if spelled[seen - 1] && ends && whole {
+            let trail = &h[h.trim_end_matches(|c: char| !c.is_alphanumeric()).len()..];
+            // An opener before the figure ("¿5") rides along.
+            let figure = t.trim_start_matches(|c: char| !c.is_alphanumeric());
+            let whole = !figure.is_empty() && figure.len() <= 15 && figure.bytes().all(|b| b.is_ascii_digit());
+            let unit = toks[i + 1];
+            let plain_unit = unit.trim_end_matches(|c: char| !c.is_alphanumeric()).len() == unit.len();
+            if spelled[seen - 1]
+                && whole
+                && plain_unit
+                && crate::w2n_currency::half_renders(lang, &core(unit))
+                && half_ends(&toks, i + 4, trail, lang, conn)
+            {
                 // The mark after "medio." goes after the amount.
                 out.push(format!("{t}.5"));
-                out.push(format!("{}{trail}", toks[i + 1]));
+                out.push(format!("{unit}{trail}"));
                 i += 4;
                 continue;
             }
         }
         out.push(t.to_string());
         i += 1;
+    }
+    out.join(" ")
+}
+
+fn fold_scale_half(text: &str, lang: &str, input: &str) -> String {
+    let base = lang.split(['_', '-']).next().unwrap_or(lang).to_lowercase();
+    let (conn, halves): (&str, &[&str]) = match base.as_str() {
+        "es" => ("y", &["medio"]),
+        "gl" => ("e", &["medio"]),
+        "pt" => ("e", &["meio"]),
+        "fr" => ("et", &["demi"]),
+        "it" => ("e", &["mezzo"]),
+        "ca" => ("i", &["mig"]),
+        _ => return text.to_string(),
+    };
+    let core = |t: &str| crate::normalize(t.trim_end_matches(|c: char| !c.is_alphanumeric()));
+    // Only after a scale word the input spelled out: "1000000 y medio" as
+    // written stays (#1208). Each "<conn> <half>" of the input, in order:
+    // was a scale word before it?
+    const SCALES: &[&str] = &[
+        "millon", "millones", "billon", "billones", "milhao", "milhoes", "bilhao", "bilhoes", "biliao", "bilioes", "million", "millions",
+        "milliard", "milliards", "billion", "billions", "milione", "milioni", "miliardo", "miliardi", "bilione", "bilioni", "milio",
+        "milions", "bilio", "bilions", "trilhao", "trilhoes", "billiard", "billiards", "biliardo", "biliardi",
+    ];
+    let words: Vec<&str> = input.split_whitespace().collect();
+    let spelled: Vec<bool> = (1..words.len().saturating_sub(1))
+        .filter(|&k| core(words[k]) == conn && halves.contains(&core(words[k + 1]).as_str()))
+        .map(|k| SCALES.contains(&core(words[k - 1]).as_str()) && words[k - 1].trim_end_matches(|c: char| c.is_alphanumeric()).is_empty())
+        .collect();
+    let toks: Vec<&str> = text.split(' ').collect();
+    // The same pairs in the output; if the counts disagree, fold nothing.
+    let pairs = (1..toks.len().saturating_sub(1)).filter(|&k| toks[k].eq_ignore_ascii_case(conn) && halves.contains(&core(toks[k + 1]).as_str())).count();
+    if pairs != spelled.len() {
+        return text.to_string();
+    }
+    let mut seen = 0;
+    let mut out: Vec<String> = Vec::with_capacity(toks.len());
+    let mut i = 0;
+    while i < toks.len() {
+        let t = toks[i];
+        if toks.get(i + 1).is_some_and(|c| c.eq_ignore_ascii_case(conn)) && toks.get(i + 2).is_some_and(|h| halves.contains(&core(h).as_str())) {
+            seen += 1;
+        }
+        let ok = seen > 0 && spelled[seen - 1];
+        let value = (!t.is_empty() && t.len() <= 18 && t.bytes().all(|b| b.is_ascii_digit())).then(|| t.parse::<u64>().ok()).flatten();
+        let half = toks.get(i + 2).map(|h| {
+            let core = h.trim_end_matches(|c: char| !c.is_alphanumeric());
+            (core, &h[core.len()..])
+        });
+        // "y medio" ends the quantity: the end, a mark, or "de" (not "y medio
+        // kilo", "y medio millón", where it is the next noun's, #1209).
+        // A conjunction or a currency name may follow ("y medio y …", "y
+        // medio euros").
+        let ends = |trail: &str| half_ends(&toks, i + 3, trail, lang, conn);
+        match (value, toks.get(i + 1), half) {
+            (Some(v), Some(&c), Some((h, trail))) if ok && ends(trail) && v > 0 && v % 1_000_000 == 0 && c.eq_ignore_ascii_case(conn) && halves.contains(&h.to_lowercase().as_str()) => {
+                let mut scale = 1_000_000u64;
+                while v % (scale * 1000) == 0 {
+                    scale *= 1000;
+                }
+                out.push(format!("{}{trail}", v + scale / 2));
+                i += 3;
+            }
+            _ => {
+                out.push(t.to_string());
+                i += 1;
+            }
+        }
     }
     out.join(" ")
 }
@@ -4101,7 +4210,10 @@ fn words2num_sentence_folded(
         })();
         drop(_clear);
         walked?;
-        return Ok(crate::w2n_currency::fold_currency(&fold_currency_half(&out, &resolved, sentence), &resolved));
+        // Scale-half first: the currency half consumes no pair it counts
+        // (#1212 audit).
+        let halved = fold_currency_half(&fold_scale_half(&out, &resolved, sentence), &resolved, sentence);
+        return Ok(crate::w2n_currency::fold_currency(&halved, &resolved));
     }
     // The plain walk cuts the same subunit off: fr "douze dollars et
     // cinquante cents" is "12 dollars et 50 cents", not "… 5000" (#868).
