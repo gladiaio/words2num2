@@ -3857,7 +3857,13 @@ fn en_time_run(parts: &[String], i: usize) -> Option<(String, usize)> {
                         | "kilograms" | "kg" | "miles" | "kilometers" | "kilometres" | "km" | "meters" | "metres"
                         | "feet" | "inches" | "pounds-force" | "litres" | "liters"
                 )
-                || crate::w2n_lang_en::ordinal_cardinal(w).is_some())
+                // "twenty first": the minutes and the ordinal are one ordinal;
+                // "fifteen first" is not (#1190 audit).
+                || (minutes % 10 == 0
+                    && minutes >= 20
+                    && crate::w2n_lang_en::ordinal_cardinal(w)
+                        .and_then(crate::w2n_lang_en::unit_value)
+                        .is_some_and(|u| (1..=9).contains(&u))))
         })
     });
     (meridiem || (cue && ends_cleanly)).then(|| (format!("{hour}:{minutes:02}"), end))

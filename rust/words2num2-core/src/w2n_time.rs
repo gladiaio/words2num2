@@ -86,8 +86,8 @@ fn number_at(lang: &str, toks: &[Tok], i: usize, range: std::ops::RangeInclusive
 /// zwanzig Leute", "las dos y cinco personas", #933).
 fn counted(lang: &str, w: &str) -> bool {
     let nouns: &[&str] = match lang {
-        "fr" => &["fois", "jour", "jours", "minute", "minutes", "seconde", "secondes", "semaine", "semaines", "mois", "an", "ans", "année", "années", "personne", "personnes", "euro", "euros", "dollar", "dollars", "livre", "livres", "%", "fr", "km", "kg", "kilomètres", "mètres", "grammes", "€", "$", "£"],
-        "de" => &["mal", "leute", "minuten", "minute", "sekunden", "tage", "tag", "jahre", "jahr", "personen", "euro", "dollar", "pfund", "prozent", "%", "km", "kg", "meter", "kilometer", "gramm", "€", "$", "£"],
+        "fr" => &["fois", "jour", "jours", "minute", "minutes", "seconde", "secondes", "semaine", "semaines", "mois", "an", "ans", "année", "années", "personnes", "euro", "euros", "dollar", "dollars", "livre", "livres", "%", "fr", "km", "kg", "kilomètres", "mètres", "grammes", "€", "$", "£"],
+        "de" => &["leute", "minuten", "minute", "sekunden", "tage", "tag", "jahre", "jahr", "personen", "euro", "dollar", "pfund", "prozent", "%", "km", "kg", "meter", "kilometer", "gramm", "€", "$", "£"],
         "es" => &["veces", "vez", "personas", "minutos", "segundos", "días", "dias", "años", "anos", "semanas", "meses", "euros", "dólares", "dolares", "libras", "%", "km", "kg", "kilómetros", "metros", "gramos", "€", "$", "£"],
         _ => &[],
     };
@@ -102,6 +102,19 @@ fn cuts_number(lang: &str, toks: &[Tok], start: usize, end: usize) -> bool {
     let is_num = |k: usize| val(k).is_some();
     let conn = |k: usize| toks.get(k).is_some_and(|t| matches!(t.word.as_str(), "et" | "y" | "e"));
     let clean = |k: usize| toks.get(k).is_some_and(|t| t.trail.is_empty());
+    // Only a scale word makes the minutes part of a larger number ("quinze
+    // mille"); another number after them is the next count ("zwanzig zwei
+    // Leute", "quinze un homme", #1190 audit).
+    let scale = |k: usize| {
+        toks.get(k).is_some_and(|t| {
+            matches!(
+                t.word.as_str(),
+                "cent" | "cents" | "mille" | "million" | "millions" | "milliard" | "milliards"
+                    | "hundert" | "tausend" | "millionen" | "cien" | "ciento" | "cientos" | "mil"
+                    | "millón" | "millones"
+            )
+        })
+    };
     // "et"/"y" joins one number only as tens and a unit ("trente et un",
     // "treinta y uno", "soixante et onze"); "neuf et dix", "zwischen neun und
     // zehn" are ranges of two (#1193).
@@ -116,7 +129,7 @@ fn cuts_number(lang: &str, toks: &[Tok], start: usize, end: usize) -> bool {
     // The minutes may have taken the connector with them ("treinta y").
     let after = end > 0
         && clean(end - 1)
-        && ((is_num(end - 1) && (is_num(end) || (conn(end) && clean(end) && compound(end - 1, end + 1))))
+        && ((is_num(end - 1) && (scale(end) || (conn(end) && clean(end) && compound(end - 1, end + 1))))
             || (end > 1 && conn(end - 1) && compound(end - 2, end)));
     before || after
 }
@@ -202,11 +215,19 @@ fn span_fr(toks: &[Tok], i: usize) -> Option<Span> {
     let span = match after {
         Some((add, m)) => {
             // Plain minutes before a counted noun are a quantity (#933).
-            if add > 0 && word(toks, key + 1).is_some_and(|w| !matches!(w, "et" | "moins")) && toks[key + m].trail.is_empty() && word(toks, key + 1 + m).is_some_and(|w| counted("fr", w)) {
-                return None;
+            let counts = add > 0
+                && word(toks, key + 1).is_some_and(|w| !matches!(w, "et" | "moins"))
+                && toks[key + m].trail.is_empty()
+                && word(toks, key + 1 + m).is_some_and(|w| counted("fr", w));
+            let (h2, mm) = clock(h, add, 24);
+            let span = Span { len: n + 1 + m, text: format!("{h2}h{mm:02}") };
+            if !counts && !cuts_number("fr", toks, i, i + span.len) {
+                return Some(span);
             }
-            let (h, mm) = clock(h, add, 24);
-            Span { len: n + 1 + m, text: format!("{h}h{mm:02}") }
+            // After a cue the hour alone is still the time ("à 9h 15 fois
+            // deux") (#1190 audit).
+            return (cue("fr", prev) && !cuts_number("fr", toks, i, i + n + 1))
+                .then(|| Span { len: n + 1, text: format!("{h}h") });
         }
         None if cue("fr", prev) => Span { len: n + 1, text: format!("{h}h") },
         None => return None,

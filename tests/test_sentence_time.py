@@ -106,6 +106,17 @@ def test_only_plain_modes():
         ("entre huit et neuf heures et quart", "fr", "entre 8 et 9h15"),
         ("zwischen neun und zehn Uhr dreißig", "de", "zwischen 9 und 10:30 Uhr"),
         ("it weighs about nine fifty grams", "en", "it weighs about 9 50 grams"),
+        # A following count is its own number, not part of the minutes; a
+        # refused fr span after a cue keeps the hour (#1190 audit).
+        ("um neun Uhr zwanzig zwei Leute kamen", "de", "um 9:20 Uhr 2 Leute kamen"),
+        (
+            "à neuf heures quinze un homme est arrivé",
+            "fr",
+            "à 9h15 un homme est arrivé",
+        ),
+        ("a las nueve y diez un hombre llegó", "es", "a las 9:10 un hombre llegó"),
+        ("à neuf heures quinze fois deux", "fr", "à 9h 15 fois 2"),
+        ("at nine fifteen first", "en", "at 9:15 first"),
     ],
 )
 def test_time_reader_leaves_longer_numbers_and_counts(text, lang, expected):
