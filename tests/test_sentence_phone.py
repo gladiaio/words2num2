@@ -148,6 +148,18 @@ def test_off_by_default():
             "ligue para 912 345 678",
         ),
         ("appelez le 06 12 2024 56", "fr", {"date": True}, "appelez le 06 12 20 24 56"),
+        # A date and a figure after it; a phone after a list figure; a year
+        # as the first figure (#1179 audit).
+        ("on 12 05 1984 12", "en", {"date": True}, "on 12/5/1984 12"),
+        (
+            "né le 23 10 2026, 300 personnes",
+            "fr",
+            {"date": True},
+            "né le 23/10/2026, 300 personnes",
+        ),
+        ("call 2, 212 555 1234", "en", {}, "call 2, (212) 555-1234"),
+        ("212 555 1234, 415 867 5309", "en", {}, "(212) 555-1234, (415) 867-5309"),
+        ("In 2019 312, 000 cars", "en", {}, "In 2019 312, 000 cars"),
         # A date is read first, or left alone (#940).
         (
             "né le vingt-trois dix deux mille vingt-six",

@@ -181,20 +181,42 @@ pub fn fold_phones(text: &str, lang: &str, region: Option<&str>) -> String {
             // one- and two-figure items is no number), no year first ("2019,
             // 312000 cars"), and no "and N" after it, which makes it a list
             // ("812, 911, 1066 and 1215") (#939, #1184, #1185).
-            let year = run.segs[0] == 4 && run.digits[..4].parse::<u32>().is_ok_and(|y| (1000..=2999).contains(&y));
+            // A year as the run's first figure ("2019, 312000", "2019 312, 000").
+            let first = split_trail(toks[i]).0;
+            let year = first.len() == 4 && first.parse::<u32>().is_ok_and(|y| (1000..=2999).contains(&y));
             let big = run.segs.iter().any(|&g| g >= 3);
             let end = i + run.taken;
             let list_tail = matches!(run.trail.as_str(), "" | ",")
                 && toks.get(end).is_some_and(|t| matches!(split_trail(t).0.to_lowercase().as_str(), "and" | "y" | "e" | "et" | "und" | "en" | "i" | "och" | "og" | "a"))
                 && toks.get(end + 1).is_some_and(|t| split_trail(t).0.starts_with(|c: char| c.is_ascii_digit()));
-            if big && !year && !list_tail { Some(run) } else { run_at(&toks, i, false) }
+            // A one-figure first group is a list item ("2, 979 517 7415").
+            if big && !year && !list_tail && run.segs[0] >= 2 { Some(run) } else { run_at(&toks, i, false) }
         });
+        // A run that crossed a comma and is no phone number is tried again
+        // up to its first comma: a phone after a list figure still reads
+        // ("call 2, 212 555 1234", #1179 audit).
+        let run = run.and_then(|r| {
+            if r.segs.len() > 1 && written(&r, &candidates).is_none() {
+                run_at(&toks, i, false)
+            } else {
+                Some(r)
+            }
+        });
+        // A day, a month and a year opening the run ("23 10 2026", "on 12 05
+        // 1984 12") are left to the date pass; only a number dialled from its
+        // trunk "0" that holds one is read whole ("06 12 2024 56", #940, #1181).
+        let date_first = run.as_ref().is_some_and(|r| r.taken >= 3 && date_shape(&toks[i..i + 3]));
         match run {
-            // A day, a month and a year ("23 10 2026", "02 20 1984") is a
-            // date, read so or left alone (#940).
-            Some(run) if date_shape(&toks[i..i + run.taken]) => {
-                out.extend(toks[i..i + run.taken].iter().map(|t| t.to_string()));
-                i += run.taken;
+            // Never across a comma right after the date ("on 04 11 2000, 609").
+            Some(run)
+                if date_first
+                    && !(run.taken > 3
+                        && split_trail(toks[i + 2]).1.is_empty()
+                        && run.digits.starts_with('0')
+                        && written(&run, &candidates).is_some()) =>
+            {
+                out.extend(toks[i..i + 3].iter().map(|t| t.to_string()));
+                i += 3;
             }
             Some(run) => {
                 match written(&run, &candidates) {
