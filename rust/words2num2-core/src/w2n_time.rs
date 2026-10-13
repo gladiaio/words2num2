@@ -84,14 +84,20 @@ fn number_at(lang: &str, toks: &[Tok], i: usize, range: std::ops::RangeInclusive
 /// A word that counts or measures what the number before it counts: after
 /// it, plain minutes are a quantity ("huit heures trois fois", "um neun Uhr
 /// zwanzig Leute", "las dos y cinco personas", #933).
-fn counted(lang: &str, w: &str) -> bool {
+fn counted(lang: &str, tok: &Tok) -> bool {
+    let w = tok.word.as_str();
     let nouns: &[&str] = match lang {
-        "fr" => &["fois", "jour", "jours", "minute", "minutes", "seconde", "secondes", "semaine", "semaines", "mois", "an", "ans", "année", "années", "personnes", "euro", "euros", "dollar", "dollars", "livre", "livres", "%", "fr", "km", "kg", "kilomètres", "mètres", "grammes", "€", "$", "£"],
-        "de" => &["leute", "minuten", "minute", "sekunden", "tage", "tag", "jahre", "jahr", "personen", "euro", "dollar", "pfund", "prozent", "%", "km", "kg", "meter", "kilometer", "gramm", "€", "$", "£"],
-        "es" => &["veces", "vez", "personas", "minutos", "segundos", "días", "dias", "años", "anos", "semanas", "meses", "euros", "dólares", "dolares", "libras", "%", "km", "kg", "kilómetros", "metros", "gramos", "€", "$", "£"],
+        "fr" => &["fois", "jour", "jours", "minute", "minutes", "seconde", "secondes", "semaine", "semaines", "mois", "an", "ans", "année", "années", "personnes", "enfants", "hommes", "femmes", "élèves", "kilos", "kilo", "litres", "litre", "francs", "euro", "euros", "dollar", "dollars", "livre", "livres", "%", "fr", "km", "kg", "kilomètres", "mètres", "grammes", "€", "$", "£"],
+        "de" => &["leute", "kinder", "männer", "frauen", "schüler", "stück", "kilo", "liter", "minuten", "minute", "sekunden", "tage", "tag", "jahre", "jahr", "personen", "euro", "dollar", "pfund", "prozent", "%", "km", "kg", "meter", "kilometer", "gramm", "€", "$", "£"],
+        "es" => &["veces", "vez", "personas", "niños", "hombres", "mujeres", "alumnos", "kilos", "kilo", "litros", "litro", "minutos", "segundos", "días", "dias", "años", "anos", "semanas", "meses", "euros", "dólares", "dolares", "libras", "%", "km", "kg", "kilómetros", "metros", "gramos", "€", "$", "£"],
         _ => &[],
     };
+    // Any currency name of the language too ("pesos", "Pfund") (#1194),
+    // but not one that is mostly another word or a name ("Franco llamó",
+    // "peso la harina", #1197 audit).
     nouns.contains(&w)
+        || (!crate::w2n_currency::time_homograph(&crate::normalize(w))
+            && crate::w2n_currency::is_currency_word(lang, &crate::normalize(w)))
 }
 
 /// The time would cut a longer number: a number word or "et"/"y"/"und" and a
@@ -220,7 +226,7 @@ fn span_fr(toks: &[Tok], i: usize) -> Option<Span> {
             let counts = add > 0
                 && word(toks, key + 1).is_some_and(|w| !matches!(w, "et" | "moins"))
                 && toks[key + m].trail.is_empty()
-                && word(toks, key + 1 + m).is_some_and(|w| counted("fr", w));
+                && toks.get(key + 1 + m).is_some_and(|t| counted("fr", t));
             let (h2, mm) = clock(h, add, 24);
             let span = Span { len: n + 1 + m, text: format!("{h2}h{mm:02}") };
             if !counts && !cuts_number("fr", toks, i, i + span.len) {
@@ -265,7 +271,7 @@ fn span_de(toks: &[Tok], i: usize) -> Option<Span> {
     let after = if uhr.trail.is_empty() { number_at("de", toks, key + 1, 1..=59) } else { None };
     // Minutes before a counted noun are a quantity: "um neun Uhr zwanzig
     // Leute" keeps "20 Leute" (#933).
-    let after = after.filter(|&(_, m)| !(toks[key + m].trail.is_empty() && word(toks, key + 1 + m).is_some_and(|w| counted("de", w))));
+    let after = after.filter(|&(_, m)| !(toks[key + m].trail.is_empty() && toks.get(key + 1 + m).is_some_and(|t| counted("de", t))));
     let span = match after {
         Some((mm, m)) => Span { len: n + 1 + m, text: format!("{h}:{mm:02} Uhr") },
         None => Span { len: n + 1, text: format!("{h} Uhr") },
@@ -282,7 +288,7 @@ fn span_es(toks: &[Tok], i: usize) -> Option<Span> {
     let key = i + 1 + n;
     let (add, m) = minutes_es("es", toks, key)?;
     let plain = !matches!(word(toks, key + 1), Some("cuarto" | "media" | "punto"));
-    if plain && toks[key + m - 1].trail.is_empty() && word(toks, key + m).is_some_and(|w| counted("es", w)) {
+    if plain && toks[key + m - 1].trail.is_empty() && toks.get(key + m).is_some_and(|t| counted("es", t)) {
         return None; // "las dos y cinco personas" (#933)
     }
     if cuts_number("es", toks, i + 1, key + m) {
