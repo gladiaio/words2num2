@@ -8,6 +8,7 @@ follows [Semantic Versioning](https://semver.org/) and uses
 
 ### Fixed
 
+- Sentence mode (es): "un poco" after the tens is the quantifier, not part of the compound ("pesaba ochenta y un poco más" is "pesaba 80 y un poco más", was "pesaba 81 poco más") (#861).
 - es/pt/fr/it/ca: whole millions or more "and a half" read as one number ("dos millones y medio de personas" is "2500000 de personas", was "2000000 y medio de personas"; pt_BR "um bilhão e meio" 1500000000; `words2num("un millón y medio")` is 1500000, was an error) (#859).
 - Sentence mode, de clock times: "eine Uhr" (a watch) is no time without a cue ("Er kaufte eine Uhr" stays, was "Er kaufte 1 Uhr"), "ein Uhr" is 1 o'clock ("um 1 Uhr", was left in words), and "und" opens no minutes ("zwischen zwei Uhr und drei Uhr" is "zwischen 2 Uhr und 3 Uhr", was "2:03 Uhr Uhr") (#936).
 - `date=True` (en): "may"/"march" after a count and before a verb-like word, or after a subject before a figure, are verbs, and "of" takes an ordinal day ("all three may come" is "all 3 may come", was "all May 3 come"; "they march two thousand miles" "they march 2000 miles"; "chapter twelve of march" "chapter 12 of march") (#907); a cardinal day after the month before a counted noun ("people", "children", "trucks" …) counts it ("in june twelve people died" is "in june 12 people died", was "in 12 June people died" in en_GB) (#931).

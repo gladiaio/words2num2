@@ -567,6 +567,35 @@ def test_written_compounds_reject_non_numbers(lang, text):
 @pytest.mark.parametrize(
     "lang, text, expected",
     [
+        # "un poco" / "um pouco" after the tens is the quantifier (#861).
+        ("es_MX", "pesaba ochenta y un poco más", "pesaba 80 y un poco más"),
+        # pt "um" is also the number and "pouco" also the adverb (#1210 audit).
+        ("pt_BR", "em dois mil e vinte e um pouco mudou", "em 2021 pouco mudou"),
+        ("es", "treinta y una poco", "31 poco"),
+        # Everything else keeps the compound: nouns, verbs, pronouns, units,
+        # currencies, years (#1210 audit).
+        ("es_AR", "llegaron veinte y una señora", "llegaron 21 señora"),
+        ("pt_BR", "trinta e um passaram na prova", "31 passaram na prova"),
+        (
+            "pt",
+            "o ano de dois mil e vinte e um foi difícil",
+            "o ano de 2021 foi difícil",
+        ),
+        ("es", "de los cincuenta, treinta y una aprobaron", "de los 50, 31 aprobaron"),
+        ("pt", "cem libras e cinquenta e um pence", "100 libras e 51 pence"),
+        ("es", "treinta y un km", "31 km"),
+        ("es", "cuarenta y un euro", "41 euro"),
+        ("es_MX", "llegaron treinta y una personas", "llegaron 31 personas"),
+        ("es", "cuarenta y un mil", "41000"),
+    ],
+)
+def test_tens_and_article(lang, text, expected):
+    assert words2num_sentence(text, lang=lang) == expected
+
+
+@pytest.mark.parametrize(
+    "lang, text, expected",
+    [
         # Whole millions or more "and a half" (#859).
         ("es_AR", "dos millones y medio de personas", "2500000 de personas"),
         (
