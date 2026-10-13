@@ -8,6 +8,7 @@ follows [Semantic Versioning](https://semver.org/) and uses
 
 ### Fixed
 
+- es: "con" as the decimal comma before a percent ("tres con cinco por ciento" is "3,5 por ciento", was "3 con 5 por ciento"; es_MX "3.5"); `words2num("tres con cinco")` is 3.5, was an error. Elsewhere in a sentence "con" stays a word ("tres con cinco amigos") (#864).
 - lo: the billion "ຕື້" (10^9) reads ("ຫ້າຕື້" is 5000000000, was an error); num2words2 writes lo 10^9 and up in figures, so the word was never in the scale table (#878).
 - es: the split teens "diez y seis" .. "diez y nueve" (RAE-accepted) are 16..19 ("tenía diez y ocho años" is "tenía 18 años", was "tenía 10 y 8 años"; `words2num("diez y seis")` is 16, was an error); a clock time ("a las diez y seis", 10:06; "las diez y seis minutos") is read first, and after a number and a comma it stays a list of two numbers ("cinco, diez y seis") (#866).
 - `currency=True` (es/pt/fr/it/ca): a spelled-out amount "and a half" folds to the half amount ("cinco pesos y medio" is "$5.50", was "$5 y medio"; pt_BR "cinco reais e meio" "R$ 5,50"); a half that is the next noun's ("y medio kilo"), a subunit ("centavos y medio"), a currency with no minor unit ("yenes") or a figure as written ("5 euros y medio") stays (#860).

@@ -783,3 +783,28 @@ def test_lo_billion_sentence():
         words2num_sentence("ງົບປະມານ ຫ້າຕື້ ກີບ", lang="lo")
         == "ງົບປະມານ 5000000000 ກີບ"
     )
+
+
+@pytest.mark.parametrize(
+    "lang, text, expected",
+    [
+        # es "con" is the decimal comma before a percent (#864).
+        (
+            "es_AR",
+            "La inflación cerró en tres con cinco por ciento, por debajo.",
+            "La inflación cerró en 3,5 por ciento, por debajo.",
+        ),
+        ("es_CL", "dos con siete por ciento", "2,7 por ciento"),
+        ("es_MX", "tres con cinco por ciento", "3.5 por ciento"),
+        ("es", "tres con treinta y cinco por ciento", "3,35 por ciento"),
+        # Not elsewhere in a sentence.
+        ("es", "llegaron tres con cinco amigos", "llegaron 3 con 5 amigos"),
+        ("es", "café con leche", "café con leche"),
+    ],
+)
+def test_es_con_decimal(lang, text, expected):
+    assert words2num_sentence(text, lang=lang) == expected
+
+
+def test_es_con_decimal_cardinal():
+    assert words2num("tres con cinco", lang="es") == Decimal("3.5")
