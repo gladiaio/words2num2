@@ -109,6 +109,28 @@ def test_off_by_default():
         ),
         # Groups from the trunk prefix still join.
         ("appelez le 06, 12, 34, 56, 78", "fr", {}, "appelez le 06 12 34 56 78"),
+        # Commas splitting it as its plan writes it, or between digits
+        # dictated one by one; "+" across a list (#1179 audit).
+        (
+            "call two one two, five five five, one two three four",
+            "en",
+            {},
+            "call (212) 555-1234",
+        ),
+        (
+            "llama al seis uno dos, tres cuatro, cinco seis, siete ocho",
+            "es",
+            {},
+            "llama al 612 34 56 78",
+        ),
+        (
+            "llama al nueve uno, uno dos tres, cuatro cinco, seis siete",
+            "es",
+            {},
+            "llama al 911 23 45 67",
+        ),
+        ("ext 2, +1, 212, 555, 1234", "en", {}, "ext 2, +1 212-555-1234"),
+        ("ruf 030 12 2345 an", "de", {}, "ruf 030 122345 an"),
         # A date is read first, or left alone (#940).
         (
             "né le vingt-trois dix deux mille vingt-six",

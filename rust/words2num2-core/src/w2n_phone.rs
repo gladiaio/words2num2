@@ -71,15 +71,25 @@ struct Run {
     digits: String,
     taken: usize,
     trail: String,
+    /// Digits between the commas the run crossed ("612, 34, 56, 78" ->
+    /// [3, 2, 2, 2]); one entry when it crossed none.
+    segs: Vec<usize>,
+    /// Some comma segment is several figures ("9 1, 123"): digits dictated
+    /// one by one, not a list of values.
+    dictated: bool,
 }
 
-fn run_at(toks: &[&str], i: usize, in_list: bool) -> Option<Run> {
+/// `commas`: may the run cross a comma between groups?
+fn run_at(toks: &[&str], i: usize, commas: bool) -> Option<Run> {
     let first = split_trail(toks.get(i)?).0.to_lowercase();
     let word_plus = first == "plus" || first == "+";
     let mut k = i + usize::from(word_plus);
     let mut plus = word_plus;
     let mut digits = String::new();
     let mut trail = String::new();
+    let mut segs = vec![0usize];
+    let mut seg_toks = 0usize;
+    let mut dictated = false;
     while let Some(tok) = toks.get(k) {
         let (core, t) = split_trail(tok);
         let core = match core.strip_prefix('+') {
@@ -93,17 +103,26 @@ fn run_at(toks: &[&str], i: usize, in_list: bool) -> Option<Run> {
             break;
         }
         digits.push_str(core);
+        *segs.last_mut().unwrap() += core.len();
+        seg_toks += 1;
+        dictated |= seg_toks > 1;
         trail = t.to_string();
         k += 1;
-        // A comma may sit between the groups of a number dialled from its
-        // trunk prefix or "+" ("06, 12, 34"); elsewhere it ends a list item
-        // ("2019, 312000 cars", "twenty one, twenty four", #939). Anything
-        // else ends the run.
-        if !(t.is_empty() || (t == "," && !in_list && (plus || digits.starts_with('0')))) {
+        // A comma may sit between groups ("06, 12, 34"); the caller decides
+        // whether that run is a phone number. Anything else ends it.
+        if t == "," && (commas || plus) {
+            segs.push(0);
+            seg_toks = 0;
+            continue;
+        }
+        if !t.is_empty() {
             break;
         }
     }
-    (!digits.is_empty()).then_some(Run { plus, digits, taken: k - i, trail })
+    if segs.last() == Some(&0) {
+        segs.pop();
+    }
+    (!digits.is_empty()).then_some(Run { plus, digits, taken: k - i, trail, segs, dictated })
 }
 
 fn only_digits(s: &str) -> String {
@@ -134,7 +153,9 @@ fn written(run: &Run, candidates: &[Id]) -> Option<String> {
 /// ("23 10 2026", "02 20 1984").
 fn date_shape(toks: &[&str]) -> bool {
     let nums: Vec<u32> = toks.iter().filter_map(|t| split_trail(t).0.parse().ok()).collect();
-    if toks.len() != 3 || nums.len() != 3 || split_trail(toks[2]).0.len() != 4 {
+    // Day and month of one or two figures: "030 12 2345" is an area code (#1179 audit).
+    let short = |t: &str| split_trail(t).0.len() <= 2;
+    if toks.len() != 3 || nums.len() != 3 || split_trail(toks[2]).0.len() != 4 || !short(toks[0]) || !short(toks[1]) {
         return false;
     }
     let (a, b, y) = (nums[0], nums[1], nums[2]);
@@ -156,7 +177,23 @@ pub fn fold_phones(text: &str, lang: &str, region: Option<&str>) -> String {
             let (core, t) = split_trail(toks[i - 1]);
             t == "," && !core.is_empty() && core.bytes().all(|b| b.is_ascii_digit())
         };
-        match run_at(&toks, i, in_list) {
+        // A comma join is the number's when it is dialled from "+" or its trunk
+        // prefix, or when the commas split it the way its plan writes it
+        // ("612, 34, 56, 78", "212, 555, 1234"), not a year and a count or a
+        // list (#939, #1179 audit). Otherwise the run ends at its first comma.
+        let run = run_at(&toks, i, !in_list).and_then(|run| {
+            if run.segs.len() < 2 || run.plus || run.digits.starts_with('0') || (run.dictated && !(run.segs[0] == 4 && run.digits[..4].parse::<u32>().is_ok_and(|y| (1000..=2999).contains(&y)))) {
+                return Some(run);
+            }
+            let year = run.segs[0] == 4 && run.digits[..4].parse::<u32>().is_ok_and(|y| (1000..=2999).contains(&y));
+            let shaped = !year
+                && written(&run, &candidates).is_some_and(|w| {
+                    let groups: Vec<usize> = w.split(|c: char| !c.is_ascii_digit()).filter(|g| !g.is_empty()).map(str::len).collect();
+                    groups == run.segs
+                });
+            if shaped { Some(run) } else { run_at(&toks, i, false) }
+        });
+        match run {
             // A day, a month and a year ("23 10 2026", "02 20 1984") is a
             // date, read so or left alone (#940).
             Some(run) if date_shape(&toks[i..i + run.taken]) => {
