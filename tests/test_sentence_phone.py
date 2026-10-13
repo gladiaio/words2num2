@@ -156,18 +156,18 @@ def test_off_by_default():
             {},
             "Speaker 2: (415) 867-5309",
         ),
+        (
+            "Speaker two: four one five, five five five, zero one two three",
+            "en",
+            {},
+            "Speaker 2: (415) 555-0123",
+        ),
         # One walked token is never a piece (#1179 audit).
         (
             "call 2, two one two five five five one two three four",
             "en",
             {},
             "call 2, (212) 555-1234",
-        ),
-        (
-            "Speaker two: four one five, five five five, zero one two three",
-            "en",
-            {},
-            "Speaker 2: (415) 555-0123",
         ),
         ("212 555 1234, 415 867 5309", "en", {}, "(212) 555-1234, (415) 867-5309"),
         # A date is read first, or left alone (#940).
