@@ -6,6 +6,8 @@ follows [Semantic Versioning](https://semver.org/) and uses
 
 ## [Unreleased]
 
+## [0.4.2] — 2026-10-13
+
 ### Fixed
 
 - Sentence mode (es): "un poco" after the tens is the quantifier, not part of the compound ("pesaba ochenta y un poco más" is "pesaba 80 y un poco más", was "pesaba 81 poco más") (#861).
