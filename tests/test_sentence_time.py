@@ -68,3 +68,58 @@ def test_only_plain_modes():
     assert ":" not in words2num_sentence(
         "a las nueve y cuarto", lang="es", to="ordinal"
     )
+
+
+@pytest.mark.parametrize(
+    "text, lang, expected",
+    [
+        # The number goes on after the time (#928, #935).
+        ("at nine fifteen thousand", "en", "at 9 15000"),
+        ("at nine twenty first", "en", "at 9 21st"),
+        ("cent vingt heures quinze", "fr", "120 heures 15"),
+        ("pendant trente et une heures quinze", "fr", "pendant 31 heures 15"),
+        ("las dos menos treinta y uno", "es", "las 2 menos 31"),
+        # The minutes count something (#933, #904).
+        (
+            "il travaille huit heures trois fois par semaine",
+            "fr",
+            "il travaille 8 heures 3 fois par semaine",
+        ),
+        ("um neun Uhr zwanzig Leute kamen", "de", "um 9 Uhr 20 Leute kamen"),
+        ("las dos y cinco personas", "es", "las 2 y 5 personas"),
+        ("sold at nine fifty each", "en", "sold at 9 50 each"),
+        ("rates at five twenty five percent", "en", "rates at 5 25 percent"),
+        # Times still read.
+        ("at nine fifteen and then lunch", "en", "at 9:15 and then lunch"),
+        ("à neuf heures quinze demain", "fr", "à 9h15 demain"),
+        ("um neun Uhr fünfzehn", "de", "um 9:15 Uhr"),
+        ("a las nueve y cuarto", "es", "a las 9:15"),
+        # "por"/"pour" and "each morning" keep the time; ranges keep both
+        # hours; more units (#1191-#1194).
+        ("a las ocho y diez por la mañana", "es", "a las 8:10 por la mañana"),
+        (
+            "rendez-vous à huit heures quinze pour le dîner",
+            "fr",
+            "rendez-vous à 8h15 pour le dîner",
+        ),
+        ("we start at nine thirty each morning", "en", "we start at 9:30 each morning"),
+        ("entre huit et neuf heures et quart", "fr", "entre 8 et 9h15"),
+        ("zwischen neun und zehn Uhr dreißig", "de", "zwischen 9 und 10:30 Uhr"),
+        ("it weighs about nine fifty grams", "en", "it weighs about 9 50 grams"),
+        # A following count is its own number, not part of the minutes; a
+        # refused fr span after a cue keeps the hour (#1190 audit).
+        ("um neun Uhr zwanzig zwei Leute kamen", "de", "um 9:20 Uhr 2 Leute kamen"),
+        (
+            "à neuf heures quinze un homme est arrivé",
+            "fr",
+            "à 9h15 un homme est arrivé",
+        ),
+        ("a las nueve y diez un hombre llegó", "es", "a las 9:10 un hombre llegó"),
+        ("à neuf heures quinze fois deux", "fr", "à 9h 15 fois 2"),
+        ("at nine fifteen first", "en", "at 9:15 first"),
+        # A scale word that does not combine with the minutes (#1190 audit).
+        ("a las nueve y veinte cien personas", "es", "a las 9:20 100 personas"),
+    ],
+)
+def test_time_reader_leaves_longer_numbers_and_counts(text, lang, expected):
+    assert words2num_sentence(text, lang=lang) == expected
