@@ -77,6 +77,10 @@ fn number_at(lang: &str, toks: &[Tok], i: usize, range: std::ops::RangeInclusive
             return None;
         }
         let words: Vec<&str> = span.iter().map(|t| t.word.as_str()).collect();
+        // Nor a connector before it: "Uhr | und zwei Bücher" (#936).
+        if matches!(words[0], "und" | "et" | "y" | "e") {
+            return None;
+        }
         // A connector after the number is no part of it: "diez y | las tres"
         // kept its "y" (#937).
         if n > 1 && matches!(words[n - 1], "y" | "et" | "und" | "e") {
@@ -281,7 +285,34 @@ fn span_de(toks: &[Tok], i: usize) -> Option<Span> {
             }
         }
     }
-    let (h, n) = hour_at("de", toks, i, 24, |k| word(toks, k) == Some("uhr"))?;
+    // "eine Uhr" is a watch (the time is "ein Uhr"): the article of the noun
+    // is no hour (#936).
+    // After a cue it is the hour still ("um eine Uhr", as transcripts write
+    // it).
+    let eine = matches!(word(toks, i)?, "eine" | "einer" | "einen" | "einem");
+    // The cue may stand before an adverb ("um etwa eine Uhr", "um Punkt eine
+    // Uhr"), and minutes after "Uhr" make it the time ("eine Uhr dreißig")
+    // (#1206 audit).
+    let cued = || {
+        let mut k = i;
+        while k > 0 && matches!(word(toks, k - 1), Some("etwa" | "circa" | "ca" | "ca." | "punkt" | "genau" | "kurz" | "so" | "ungefähr")) {
+            k -= 1;
+        }
+        let p = k.checked_sub(1).and_then(|k| word(toks, k));
+        cue("de", p) || matches!(p, Some("seit" | "von"))
+    };
+    let minutes = || {
+        toks.get(i + 1).is_some_and(|t| t.word == "uhr" && t.trail.is_empty())
+            && number_at("de", toks, i + 2, 1..=59).is_some_and(|(_, m)| !(toks[i + 1 + m].trail.is_empty() && toks.get(i + 2 + m).is_some_and(|t| counted("de", t))))
+    };
+    if eine && !cued() && !minutes() {
+        return None;
+    }
+    let (h, n) = if (word(toks, i) == Some("ein") || (eine && word(toks, i) == Some("eine"))) && toks[i].trail.is_empty() && word(toks, i + 1) == Some("uhr") {
+        (1, 1)
+    } else {
+        hour_at("de", toks, i, 24, |k| word(toks, k) == Some("uhr"))?
+    };
     let key = i + n;
     let uhr = &toks[key];
     let after = if uhr.trail.is_empty() { number_at("de", toks, key + 1, 1..=59) } else { None };
