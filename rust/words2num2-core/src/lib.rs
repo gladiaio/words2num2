@@ -1860,8 +1860,7 @@ fn glued_number(lang: &str, s: &str, sc: &Scales) -> Option<i64> {
     if base == Some("th") {
         let ed = normalize("เอ็ด");
         let one = normalize("หนึ่ง");
-        // Not a bare "เอ็ด" (the verb "to scold"): it needs a place before it.
-        if let Some(head) = s.strip_suffix(ed.as_str()).filter(|h| !h.is_empty()) {
+        if let Some(head) = s.strip_suffix(ed.as_str()) {
             if let Some(v) = lookup_plain(lang, &format!("{head}{one}")) {
                 return Some(v);
             }
@@ -2089,8 +2088,10 @@ fn parse_scaled_inner(lang: &str, text: &str, sc: &Scales, conns: &[&str]) -> Op
     if let Some(v) = lookup_plain(lang, text) {
         return Some(v);
     }
-    // One token: a scale split, or a th / my written form (#877, #879).
-    if !text.contains(' ') {
+    // One token: a scale split, or a th / my written form (#877, #879). Not
+    // a bare th "เอ็ด" (the verb "to scold"): it is the one only after a place
+    // (#1214 audit).
+    if !text.contains(' ') && text != normalize("เอ็ด") {
         if let Some(v) = glued_number(lang, text, sc) {
             return Some(v);
         }
