@@ -756,3 +756,30 @@ def test_th_my_written_forms_reject(lang, text):
 )
 def test_th_my_written_forms_sentence(lang, text, expected):
     assert words2num_sentence(text, lang=lang) == expected
+
+
+@pytest.mark.parametrize(
+    "lang, text, expected",
+    [
+        # A spelled-out alternative or range shares its scale (#865).
+        (
+            "es_MX",
+            "Llegaron cinco o seis mil personas a la marcha.",
+            "Llegaron 5000 o 6000 personas a la marcha.",
+        ),
+        (
+            "es_AR",
+            "entre dos y tres millones de personas",
+            "entre 2000000 y 3000000 de personas",
+        ),
+        ("pt_BR", "dois ou três milhões de pessoas", "2000000 ou 3000000 de pessoas"),
+        ("en", "five or six thousand people", "5000 or 6000 people"),
+        ("fr", "cinq ou six mille personnes", "5000 ou 6000 personnes"),
+        # Not a figure as written, a bare "and", or a falling pair.
+        ("es", "5 o seis mil", "5 o 6000"),
+        ("en", "two and three thousand", "2 and 3000"),
+        ("es", "veinte o dos mil", "20 o 2000"),
+    ],
+)
+def test_shared_scale_range(lang, text, expected):
+    assert words2num_sentence(text, lang=lang) == expected
