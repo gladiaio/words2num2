@@ -562,3 +562,37 @@ def test_written_compounds_read(lang, text, expected):
 def test_written_compounds_reject_non_numbers(lang, text):
     with pytest.raises(Words2NumError):
         words2num(text, lang=lang)
+
+
+@pytest.mark.parametrize(
+    "lang, text, expected",
+    [
+        # Whole millions or more "and a half" (#859).
+        ("es_AR", "dos millones y medio de personas", "2500000 de personas"),
+        (
+            "pt_BR",
+            "um pacote de um bilhão e meio de reais.",
+            "um pacote de 1500000000 de reais.",
+        ),
+        ("fr", "un million et demi de personnes", "1500000 de personnes"),
+        ("it", "un milione e mezzo di persone", "1500000 di persone"),
+        # Below a million, or a time, it stays.
+        ("es", "mil y medio", "1000 y medio"),
+        ("es", "las dos y medio", "las 2 y medio"),
+    ],
+)
+def test_scale_and_a_half_sentence(lang, text, expected):
+    assert words2num_sentence(text, lang=lang) == expected
+
+
+@pytest.mark.parametrize(
+    "lang, text, expected",
+    [
+        ("es", "un millón y medio", 1500000),
+        ("es", "dos millones y medio", 2500000),
+        ("pt_BR", "um bilhão e meio", 1500000000),
+        ("fr", "un million et demi", 1500000),
+    ],
+)
+def test_scale_and_a_half_cardinal(lang, text, expected):
+    assert words2num(text, lang=lang) == expected

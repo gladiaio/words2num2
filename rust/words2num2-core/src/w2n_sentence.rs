@@ -3982,6 +3982,9 @@ pub fn words2num_sentence_full(
     // The currency pass reads a figure with its format character (#1021).
     let folds = date || phone;
     let mut out = with_bare_format(!folds, || words2num_sentence_folded(sentence, lang, to, has_kwargs, currency))?;
+    if !currency {
+        out = fold_scale_half(&out, lang);
+    }
     // The phone pass leaves a day-month-year run of figures to the date pass
     // ("né le 23 10 2026", #940), and reads a longer number whole first
     // ("06 12 2024 56", #1181).
@@ -3989,6 +3992,47 @@ pub fn words2num_sentence_full(
         out = crate::w2n_phone::fold_phones(&out, lang, region);
     }
     Ok(if date { crate::w2n_date::fold_dates_with(&out, lang, region, iso) } else { out })
+}
+
+/// "un millón y medio" -> 1500000, not "1000000 y medio" (#859): a figure
+/// that is a whole number of millions (or more) followed by "and a half" in
+/// the language takes half of its largest scale.
+fn fold_scale_half(text: &str, lang: &str) -> String {
+    let base = lang.split(['_', '-']).next().unwrap_or(lang).to_lowercase();
+    let (conn, halves): (&str, &[&str]) = match base.as_str() {
+        "es" | "gl" => ("y", &["medio"]),
+        "pt" => ("e", &["meio"]),
+        "fr" => ("et", &["demi"]),
+        "it" => ("e", &["mezzo"]),
+        "ca" => ("i", &["mig"]),
+        _ => return text.to_string(),
+    };
+    let toks: Vec<&str> = text.split(' ').collect();
+    let mut out: Vec<String> = Vec::with_capacity(toks.len());
+    let mut i = 0;
+    while i < toks.len() {
+        let t = toks[i];
+        let value = (!t.is_empty() && t.len() <= 18 && t.bytes().all(|b| b.is_ascii_digit())).then(|| t.parse::<u64>().ok()).flatten();
+        let half = toks.get(i + 2).map(|h| {
+            let core = h.trim_end_matches(|c: char| !c.is_alphanumeric());
+            (core, &h[core.len()..])
+        });
+        match (value, toks.get(i + 1), half) {
+            (Some(v), Some(&c), Some((h, trail))) if v > 0 && v % 1_000_000 == 0 && c == conn && halves.contains(&h.to_lowercase().as_str()) => {
+                let mut scale = 1_000_000u64;
+                while v % (scale * 1000) == 0 {
+                    scale *= 1000;
+                }
+                out.push(format!("{}{trail}", v + scale / 2));
+                i += 3;
+            }
+            _ => {
+                out.push(t.to_string());
+                i += 1;
+            }
+        }
+    }
+    out.join(" ")
 }
 
 fn words2num_sentence_folded(
@@ -4037,7 +4081,7 @@ fn words2num_sentence_folded(
         })();
         drop(_clear);
         walked?;
-        return Ok(crate::w2n_currency::fold_currency(&out, &resolved));
+        return Ok(crate::w2n_currency::fold_currency(&fold_scale_half(&out, &resolved), &resolved));
     }
     // The plain walk cuts the same subunit off: fr "douze dollars et
     // cinquante cents" is "12 dollars et 50 cents", not "… 5000" (#868).
