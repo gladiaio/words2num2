@@ -206,7 +206,7 @@ fn en_verb_next(m: &str, w: &str) -> bool {
         matches!(
             w,
             // Not the adverbs that also follow a date ("on 3 may now").
-            "be" | "have" | "come" | "go" | "take" | "not" | "also" | "need" | "want" | "get" | "see" | "help" | "find" | "make" | "use"
+            "be" | "have" | "come" | "go" | "take" | "not" | "need" | "want" | "get" | "see" | "help" | "find" | "make" | "use"
                 | "never" | "arrive" | "leave" | "win" | "lose"
                 | "stay" | "join" | "apply" | "vary" | "differ" | "change" | "include" | "require" | "cause" | "contain"
         )
@@ -601,7 +601,8 @@ fn span_at(lang: &str, st: Style, toks: &[&str], i: usize, chained: bool) -> Opt
                 }
                 // "in june twelve people died": a cardinal day before a plural
                 // noun counts it (#931).
-                // After "on" the date is the likelier reading (#1203 audit).
+                // After "on" the date is the likelier reading (#1203 audit);
+                // "by july fifteen trucks had left" is the count (#931).
                 let on = i > 0 && low(i - 1).as_deref() == Some("on");
                 if !ordinal && !on && n == 0 && open(&d_trail) && low(i + 2 + skip).is_some_and(|w| en_counted(&w)) {
                     return None;

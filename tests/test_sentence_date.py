@@ -331,6 +331,7 @@ def test_opener_around_date_is_kept(lang, text, expected):
         ("en", "on 3 march in london", "on March 3 in london"),
         ("en", "on 3 may now", "on May 3 now"),
         ("en", "see you may 2020", "see you May 2020"),
+        ("en", "deadline 3 may also applies", "deadline May 3 also applies"),
     ],
 )
 def test_en_month_homographs_and_counts(lang, text, expected):
