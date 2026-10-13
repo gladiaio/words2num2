@@ -9,6 +9,7 @@ follows [Semantic Versioning](https://semver.org/) and uses
 ### Fixed
 
 - lo: the billion "ຕື້" (10^9) reads ("ຫ້າຕື້" is 5000000000, was an error); num2words2 writes lo 10^9 and up in figures, so the word was never in the scale table (#878).
+- th: the official "หนึ่ง" after the hundreds reads like "เอ็ด" ("สองร้อยหนึ่ง" is 201, was an error; "ห้องสองร้อยหนึ่ง" is "ห้อง201"); my: the ten without its "တစ်" ("ဆယ်" 10, "ဆယ့်ငါး" 15, "ဆယ်သိန်း" 1000000) (#877, #879).
 
 ## [0.4.2] — 2026-10-13
 
