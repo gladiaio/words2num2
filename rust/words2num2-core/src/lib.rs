@@ -84,6 +84,15 @@ pub fn words2num(
         };
     }
     let res = w2n_sentence::words2num(text, lang, to);
+    // es "tres con cinco": "con" is the decimal comma (#864).
+    if res.is_err() && to == "cardinal" {
+        let resolved = w2n_sentence::resolve_lang(lang).unwrap_or_default();
+        if let Some(t) = w2n_sentence::es_con_decimal(text.trim(), &resolved, true) {
+            if let Ok(v) = w2n_sentence::words2num(&t, lang, to) {
+                return Ok(v);
+            }
+        }
+    }
     // es "diez y seis": the split teens (#866), in cardinal and year mode.
     if res.is_err() && matches!(to, "cardinal" | "year") {
         let resolved = w2n_sentence::resolve_lang(lang).unwrap_or_default();
