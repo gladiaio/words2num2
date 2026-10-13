@@ -516,6 +516,18 @@ def test_article_one_after_a_number_or_speaker_label(lang, text, expected):
         ("ka", "ორი ათას ხუთასი", 2500),
         ("ka", "მინუს ოცდაერთი", -21),
         ("ka", "ოცდაერთი.", 21),
+        # Edges as the table path reads them (#1198 audit).
+        ("ka", "-ოცდაერთი", -21),
+        ("ka", "minus ოცდაერთი", -21),
+        ("ka", "(ოცდაერთი)", 21),
+        ("ka", "ოცდაერთი…", 21),
+        ("ka", "„ოცდაერთი“", 21),
+        ("ka", "–ოცდაერთი", -21),
+        ("ka", "MINUS ოცდაერთი", -21),
+        ("ka", "（ოცდაერთი）", 21),
+        ("my", "တစ်ဆယ့် တစ်.", 11),
+        ("my", "-တစ်ဆယ့် တစ်", -11),
+        ("my", "minus တစ်ဆယ့် တစ်", -11),
         # Burmese spaced inside one number (#989).
         ("my", "တစ်ဆယ့် တစ်", 11),
         ("my", "တစ်ဆယ့် နှစ်", 12),
@@ -539,6 +551,12 @@ def test_written_compounds_read(lang, text, expected):
         ("my", "12 34"),
         ("my", "2 3.5"),
         ("my_MM", "1 2"),
+        ("my", "-1 2"),
+        ("my", "1 2."),
+        ("ka", "--ოცდაერთი"),
+        ("ka", "+ოცდაერთი"),
+        ("ka", "ოცდაერთი%"),
+        ("my", "တစ်ဆယ့် တစ်%"),
     ],
 )
 def test_written_compounds_reject_non_numbers(lang, text):
