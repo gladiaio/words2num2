@@ -169,29 +169,10 @@ pub fn fold_phones(text: &str, lang: &str, region: Option<&str>) -> String {
             let (core, t) = split_trail(toks[i - 1]);
             t == "," && !core.is_empty() && core.bytes().all(|b| b.is_ascii_digit())
         };
-        // A comma join is the number's when it is dialled from "+" or its trunk
-        // prefix, or when the commas split it the way its plan writes it
-        // ("612, 34, 56, 78", "212, 555, 1234"), not a year and a count or a
-        // list (#939, #1179 audit). Otherwise the run ends at its first comma.
-        let run = run_at(&toks, i, !in_list).and_then(|run| {
-            if run.segs.len() < 2 || run.plus || run.digits.starts_with('0') {
-                return Some(run);
-            }
-            // With no prefix: some group of three figures or more (a list of
-            // one- and two-figure items is no number), no year first ("2019,
-            // 312000 cars"), and no "and N" after it, which makes it a list
-            // ("812, 911, 1066 and 1215") (#939, #1184, #1185).
-            // A year as the run's first figure ("2019, 312000", "2019 312, 000").
-            let first = split_trail(toks[i]).0;
-            let year = first.len() == 4 && first.parse::<u32>().is_ok_and(|y| (1000..=2999).contains(&y));
-            let big = run.segs.iter().any(|&g| g >= 3);
-            let end = i + run.taken;
-            let list_tail = matches!(run.trail.as_str(), "" | ",")
-                && toks.get(end).is_some_and(|t| matches!(split_trail(t).0.to_lowercase().as_str(), "and" | "y" | "e" | "et" | "und" | "en" | "i" | "och" | "og" | "a"))
-                && toks.get(end + 1).is_some_and(|t| split_trail(t).0.starts_with(|c: char| c.is_ascii_digit()));
-            // A one-figure first group is a list item ("2, 979 517 7415").
-            if big && !year && !list_tail && run.segs[0] >= 2 { Some(run) } else { run_at(&toks, i, false) }
-        });
+        // A comma joins groups as before (#939 stays open: a list and a
+        // number dictated in comma groups cannot be told apart from the walked
+        // figures alone); only not inside a list, where "+" still joins.
+        let run = run_at(&toks, i, !in_list);
         // A run that crossed a comma and is no phone number is tried again
         // up to its first comma: a phone after a list figure still reads
         // ("call 2, 212 555 1234", #1179 audit).

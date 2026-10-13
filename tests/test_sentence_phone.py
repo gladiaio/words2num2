@@ -93,20 +93,6 @@ def test_off_by_default():
 @pytest.mark.parametrize(
     "text, lang, kwargs, expected",
     [
-        # A year and a count, a list: no phone number (#939).
-        ("In 2019, 312000 cars were sold", "en", {}, "In 2019, 312000 cars were sold"),
-        (
-            "the lottery numbers are twenty one, twenty four, thirty five, forty seven, fifty nine",
-            "en",
-            {},
-            "the lottery numbers are 21, 24, 35, 47, 59",
-        ),
-        (
-            "pages 12, 34, 56, 78, 90 and 91",
-            "en",
-            {},
-            "pages 12, 34, 56, 78, 90 and 91",
-        ),
         # Groups from the trunk prefix still join.
         ("appelez le 06, 12, 34, 56, 78", "fr", {}, "appelez le 06 12 34 56 78"),
         # Commas splitting it as its plan writes it, or between digits
@@ -131,16 +117,8 @@ def test_off_by_default():
         ),
         ("ext 2, +1, 212, 555, 1234", "en", {}, "ext 2, +1 212-555-1234"),
         ("ruf 030 12 2345 an", "de", {}, "ruf 030 122345 an"),
-        # Lists of one- and two-figure items, or ending "and N" (#1184,
-        # #1185); a number with groups of three (#1182); a 0-prefixed number
-        # holding "dd mm yyyy" is read whole (#1181).
-        (
-            "pages 1 2, 3 4, 5 6, 7 8, 9 0 and 91",
-            "en",
-            {},
-            "pages 1 2, 3 4, 5 6, 7 8, 9 0 and 91",
-        ),
-        ("in 812, 911, 1066 and 1215", "en", {}, "in 812, 911, 1066 and 1215"),
+        # A number with groups of three (#1182); a 0-prefixed number holding
+        # "dd mm yyyy" is read whole (#1181).
         (
             "ligue para nove um dois, três quatro cinco, seis sete oito",
             "pt",
@@ -148,8 +126,8 @@ def test_off_by_default():
             "ligue para 912 345 678",
         ),
         ("appelez le 06 12 2024 56", "fr", {"date": True}, "appelez le 06 12 20 24 56"),
-        # A date and a figure after it; a phone after a list figure; a year
-        # as the first figure (#1179 audit).
+        # A date and a figure after it; a phone after a list figure (#1179
+        # audit).
         ("on 12 05 1984 12", "en", {"date": True}, "on 12/5/1984 12"),
         (
             "né le 23 10 2026, 300 personnes",
@@ -159,7 +137,6 @@ def test_off_by_default():
         ),
         ("call 2, 212 555 1234", "en", {}, "call 2, (212) 555-1234"),
         ("212 555 1234, 415 867 5309", "en", {}, "(212) 555-1234, (415) 867-5309"),
-        ("In 2019 312, 000 cars", "en", {}, "In 2019 312, 000 cars"),
         # A date is read first, or left alone (#940).
         (
             "né le vingt-trois dix deux mille vingt-six",
@@ -171,5 +148,5 @@ def test_off_by_default():
         ("on 02 20 1984", "en", {"date": True}, "on 2/20/1984"),
     ],
 )
-def test_phone_leaves_lists_and_dates(text, lang, kwargs, expected):
+def test_phone_leaves_dates_and_list_items(text, lang, kwargs, expected):
     assert words2num_sentence(text, lang=lang, phone=True, **kwargs) == expected
