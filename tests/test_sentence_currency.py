@@ -560,6 +560,12 @@ def test_opener_around_amount_is_kept(text, lang, expected):
         ("cinco euros y medio de comunicación", "es", "5 € y medio de comunicación"),
         ("cinq euros et demi d'avance", "fr", "5,50 € d'avance"),
         ("¿cinco euros y medio?", "es", "¿5,50 €?"),
+        # A lead or trail the currency pass does not render, a half that is
+        # the next currency's (#1212 audit).
+        ("Son —cinco euros y medio— dijo.", "es", "Son —5 euros y medio— dijo."),
+        ("cinco euros y medio€", "es", "5 € y medio€"),
+        ("cinco euros y media libra", "es", "5 € y media libra"),
+        ("cinco euros y medio\u200b", "es", "5 € y medio\u200b"),
         (
             "un millón y medio de personas pagaron cinco euros y medio",
             "es",

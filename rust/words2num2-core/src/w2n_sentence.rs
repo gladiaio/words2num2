@@ -3994,16 +3994,13 @@ pub fn words2num_sentence_full(
     Ok(if date { crate::w2n_date::fold_dates_with(&out, lang, region, iso) } else { out })
 }
 
-/// "un millón y medio" -> 1500000, not "1000000 y medio" (#859): a figure
-/// that is a whole number of millions (or more) followed by "and a half" in
-/// the language takes half of its largest scale.
 /// Does "<conn> <half>" end the quantity, given the half word's glued
 /// `trail` and the tokens from `from` on? The end, a mark, an (elided)
 /// partitive, the language's conjunction or a currency name; not a noun of
 /// its own ("y medio kilo", "y medio millón", #1209) nor a set phrase ("medio
 /// de comunicación"). Whitespace and format characters are no token and no
 /// mark ("y medio  ambiente", "medio\t ambiente", #1207 audit).
-fn half_ends(toks: &[&str], from: usize, trail: &str, lang: &str) -> bool {
+fn half_ends(toks: &[&str], from: usize, trail: &str, lang: &str, currency_ends: bool) -> bool {
     let core = |t: &str| crate::normalize(t.trim_end_matches(|c: char| !c.is_alphanumeric()));
     let blank = |t: &str| t.chars().all(|c| c.is_whitespace() || is_format_char(c));
     let real = |from: usize| (from..toks.len()).find(|&k| !blank(toks[k]));
@@ -4025,9 +4022,11 @@ fn half_ends(toks: &[&str], from: usize, trail: &str, lang: &str) -> bool {
         )
     });
     (matches!(w.as_str(), "de" | "del" | "di" | "do" | "da" | "dos" | "das" | "des" | "du" | "d") && !set_phrase)
-        // A conjunction; not it "i", the plural article (#1212 audit).
-        || (matches!(w.as_str(), "y" | "e" | "et" | "i" | "o" | "ou" | "que") && !(w == "i" && lang.starts_with("it")))
-        || crate::w2n_currency::is_currency_word(lang, &w)
+        || matches!(w.as_str(), "y" | "e" | "et" | "i" | "o" | "ou" | "que")
+        // A currency name ends a scale quantity ("dos millones y medio euros")
+        // but is the next noun after an amount ("cinco euros y media libra",
+        // #1212 audit).
+        || (currency_ends && crate::w2n_currency::is_currency_word(lang, &w))
 }
 
 /// "cinco pesos y medio" -> "$5.50", not "$5 y medio" (#860): a spelled-out
@@ -4071,16 +4070,21 @@ fn fold_currency_half(text: &str, lang: &str, input: &str) -> String {
             seen += 1;
             let h = toks[i + 3];
             let trail = &h[h.trim_end_matches(|c: char| !c.is_alphanumeric()).len()..];
-            // An opener before the figure ("¿5") rides along.
-            let figure = t.trim_start_matches(|c: char| !c.is_alphanumeric());
+            // An opener the currency pass renders ("¿5", "(5") rides along;
+            // any other lead ("-5", "—5") or a trail it does not render
+            // ("medio€", "medio\u{200b}") would leave a raw "5.5" (#1212
+            // audit).
+            let figure = t.trim_start_matches(|c: char| is_opener(c));
+            let trail_ok = trail.chars().all(|c| ",.;:!?)]}\"'»…”’".contains(c) || (c.is_whitespace() && !is_format_char(c)));
             let whole = !figure.is_empty() && figure.len() <= 15 && figure.bytes().all(|b| b.is_ascii_digit());
             let unit = toks[i + 1];
             let plain_unit = unit.trim_end_matches(|c: char| !c.is_alphanumeric()).len() == unit.len();
             if spelled[seen - 1]
+                && trail_ok
                 && whole
                 && plain_unit
                 && crate::w2n_currency::half_renders(lang, &core(unit))
-                && half_ends(&toks, i + 4, trail, lang)
+                && half_ends(&toks, i + 4, trail, lang, false)
             {
                 // The mark after "medio." goes after the amount.
                 out.push(format!("{t}.5"));
@@ -4095,6 +4099,9 @@ fn fold_currency_half(text: &str, lang: &str, input: &str) -> String {
     out.join(" ")
 }
 
+/// "un millón y medio" -> 1500000, not "1000000 y medio" (#859): a figure
+/// that is a whole number of millions (or more) followed by "and a half" in
+/// the language takes half of its largest scale.
 fn fold_scale_half(text: &str, lang: &str, input: &str) -> String {
     let base = lang.split(['_', '-']).next().unwrap_or(lang).to_lowercase();
     let (conn, halves): (&str, &[&str]) = match base.as_str() {
@@ -4144,7 +4151,7 @@ fn fold_scale_half(text: &str, lang: &str, input: &str) -> String {
         // kilo", "y medio millón", where it is the next noun's, #1209).
         // A conjunction or a currency name may follow ("y medio y …", "y
         // medio euros").
-        let ends = |trail: &str| half_ends(&toks, i + 3, trail, lang);
+        let ends = |trail: &str| half_ends(&toks, i + 3, trail, lang, true);
         match (value, toks.get(i + 1), half) {
             (Some(v), Some(&c), Some((h, trail))) if ok && ends(trail) && v > 0 && v % 1_000_000 == 0 && c.eq_ignore_ascii_case(conn) && halves.contains(&h.to_lowercase().as_str()) => {
                 let mut scale = 1_000_000u64;
