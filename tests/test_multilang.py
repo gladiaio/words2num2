@@ -652,3 +652,32 @@ def test_scale_and_a_half_sentence(lang, text, expected):
 )
 def test_scale_and_a_half_cardinal(lang, text, expected):
     assert words2num(text, lang=lang) == expected
+
+
+@pytest.mark.parametrize(
+    "lang, text, expected",
+    [
+        # th official "หนึ่ง" after the hundreds (#879), my bare ten (#877).
+        ("th", "สองร้อยหนึ่ง", 201),
+        ("th", "หนึ่งร้อยหนึ่ง", 101),
+        ("th", "สามพันสองร้อยหนึ่ง", 3201),
+        ("my", "ဆယ်", 10),
+        ("my", "ဆယ့်ငါး", 15),
+        ("my", "ဆယ်သိန်း", 1000000),
+    ],
+)
+def test_th_my_written_forms(lang, text, expected):
+    assert words2num(text, lang=lang) == expected
+
+
+@pytest.mark.parametrize(
+    "lang, text, expected",
+    [
+        ("th", "ห้องสองร้อยหนึ่ง", "ห้อง201"),
+        ("th", "รถเมล์สายห้าร้อยหนึ่ง", "รถเมล์สาย501"),
+        ("my", "နံနက် ဆယ် နာရီ သုံးဆယ် မိနစ်", "နံနက် 10 နာရီ 30 မိနစ်"),
+        ("my", "လူ ဆယ့်တစ် ယောက်", "လူ 11 ယောက်"),
+    ],
+)
+def test_th_my_written_forms_sentence(lang, text, expected):
+    assert words2num_sentence(text, lang=lang) == expected
