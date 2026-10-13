@@ -4782,6 +4782,11 @@ fn words2num_sentence_walk(
                             | "su" | "tra" | "fra" | "i" | "amb" | "total" | "medio" | "meio" | "mezzo" | "mig"
                     )
                     && !matches!(crate::lookup_norm(&resolved, &n, false, &[]), Ok(Some(_)))
+                    // A unit or a currency the compound counts ("cuarenta y
+                    // un euro", "kilómetro"): the left-over "un" would read as
+                    // a second 1 (#1211).
+                    && !unit_words(&resolved).split_whitespace().any(|u| u == n)
+                    && !crate::w2n_currency::is_currency_word(&resolved, &n)
             });
             if article && singular {
                 if let Some(k) = prev.and_then(|c| (i..c).rev().find(|&k| !py_str_isspace(&parts[k]))) {

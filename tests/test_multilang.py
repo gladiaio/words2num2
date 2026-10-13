@@ -580,6 +580,9 @@ def test_written_compounds_reject_non_numbers(lang, text):
         ("es", "cuarenta y un mil", "41000"),
         ("es", "treinta y un por ciento", "31 por ciento"),
         ("es", "treinta y una", "31"),
+        # A unit or a currency keeps the compound (#1211).
+        ("es", "cuarenta y un kilómetro", "41 kilómetro"),
+        ("es", "cuarenta y un euro", "41 euro"),
     ],
 )
 def test_tens_and_article(lang, text, expected):
