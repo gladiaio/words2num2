@@ -149,7 +149,8 @@ fn edges(text: &str) -> (&str, &str, &str) {
 /// number of millions or more and a half of its largest scale (#859).
 fn scale_and_half(text: &str, lang: &str, base: &str) -> Option<i64> {
     let (conn, half) = match base {
-        "es" | "gl" => ("y", "medio"),
+        "es" => ("y", "medio"),
+        "gl" => ("e", "medio"),
         "pt" => ("e", "meio"),
         "fr" => ("et", "demi"),
         "it" => ("e", "mezzo"),
@@ -162,7 +163,9 @@ fn scale_and_half(text: &str, lang: &str, base: &str) -> Option<i64> {
         return None;
     }
     let head = before.trim_end().strip_suffix(conn)?;
-    if !head.ends_with(char::is_whitespace) {
+    // Number words only: a figure is never added to ("1000000 y medio",
+    // #1208).
+    if !head.ends_with(char::is_whitespace) || head.chars().any(|c| c.is_numeric()) {
         return None;
     }
     let v = match w2n_sentence::words2num(head.trim_end(), lang, "cardinal").ok()? {
@@ -3045,6 +3048,28 @@ mod tests {
         assert_eq!(parse_scaled("sl", "pet milijonov"), Some(5_000_000));
         assert_eq!(parse_scaled("sl", "pet milijard"), Some(5_000_000_000));
         assert_eq!(parse_scaled("da", "en million"), Some(1_000_000));
+    }
+
+    /// #859, #1208, #1209: whole scales and a half.
+    #[test]
+    fn scale_and_half_cardinal() {
+        let v = |t: &str, l: &str| match crate::words2num(t, l, "cardinal") {
+            Ok(w2n_lang_en::W2nValue::Int(i)) => Some(i64::try_from(i).unwrap()),
+            _ => None,
+        };
+        assert_eq!(v("un millón y medio", "es"), Some(1_500_000));
+        assert_eq!(v("dos millones y medio", "es"), Some(2_500_000));
+        assert_eq!(v("1000000 y medio", "es"), None);
+        assert_eq!(v("un millón y medio kilo", "es"), None);
+        assert_eq!(
+            crate::w2n_sentence::words2num_sentence("dos millones y medio ambiente", "es", "cardinal", false).unwrap(),
+            "2000000 y medio ambiente"
+        );
+        assert_eq!(crate::w2n_sentence::words2num_sentence("2000000 y medio", "es", "cardinal", false).unwrap(), "2000000 y medio");
+        assert_eq!(
+            crate::w2n_sentence::words2num_sentence("dos millones y medio de personas", "es", "cardinal", false).unwrap(),
+            "2500000 de personas"
+        );
     }
 
     /// gladiaio/words2num2#90, #91, #92, #99, #100, #239: glued scales.

@@ -579,6 +579,19 @@ def test_written_compounds_reject_non_numbers(lang, text):
         # Below a million, or a time, it stays.
         ("es", "mil y medio", "1000 y medio"),
         ("es", "las dos y medio", "las 2 y medio"),
+        # Figures as written are never added to (#1208); a half that belongs
+        # to the next noun stays (#1209).
+        ("es", "1000000 y medio", "1000000 y medio"),
+        ("es", "un millón y medio kilo", "1000000 y medio kilo"),
+        ("es", "un millón y medio millón", "1000000 y medio millón"),
+        ("es", "dos millones y medio ambiente", "2000000 y medio ambiente"),
+        (
+            "es",
+            "dos millones y medio de comunicación",
+            "2000000 y medio de comunicación",
+        ),
+        ("pt_BR", "um milhão e meio ambiente", "1000000 e meio ambiente"),
+        ("es", "DOS MILLONES Y MEDIO", "2500000"),
     ],
 )
 def test_scale_and_a_half_sentence(lang, text, expected):
