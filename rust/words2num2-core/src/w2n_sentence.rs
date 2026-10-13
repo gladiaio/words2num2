@@ -3991,6 +3991,45 @@ pub fn words2num_sentence_full(
     Ok(if date { crate::w2n_date::fold_dates_with(&out, lang, region, iso) } else { out })
 }
 
+/// es "diez y seis" -> "dieciséis" (16..19, #866), or None when the text
+/// holds none.
+pub(crate) fn es_split_teens(text: &str, lang: &str) -> Option<String> {
+    if lang.split(['_', '-']).next() != Some("es") {
+        return None;
+    }
+    let toks: Vec<&str> = text.split(' ').collect();
+    let mut out: Vec<String> = Vec::with_capacity(toks.len());
+    let mut changed = false;
+    let mut i = 0;
+    while i < toks.len() {
+        let unit = toks.get(i + 2).and_then(|u| {
+            let core = u.trim_end_matches(|c: char| !c.is_alphanumeric());
+            let one = match crate::normalize(core).as_str() {
+                "seis" => "dieciséis",
+                "siete" => "diecisiete",
+                "ocho" => "dieciocho",
+                "nueve" => "diecinueve",
+                _ => return None,
+            };
+            Some((one, &u[core.len()..]))
+        });
+        match unit {
+            Some((one, trail))
+                if toks[i].eq_ignore_ascii_case("diez") && toks.get(i + 1).is_some_and(|y| y.eq_ignore_ascii_case("y")) =>
+            {
+                out.push(format!("{one}{trail}"));
+                changed = true;
+                i += 3;
+            }
+            _ => {
+                out.push(toks[i].to_string());
+                i += 1;
+            }
+        }
+    }
+    changed.then(|| out.join(" "))
+}
+
 fn words2num_sentence_folded(
     sentence: &str,
     lang: &str,
@@ -4010,6 +4049,17 @@ fn words2num_sentence_folded(
         timed.as_str()
     } else {
         sentence
+    };
+    // es "diez y seis" .. "diez y nueve": the split teens the RAE accepts are
+    // 16..19, not "10 y 6" (#866); after the clock pass ("a las diez y seis"
+    // is 10:06).
+    let teens;
+    let sentence = match es_split_teens(sentence, &resolved_lang) {
+        Some(t) => {
+            teens = t;
+            teens.as_str()
+        }
+        None => sentence,
     };
     if currency {
         let resolved = resolved_lang.clone();

@@ -86,6 +86,12 @@ pub fn words2num(
     let res = w2n_sentence::words2num(text, lang, to);
     if res.is_err() && to == "cardinal" {
         let resolved = w2n_sentence::resolve_lang(lang).unwrap_or_default();
+        // es "diez y seis": the split teens (#866).
+        if let Some(t) = w2n_sentence::es_split_teens(text.trim(), &resolved) {
+            if let Ok(v) = w2n_sentence::words2num(&t, lang, to) {
+                return Ok(v);
+            }
+        }
         match resolved.split(['_', '-']).next().unwrap_or("") {
             // Georgian as it is written: "ოცდაერთი" (20 and 1), "ოცდა ათი",
             // "ას ოცდაერთი"; the table only knows num2words2's forms (#989).

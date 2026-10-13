@@ -562,3 +562,24 @@ def test_written_compounds_read(lang, text, expected):
 def test_written_compounds_reject_non_numbers(lang, text):
     with pytest.raises(Words2NumError):
         words2num(text, lang=lang)
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        # es split teens 16..19, RAE-accepted (#866).
+        ("tenía diez y ocho años", "tenía 18 años"),
+        ("diez y nueve mil", "19000"),
+        ("diez y seis, diez y siete", "16, 17"),
+        # A clock time and 13..15 stay.
+        ("a las diez y seis", "a las 10:06"),
+        ("diez y tres", "10 y 3"),
+    ],
+)
+def test_es_split_teens(text, expected):
+    assert words2num_sentence(text, lang="es") == expected
+
+
+def test_es_split_teens_cardinal():
+    assert words2num("diez y seis", lang="es") == 16
+    assert words2num("diez y nueve", lang="es") == 19
