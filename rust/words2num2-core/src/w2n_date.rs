@@ -102,7 +102,10 @@ fn day(st: Style, tok: &str) -> Option<(u32, String)> {
 
 /// A month name of the language, as spoken (the walk leaves it in words).
 fn month(lang: &str, tok: &str) -> Option<(String, String)> {
-    let (core, trail) = split_trail(tok);
+    // An opener glued after the name ("may(") is punctuation after it, not
+    // part of the name: it goes after the date (#1106).
+    let bare = tok.trim_end_matches(|c: char| TRAILING.contains(&c) || crate::w2n_sentence::is_opener(c));
+    let (core, trail) = (bare, &tok[bare.len()..]);
     let norm = crate::normalize(core);
     crate::w2n_sentence::months(lang)
         .split_whitespace()
@@ -562,9 +565,20 @@ pub fn fold_dates_with(text: &str, lang: &str, region: Option<&str>, iso: bool) 
     while i < toks.len() {
         // Up to three range words ("to", nl "tot en met").
         let chained = after_date.is_some_and(|k| k < i && i - k <= 3 && range_link(st, &toks[k..i]));
-        match span_at(lang, st, &toks, i, chained) {
+        // An opener glued before the date ("［fifth of may") goes back
+        // before it (#1106).
+        let body = toks[i].trim_start_matches(crate::w2n_sentence::is_opener);
+        let lead = &toks[i][..toks[i].len() - body.len()];
+        let span = if lead.is_empty() || body.is_empty() {
+            span_at(lang, st, &toks, i, chained)
+        } else {
+            let mut bare = toks.clone();
+            bare[i] = body;
+            span_at(lang, st, &bare, i, chained)
+        };
+        match span {
             Some(s) => {
-                out.push(render(st, &s, iso));
+                out.push(format!("{}{}", if body.is_empty() { "" } else { lead }, render(st, &s, iso)));
                 i += s.len;
                 after_date = open(&s.trail).then_some(i);
             }

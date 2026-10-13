@@ -826,6 +826,15 @@ pub(crate) fn folded_mark(c: char) -> Option<Mark> {
     }
 }
 
+/// An opening bracket or quote, ASCII, typographic or a compatibility form.
+/// Glued before an amount or a date ("(fifty dollars)", "«quinze euros»",
+/// "［fifth of may") it goes back before the folded form; glued after a
+/// currency word ("dollars(") it goes back after it, not lost (#1104,
+/// #1105, #1106).
+pub(crate) fn is_opener(c: char) -> bool {
+    "([{\"'¿¡«‹“‘„‚「『【《〔〈".contains(c) || folded_mark(c) == Some(Mark::Opening)
+}
+
 /// Does `c` fold to dots only ("．", "﹒", "︙")? Such a mark before a figure
 /// reads as a decimal point.
 pub(crate) fn folds_to_dots(c: char) -> bool {

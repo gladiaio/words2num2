@@ -260,3 +260,19 @@ def test_iso(lang, text, expected):
 def test_unknown_date_format():
     with pytest.raises(NotImplementedError):
         words2num_sentence("march twelfth", date=True, date_format="roman")
+
+
+@pytest.mark.parametrize(
+    "lang, text, expected",
+    [
+        # An opener glued before the date goes back before it (#1106).
+        ("en", "x ［fifth of may y", "x ［May 5 y"),
+        ("en", "x (the fifth of may) y", "x (May 5) y"),
+        ("en", "x (may fifth) y", "x (May 5) y"),
+        ("de", "x (am zwölften März) y", "x (am 12. März) y"),
+        # An opener glued after the month goes after the date, not inside.
+        ("en", "x the fifth of may( y", "x May 5( y"),
+    ],
+)
+def test_opener_around_date_is_kept(lang, text, expected):
+    assert words2num_sentence(text, lang=lang, date=True) == expected
