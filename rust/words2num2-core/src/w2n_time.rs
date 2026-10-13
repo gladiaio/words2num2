@@ -23,8 +23,6 @@ struct Tok {
     end: usize,
     word: String,
     trail: String,
-    /// Written with a capital: mid-sentence, a name ("Franco", "Penny").
-    cap: bool,
 }
 
 const TRAILING: &[char] = &[',', ';', ':', '!', '?', '.', ')', '"', '»'];
@@ -43,7 +41,6 @@ fn tokens(s: &str) -> Vec<Tok> {
                     end: k,
                     word: core.to_lowercase(),
                     trail: raw[core.len()..].to_string(),
-                    cap: core.starts_with(char::is_uppercase),
                 });
                 start = None;
             }
@@ -96,11 +93,10 @@ fn counted(lang: &str, tok: &Tok) -> bool {
         _ => &[],
     };
     // Any currency name of the language too ("pesos", "Pfund") (#1194),
-    // but not a capitalised one outside German ("Franco llamó" is a name),
-    // nor one that is mostly another word (#1197 audit).
+    // but not one that is mostly another word or a name ("Franco llamó",
+    // "peso la harina", #1197 audit).
     nouns.contains(&w)
-        || (!(tok.cap && lang != "de")
-            && !crate::w2n_currency::time_homograph(&crate::normalize(w))
+        || (!crate::w2n_currency::time_homograph(&crate::normalize(w))
             && crate::w2n_currency::is_currency_word(lang, &crate::normalize(w)))
 }
 
