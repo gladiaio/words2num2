@@ -552,6 +552,19 @@ def test_opener_around_amount_is_kept(text, lang, expected):
         ("cinco euros y medio kilo", "es", "5 € y medio kilo"),
         ("cinco euros y media hora", "es", "5 € y media hora"),
         ("5 euros y medio", "es", "5 € y medio"),
+        # Subunits, currencies with no minor unit, glued whitespace, set
+        # phrases (#1212 audit).
+        ("cinco dólares con veinte centavos y medio", "es", "$5.20 y medio"),
+        ("cinco yenes y medio", "es", "5 ¥ y medio"),
+        ("cinco euros y medio\t kilo", "es", "5 € y medio\t kilo"),
+        ("cinco euros y medio de comunicación", "es", "5 € y medio de comunicación"),
+        ("cinq euros et demi d'avance", "fr", "5,50 € d'avance"),
+        ("¿cinco euros y medio?", "es", "¿5,50 €?"),
+        (
+            "un millón y medio de personas pagaron cinco euros y medio",
+            "es",
+            "1500000 de personas pagaron 5,50 €",
+        ),
     ],
 )
 def test_amount_and_a_half(text, lang, expected):

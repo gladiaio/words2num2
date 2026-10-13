@@ -4003,7 +4003,7 @@ pub fn words2num_sentence_full(
 /// its own ("y medio kilo", "y medio millón", #1209) nor a set phrase ("medio
 /// de comunicación"). Whitespace and format characters are no token and no
 /// mark ("y medio  ambiente", "medio\t ambiente", #1207 audit).
-fn half_ends(toks: &[&str], from: usize, trail: &str, lang: &str, conn: &str) -> bool {
+fn half_ends(toks: &[&str], from: usize, trail: &str, lang: &str) -> bool {
     let core = |t: &str| crate::normalize(t.trim_end_matches(|c: char| !c.is_alphanumeric()));
     let blank = |t: &str| t.chars().all(|c| c.is_whitespace() || is_format_char(c));
     let real = |from: usize| (from..toks.len()).find(|&k| !blank(toks[k]));
@@ -4025,9 +4025,8 @@ fn half_ends(toks: &[&str], from: usize, trail: &str, lang: &str, conn: &str) ->
         )
     });
     (matches!(w.as_str(), "de" | "del" | "di" | "do" | "da" | "dos" | "das" | "des" | "du" | "d") && !set_phrase)
-        // The language's own conjunction: it "i" is the article (#1212 audit).
-        || w == conn
-        || matches!(w.as_str(), "o" | "ou" | "que")
+        // A conjunction; not it "i", the plural article (#1212 audit).
+        || (matches!(w.as_str(), "y" | "e" | "et" | "i" | "o" | "ou" | "que") && !(w == "i" && lang.starts_with("it")))
         || crate::w2n_currency::is_currency_word(lang, &w)
 }
 
@@ -4081,7 +4080,7 @@ fn fold_currency_half(text: &str, lang: &str, input: &str) -> String {
                 && whole
                 && plain_unit
                 && crate::w2n_currency::half_renders(lang, &core(unit))
-                && half_ends(&toks, i + 4, trail, lang, conn)
+                && half_ends(&toks, i + 4, trail, lang)
             {
                 // The mark after "medio." goes after the amount.
                 out.push(format!("{t}.5"));
@@ -4145,7 +4144,7 @@ fn fold_scale_half(text: &str, lang: &str, input: &str) -> String {
         // kilo", "y medio millón", where it is the next noun's, #1209).
         // A conjunction or a currency name may follow ("y medio y …", "y
         // medio euros").
-        let ends = |trail: &str| half_ends(&toks, i + 3, trail, lang, conn);
+        let ends = |trail: &str| half_ends(&toks, i + 3, trail, lang);
         match (value, toks.get(i + 1), half) {
             (Some(v), Some(&c), Some((h, trail))) if ok && ends(trail) && v > 0 && v % 1_000_000 == 0 && c.eq_ignore_ascii_case(conn) && halves.contains(&h.to_lowercase().as_str()) => {
                 let mut scale = 1_000_000u64;
