@@ -3983,7 +3983,7 @@ pub fn words2num_sentence_full(
     let folds = date || phone;
     let mut out = with_bare_format(!folds, || words2num_sentence_folded(sentence, lang, to, has_kwargs, currency))?;
     if !currency {
-        out = fold_scale_half(&out, lang, sentence);
+        out = fold_shared_scale(&fold_scale_half(&out, lang, sentence), lang, sentence);
     }
     // The phone pass leaves a day-month-year run of figures to the date pass
     // ("né le 23 10 2026", #940), and reads a longer number whole first
@@ -4095,6 +4095,88 @@ fn fold_currency_half(text: &str, lang: &str, input: &str) -> String {
         }
         out.push(t.to_string());
         i += 1;
+    }
+    out.join(" ")
+}
+
+/// "cinco o seis mil personas" -> "5000 o 6000", not "5 o 6000" (#865): in a
+/// spelled-out alternative or range whose second bound carries the scale
+/// ("<A> or <B> thousand", "between <A> and <B> million"), the first bound
+/// takes the scale too. Only where the input spells it so; a figure as
+/// written is never multiplied.
+fn fold_shared_scale(text: &str, lang: &str, input: &str) -> String {
+    let base = lang.split(['_', '-']).next().unwrap_or(lang).to_lowercase();
+    let (or_words, and_words, range_cues): (&[&str], &[&str], &[&str]) = match base.as_str() {
+        "en" => (&["or"], &["and"], &["between"]),
+        "es" | "gl" => (&["o", "u"], &["y", "e"], &["entre"]),
+        "pt" => (&["ou"], &["e"], &["entre"]),
+        "fr" => (&["ou"], &["et"], &["entre"]),
+        "it" => (&["o", "oppure"], &["e"], &["tra", "fra"]),
+        "ca" => (&["o"], &["i"], &["entre"]),
+        "de" => (&["oder"], &["und"], &["zwischen"]),
+        "nl" => (&["of"], &["en"], &["tussen"]),
+        _ => return text.to_string(),
+    };
+    let resolved = resolve_lang(lang).unwrap_or_else(|_| lang.to_string());
+    let core = |t: &str| crate::normalize(t.trim_end_matches(|c: char| !c.is_alphanumeric()));
+    let scale_of = |w: &str| -> Option<u64> {
+        Some(match core(w).as_str() {
+            "thousand" | "mil" | "mille" | "mila" | "tausend" | "duizend" => 1_000,
+            "million" | "millions" | "millon" | "millones" | "milhao" | "milhoes" | "milione" | "milioni" | "milio" | "milions"
+            | "millionen" | "miljoen" | "miljoenen" => 1_000_000,
+            "billion" | "billions" | "milliard" | "milliards" | "bilhao" | "bilhoes" | "miliardo" | "miliardi" | "milliarde"
+            | "milliarden" | "miljard" | "miljarden" => 1_000_000_000,
+            _ => return None,
+        })
+    };
+    // A bound spelled as one number word below the scale (no mark, no figure).
+    let small = |w: &str| {
+        !w.chars().any(|c| c.is_numeric())
+            && w.trim_end_matches(|c: char| c.is_alphanumeric()).is_empty()
+            && matches!(crate::lookup_norm(&resolved, &core(w), false, &[]), Ok(Some(v)) if (1..1000).contains(&v))
+    };
+    // Each "<A> <conn> <B> <scale>" of the input, in order, with its scale.
+    let words: Vec<&str> = input.split_whitespace().collect();
+    let mut wanted: Vec<u64> = Vec::new();
+    for k in 1..words.len().saturating_sub(2) {
+        let conn = core(words[k]);
+        let or = or_words.contains(&conn.as_str());
+        let and = and_words.contains(&conn.as_str()) && k >= 2 && range_cues.contains(&core(words[k - 2]).as_str());
+        if (or || and) && small(words[k - 1]) && small(words[k + 1]) {
+            if let Some(sc) = scale_of(words[k + 2]) {
+                wanted.push(sc);
+            }
+        }
+    }
+    if wanted.is_empty() {
+        return text.to_string();
+    }
+    let toks: Vec<&str> = text.split(' ').collect();
+    let figure = |t: &str| (!t.is_empty() && t.len() <= 15 && t.bytes().all(|b| b.is_ascii_digit())).then(|| t.parse::<u64>().ok()).flatten();
+    let conn_at = |t: &str| {
+        let c = core(t);
+        t.chars().all(char::is_alphanumeric) && (or_words.contains(&c.as_str()) || and_words.contains(&c.as_str()))
+    };
+    // The same shape in the output: "<a> <conn> <b·scale>"; if the counts
+    // differ, fold nothing.
+    let pairs: Vec<usize> = (1..toks.len().saturating_sub(1))
+        .filter(|&k| conn_at(toks[k]) && figure(toks[k - 1]).is_some() && toks[k + 1].starts_with(|c: char| c.is_ascii_digit()))
+        .collect();
+    let mut out: Vec<String> = toks.iter().map(|t| t.to_string()).collect();
+    let mut w = 0;
+    for k in pairs {
+        let (Some(a), Some(&sc)) = (figure(toks[k - 1]), wanted.get(w)) else { break };
+        let b_core = toks[k + 1].trim_end_matches(|c: char| !c.is_ascii_digit());
+        let Some(b) = figure(b_core) else { continue };
+        if b % sc != 0 || a >= 1000 {
+            continue;
+        }
+        w += 1;
+        // An alternative or range rises: "cinco o seis mil", not "veinte o
+        // dos mil".
+        if a < b / sc {
+            out[k - 1] = (a * sc).to_string();
+        }
     }
     out.join(" ")
 }
@@ -4307,7 +4389,7 @@ fn words2num_sentence_folded(
         walked?;
         // Scale-half first: the currency half consumes no pair it counts
         // (#1212 audit).
-        let halved = fold_currency_half(&fold_scale_half(&out, &resolved, sentence), &resolved, sentence);
+        let halved = fold_currency_half(&fold_shared_scale(&fold_scale_half(&out, &resolved, sentence), &resolved, sentence), &resolved, sentence);
         return Ok(crate::w2n_currency::fold_currency(&halved, &resolved));
     }
     // The plain walk cuts the same subunit off: fr "douze dollars et
