@@ -117,6 +117,8 @@ def test_only_plain_modes():
         ("a las nueve y diez un hombre llegó", "es", "a las 9:10 un hombre llegó"),
         ("à neuf heures quinze fois deux", "fr", "à 9h 15 fois 2"),
         ("at nine fifteen first", "en", "at 9:15 first"),
+        # A scale word that does not combine with the minutes (#1190 audit).
+        ("a las nueve y veinte cien personas", "es", "a las 9:20 100 personas"),
     ],
 )
 def test_time_reader_leaves_longer_numbers_and_counts(text, lang, expected):

@@ -103,7 +103,7 @@ fn cuts_number(lang: &str, toks: &[Tok], start: usize, end: usize) -> bool {
     let conn = |k: usize| toks.get(k).is_some_and(|t| matches!(t.word.as_str(), "et" | "y" | "e"));
     let clean = |k: usize| toks.get(k).is_some_and(|t| t.trail.is_empty());
     // Only a scale word makes the minutes part of a larger number ("quinze
-    // mille"); another number after them is the next count ("zwanzig zwei
+    // mille"), another number after them is the next count ("zwanzig zwei
     // Leute", "quinze un homme", #1190 audit).
     let scale = |k: usize| {
         toks.get(k).is_some_and(|t| {
@@ -113,7 +113,9 @@ fn cuts_number(lang: &str, toks: &[Tok], start: usize, end: usize) -> bool {
                     | "hundert" | "tausend" | "millionen" | "cien" | "ciento" | "cientos" | "mil"
                     | "millón" | "millones"
             )
-        })
+        // ... and only when the two make one number: es "veinte cien" does
+        // not (#1190 audit).
+        }) && number(lang, &[toks[k - 1].word.as_str(), toks[k].word.as_str()]).is_some()
     };
     // "et"/"y" joins one number only as tens and a unit ("trente et un",
     // "treinta y uno", "soixante et onze"); "neuf et dix", "zwischen neun und
