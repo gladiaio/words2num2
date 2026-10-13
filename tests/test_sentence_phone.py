@@ -88,3 +88,98 @@ def test_off_by_default():
         words2num_sentence("two one two four five six seven eight nine oh")
         == "2124567890"
     )
+
+
+@pytest.mark.parametrize(
+    "text, lang, kwargs, expected",
+    [
+        # Groups from the trunk prefix still join.
+        ("appelez le 06, 12, 34, 56, 78", "fr", {}, "appelez le 06 12 34 56 78"),
+        # Commas splitting it as its plan writes it, or between digits
+        # dictated one by one; "+" across a list (#1179 audit).
+        (
+            "call two one two, five five five, one two three four",
+            "en",
+            {},
+            "call (212) 555-1234",
+        ),
+        (
+            "llama al seis uno dos, tres cuatro, cinco seis, siete ocho",
+            "es",
+            {},
+            "llama al 612 34 56 78",
+        ),
+        (
+            "llama al nueve uno, uno dos tres, cuatro cinco, seis siete",
+            "es",
+            {},
+            "llama al 911 23 45 67",
+        ),
+        ("ext 2, +1, 212, 555, 1234", "en", {}, "ext 2, +1 212-555-1234"),
+        ("ruf 030 12 2345 an", "de", {}, "ruf 030 122345 an"),
+        # A number with groups of three (#1182); a 0-prefixed number holding
+        # "dd mm yyyy" is read whole (#1181).
+        (
+            "ligue para nove um dois, três quatro cinco, seis sete oito",
+            "pt",
+            {},
+            "ligue para 912 345 678",
+        ),
+        ("appelez le 06 12 2024 56", "fr", {"date": True}, "appelez le 06 12 20 24 56"),
+        # A date and a figure after it; a phone after a list figure (#1179
+        # audit).
+        ("on 12 05 1984 12", "en", {"date": True}, "on 12/5/1984 12"),
+        (
+            "né le 23 10 2026, 300 personnes",
+            "fr",
+            {"date": True},
+            "né le 23/10/2026, 300 personnes",
+        ),
+        ("call 2, 212 555 1234", "en", {}, "call 2, (212) 555-1234"),
+        # A piece after another figure needs its plan's grouping (#1189).
+        (
+            "In 2018, 2019 312000 cars were sold",
+            "en",
+            {},
+            "In 2018, 2019 312000 cars were sold",
+        ),
+        (
+            "born 12 05 1984 2019 312000 cars",
+            "en",
+            {"date": True},
+            "born 12/5/1984 2019 312000 cars",
+        ),
+        # Not after a figure that ends its clause (#1179 audit).
+        (
+            "Speaker 2: four fifteen eight six seven fifty three oh nine",
+            "en",
+            {},
+            "Speaker 2: (415) 867-5309",
+        ),
+        (
+            "Speaker two: four one five, five five five, zero one two three",
+            "en",
+            {},
+            "Speaker 2: (415) 555-0123",
+        ),
+        # One walked token is never a piece (#1179 audit).
+        (
+            "call 2, two one two five five five one two three four",
+            "en",
+            {},
+            "call 2, (212) 555-1234",
+        ),
+        ("212 555 1234, 415 867 5309", "en", {}, "(212) 555-1234, (415) 867-5309"),
+        # A date is read first, or left alone (#940).
+        (
+            "né le vingt-trois dix deux mille vingt-six",
+            "fr",
+            {"date": True},
+            "né le 23/10/2026",
+        ),
+        ("né le vingt-trois dix deux mille vingt-six", "fr", {}, "né le 23 10 2026"),
+        ("on 02 20 1984", "en", {"date": True}, "on 2/20/1984"),
+    ],
+)
+def test_phone_leaves_dates_and_list_items(text, lang, kwargs, expected):
+    assert words2num_sentence(text, lang=lang, phone=True, **kwargs) == expected
