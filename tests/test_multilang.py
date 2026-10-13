@@ -8,7 +8,7 @@ from decimal import Decimal
 
 import pytest
 
-from words2num2 import words2num, words2num_sentence
+from words2num2 import Words2NumError, words2num, words2num_sentence
 
 num2words2 = pytest.importorskip("num2words2")
 
@@ -500,3 +500,47 @@ def test_currency_marks_by_nfkc_fold_issue_1099(text, expected):
 )
 def test_article_one_after_a_number_or_speaker_label(lang, text, expected):
     assert words2num_sentence(text, lang=lang) == expected
+
+
+@pytest.mark.parametrize(
+    "lang, text, expected",
+    [
+        # Georgian as it is written: the vigesimal tens joined by "და",
+        # spaced too, and the bound hundreds and thousand (#989).
+        ("ka", "ოცდა ათი", 30),
+        ("ka", "ოცდაერთი", 21),
+        ("ka", "სამოცდაცხრამეტი", 79),
+        ("ka", "ოთხმოცდათორმეტი", 92),
+        ("ka", "ას ოცდაერთი", 121),
+        ("ka", "ათას ოცდაერთი", 1021),
+        ("ka", "ორი ათას ხუთასი", 2500),
+        ("ka", "მინუს ოცდაერთი", -21),
+        ("ka", "ოცდაერთი.", 21),
+        # Burmese spaced inside one number (#989).
+        ("my", "တစ်ဆယ့် တစ်", 11),
+        ("my", "တစ်ဆယ့် နှစ်", 12),
+    ],
+)
+def test_written_compounds_read(lang, text, expected):
+    assert words2num(text, lang=lang) == expected
+
+
+@pytest.mark.parametrize(
+    "lang, text",
+    [
+        ("ka", "ოცდა"),
+        ("ka", "ერთი ერთი"),
+        ("ka", "ოცდა ოცი"),
+        ("my", "တစ် နှစ်"),
+        ("my", "ငါး ငါး"),
+        # Separate figures are not glued (#1199).
+        ("my", "1 2"),
+        ("my", "၁ ၂"),
+        ("my", "12 34"),
+        ("my", "2 3.5"),
+        ("my_MM", "1 2"),
+    ],
+)
+def test_written_compounds_reject_non_numbers(lang, text):
+    with pytest.raises(Words2NumError):
+        words2num(text, lang=lang)
