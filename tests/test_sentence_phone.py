@@ -149,6 +149,13 @@ def test_off_by_default():
             {"date": True},
             "born 12/5/1984 2019 312000 cars",
         ),
+        # Not after a figure that ends its clause (#1179 audit).
+        (
+            "Speaker two: four one five, five five five, zero one two three",
+            "en",
+            {},
+            "Speaker 2: (415) 555-0123",
+        ),
         ("212 555 1234, 415 867 5309", "en", {}, "(212) 555-1234, (415) 867-5309"),
         # A date is read first, or left alone (#940).
         (

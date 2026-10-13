@@ -204,9 +204,13 @@ pub fn fold_phones(text: &str, lang: &str, region: Option<&str>) -> String {
                 // retry, a list or a date) is a phone only grouped the way its
                 // plan writes it: "call 2, 212 555 1234", not "2018, 2019
                 // 312000" or "7, 21 24 35 47 59" (#1189).
-                let piece = i > 0 && {
-                    let core = split_trail(toks[i - 1]).0;
-                    !core.is_empty() && core.bytes().all(|b| b.is_ascii_digit())
+                // Only after a figure with a comma or nothing after it (a
+                // sentence mark ends that figure's clause: "Speaker 2: four
+                // one five …"), and never a single walked token, which is no
+                // year-and-count or list (#1179 audit).
+                let piece = i > 0 && run.taken > 1 && {
+                    let (core, t) = split_trail(toks[i - 1]);
+                    matches!(t, "" | ",") && !core.is_empty() && core.bytes().all(|b| b.is_ascii_digit())
                 };
                 let shaped = |w: &str| {
                     let groups: Vec<usize> = w.split(|c: char| !c.is_ascii_digit()).filter(|g| !g.is_empty()).map(str::len).collect();
