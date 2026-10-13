@@ -136,6 +136,19 @@ def test_off_by_default():
             "né le 23/10/2026, 300 personnes",
         ),
         ("call 2, 212 555 1234", "en", {}, "call 2, (212) 555-1234"),
+        # A piece after another figure needs its plan's grouping (#1189).
+        (
+            "In 2018, 2019 312000 cars were sold",
+            "en",
+            {},
+            "In 2018, 2019 312000 cars were sold",
+        ),
+        (
+            "born 12 05 1984 2019 312000 cars",
+            "en",
+            {"date": True},
+            "born 12/5/1984 2019 312000 cars",
+        ),
         ("212 555 1234, 415 867 5309", "en", {}, "(212) 555-1234, (415) 867-5309"),
         # A date is read first, or left alone (#940).
         (

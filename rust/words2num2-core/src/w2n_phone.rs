@@ -200,7 +200,20 @@ pub fn fold_phones(text: &str, lang: &str, region: Option<&str>) -> String {
                 i += 3;
             }
             Some(run) => {
-                match written(&run, &candidates) {
+                // A piece that starts right after another figure (left by the
+                // retry, a list or a date) is a phone only grouped the way its
+                // plan writes it: "call 2, 212 555 1234", not "2018, 2019
+                // 312000" or "7, 21 24 35 47 59" (#1189).
+                let piece = i > 0 && {
+                    let core = split_trail(toks[i - 1]).0;
+                    !core.is_empty() && core.bytes().all(|b| b.is_ascii_digit())
+                };
+                let shaped = |w: &str| {
+                    let groups: Vec<usize> = w.split(|c: char| !c.is_ascii_digit()).filter(|g| !g.is_empty()).map(str::len).collect();
+                    let toks_len: Vec<usize> = toks[i..i + run.taken].iter().map(|t| split_trail(t).0.trim_start_matches('+').len()).filter(|&n| n > 0).collect();
+                    groups == toks_len
+                };
+                match written(&run, &candidates).filter(|w| !piece || run.plus || shaped(w)) {
                     Some(w) => {
                         // A comma after the last group is the sentence's.
                         let trail = if run.trail == "," { "," } else { run.trail.as_str() };
