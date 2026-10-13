@@ -84,13 +84,20 @@ pub fn words2num(
         };
     }
     let res = w2n_sentence::words2num(text, lang, to);
-    if res.is_err() && to == "cardinal" {
+    // es "diez y seis": the split teens (#866), in cardinal and year mode.
+    if res.is_err() && matches!(to, "cardinal" | "year") {
         let resolved = w2n_sentence::resolve_lang(lang).unwrap_or_default();
-        // es "diez y seis": the split teens (#866).
         if let Some(t) = w2n_sentence::es_split_teens(text.trim(), &resolved) {
             if let Ok(v) = w2n_sentence::words2num(&t, lang, to) {
                 return Ok(v);
             }
+        }
+    }
+    if res.is_err() && to == "cardinal" {
+        let resolved = w2n_sentence::resolve_lang(lang).unwrap_or_default();
+        // "un millón y medio": whole millions and a half (#859).
+        if let Some(v) = scale_and_half(text, lang, resolved.split(['_', '-']).next().unwrap_or("")) {
+            return Ok(w2n_lang_en::W2nValue::Int(v.into()));
         }
         match resolved.split(['_', '-']).next().unwrap_or("") {
             // Georgian as it is written: "ოცდაერთი" (20 and 1), "ოცდა ათი",
@@ -145,6 +152,43 @@ fn edges(text: &str) -> (&str, &str, &str) {
     let lead = &t[..t.len() - core.len()];
     let core2 = core.trim_end_matches(mark);
     (lead, core2, &core[core2.len()..])
+}
+
+/// "un millón y medio", "um bilhão e meio", "un million et demi": a whole
+/// number of millions or more and a half of its largest scale (#859).
+fn scale_and_half(text: &str, lang: &str, base: &str) -> Option<i64> {
+    let (conn, half) = match base {
+        "es" => ("y", "medio"),
+        "gl" => ("e", "medio"),
+        "pt" => ("e", "meio"),
+        "fr" => ("et", "demi"),
+        "it" => ("e", "mezzo"),
+        "ca" => ("i", "mig"),
+        _ => return None,
+    };
+    let t = text.trim();
+    let before = t.strip_suffix(half)?;
+    if !before.ends_with(char::is_whitespace) {
+        return None;
+    }
+    let head = before.trim_end().strip_suffix(conn)?;
+    // Number words only: a figure is never added to ("1000000 y medio",
+    // #1208).
+    if !head.ends_with(char::is_whitespace) || head.chars().any(|c| c.is_numeric()) {
+        return None;
+    }
+    let v = match w2n_sentence::words2num(head.trim_end(), lang, "cardinal").ok()? {
+        w2n_lang_en::W2nValue::Int(v) => i64::try_from(v).ok()?,
+        _ => return None,
+    };
+    if v <= 0 || v % 1_000_000 != 0 {
+        return None;
+    }
+    let mut scale = 1_000_000i64;
+    while v % (scale * 1000) == 0 {
+        scale *= 1000;
+    }
+    Some(v + scale / 2)
 }
 
 /// A Georgian cardinal below a million in its standard spelling: units and
@@ -3013,6 +3057,41 @@ mod tests {
         assert_eq!(parse_scaled("sl", "pet milijonov"), Some(5_000_000));
         assert_eq!(parse_scaled("sl", "pet milijard"), Some(5_000_000_000));
         assert_eq!(parse_scaled("da", "en million"), Some(1_000_000));
+    }
+
+    /// #859, #1208, #1209: whole scales and a half.
+    #[test]
+    fn scale_and_half_cardinal() {
+        let v = |t: &str, l: &str| match crate::words2num(t, l, "cardinal") {
+            Ok(w2n_lang_en::W2nValue::Int(i)) => Some(i64::try_from(i).unwrap()),
+            _ => None,
+        };
+        assert_eq!(v("un millón y medio", "es"), Some(1_500_000));
+        assert_eq!(v("dos millones y medio", "es"), Some(2_500_000));
+        assert_eq!(v("1000000 y medio", "es"), None);
+        assert_eq!(v("un millón y medio kilo", "es"), None);
+        assert_eq!(
+            crate::w2n_sentence::words2num_sentence("dos millones y medio ambiente", "es", "cardinal", false).unwrap(),
+            "2000000 y medio ambiente"
+        );
+        assert_eq!(crate::w2n_sentence::words2num_sentence("2000000 y medio", "es", "cardinal", false).unwrap(), "2000000 y medio");
+        assert_eq!(
+            crate::w2n_sentence::words2num_sentence("dos millones y medio de personas", "es", "cardinal", false).unwrap(),
+            "2500000 de personas"
+        );
+    }
+
+    /// #866: es split teens.
+    #[test]
+    fn es_split_teens_rewrite() {
+        let r = |t: &str| crate::w2n_sentence::es_split_teens(t, "es");
+        assert_eq!(r("tenía diez y ocho años").as_deref(), Some("tenía dieciocho años"));
+        assert_eq!(r("¿diez y seis?").as_deref(), Some("¿dieciséis?"));
+        assert_eq!(r("diez y seis€"), None);
+        assert_eq!(r("cinco, diez y seis"), None);
+        assert_eq!(r("las diez y seis minutos"), None);
+        assert_eq!(r("diez y tres"), None);
+        assert_eq!(crate::w2n_sentence::es_split_teens("dez e seis", "pt"), None);
     }
 
     /// gladiaio/words2num2#90, #91, #92, #99, #100, #239: glued scales.

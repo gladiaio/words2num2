@@ -3982,6 +3982,9 @@ pub fn words2num_sentence_full(
     // The currency pass reads a figure with its format character (#1021).
     let folds = date || phone;
     let mut out = with_bare_format(!folds, || words2num_sentence_folded(sentence, lang, to, has_kwargs, currency))?;
+    if !currency {
+        out = fold_scale_half(&out, lang, sentence);
+    }
     // The phone pass leaves a day-month-year run of figures to the date pass
     // ("né le 23 10 2026", #940), and reads a longer number whole first
     // ("06 12 2024 56", #1181).
@@ -3991,17 +3994,123 @@ pub fn words2num_sentence_full(
     Ok(if date { crate::w2n_date::fold_dates_with(&out, lang, region, iso) } else { out })
 }
 
+/// "un millón y medio" -> 1500000, not "1000000 y medio" (#859): a figure
+/// that is a whole number of millions (or more) followed by "and a half" in
+/// the language takes half of its largest scale.
+fn fold_scale_half(text: &str, lang: &str, input: &str) -> String {
+    let base = lang.split(['_', '-']).next().unwrap_or(lang).to_lowercase();
+    let (conn, halves): (&str, &[&str]) = match base.as_str() {
+        "es" => ("y", &["medio"]),
+        "gl" => ("e", &["medio"]),
+        "pt" => ("e", &["meio"]),
+        "fr" => ("et", &["demi"]),
+        "it" => ("e", &["mezzo"]),
+        "ca" => ("i", &["mig"]),
+        _ => return text.to_string(),
+    };
+    let core = |t: &str| crate::normalize(t.trim_end_matches(|c: char| !c.is_alphanumeric()));
+    // Only after a scale word the input spelled out: "1000000 y medio" as
+    // written stays (#1208). Each "<conn> <half>" of the input, in order:
+    // was a scale word before it?
+    const SCALES: &[&str] = &[
+        "millon", "millones", "billon", "billones", "milhao", "milhoes", "bilhao", "bilhoes", "biliao", "bilioes", "million", "millions",
+        "milliard", "milliards", "billion", "billions", "milione", "milioni", "miliardo", "miliardi", "bilione", "bilioni", "milio",
+        "milions", "bilio", "bilions", "trilhao", "trilhoes", "billiard", "billiards", "biliardo", "biliardi",
+    ];
+    let words: Vec<&str> = input.split_whitespace().collect();
+    let spelled: Vec<bool> = (1..words.len().saturating_sub(1))
+        .filter(|&k| core(words[k]) == conn && halves.contains(&core(words[k + 1]).as_str()))
+        .map(|k| SCALES.contains(&core(words[k - 1]).as_str()) && words[k - 1].trim_end_matches(|c: char| c.is_alphanumeric()).is_empty())
+        .collect();
+    let toks: Vec<&str> = text.split(' ').collect();
+    // The same pairs in the output; if the counts disagree, fold nothing.
+    let pairs = (1..toks.len().saturating_sub(1)).filter(|&k| toks[k].eq_ignore_ascii_case(conn) && halves.contains(&core(toks[k + 1]).as_str())).count();
+    if pairs != spelled.len() {
+        return text.to_string();
+    }
+    let mut seen = 0;
+    let mut out: Vec<String> = Vec::with_capacity(toks.len());
+    let mut i = 0;
+    while i < toks.len() {
+        let t = toks[i];
+        if toks.get(i + 1).is_some_and(|c| c.eq_ignore_ascii_case(conn)) && toks.get(i + 2).is_some_and(|h| halves.contains(&core(h).as_str())) {
+            seen += 1;
+        }
+        let ok = seen > 0 && spelled[seen - 1];
+        let value = (!t.is_empty() && t.len() <= 18 && t.bytes().all(|b| b.is_ascii_digit())).then(|| t.parse::<u64>().ok()).flatten();
+        let half = toks.get(i + 2).map(|h| {
+            let core = h.trim_end_matches(|c: char| !c.is_alphanumeric());
+            (core, &h[core.len()..])
+        });
+        // "y medio" ends the quantity: the end, a mark, or "de" (not "y medio
+        // kilo", "y medio millón", where it is the next noun's, #1209).
+        // A conjunction or a currency name may follow ("y medio y …", "y
+        // medio euros").
+        let ends = |trail: &str| {
+            // The next real token: a double space leaves empty ones
+            // ("y medio  ambiente", #1207 audit).
+            // Whitespace and format characters are no token ("medio\u{200b}",
+            // "\u{a0}", "\t").
+            let blank = |t: &str| t.chars().all(|c| c.is_whitespace() || is_format_char(c));
+            let real = |from: usize| (from..toks.len()).find(|&k| !blank(toks[k]));
+            let next_k = real(i + 3);
+            let next = next_k.map(|k| toks[k]);
+            !trail.chars().all(|c| c.is_whitespace() || is_format_char(c))
+                || next.is_none_or(|n| {
+                    // An elided partitive ("d'euros", "d’habitants") and a
+                    // spaced mark (fr "et demi !") end it too (#1207 audit).
+                    let lower = n.to_lowercase();
+                    if lower.starts_with("d'") || lower.starts_with("d\u{2019}") || lower.starts_with("d\u{2018}") || lower.starts_with("d\u{2bc}") || !n.chars().any(char::is_alphanumeric) {
+                        return true;
+                    }
+                    let w = core(n);
+                    // Not "medio de comunicación", "meio de transporte": the
+                    // half of a set phrase (#1207 audit).
+                    let set_phrase = next_k.and_then(|k| real(k + 1)).map(|k| toks[k]).is_some_and(|x| {
+                        matches!(core(x).as_str(), "comunicacion" | "comunicacao" | "transporte" | "transportes" | "vida" | "pago" | "pagos" | "pagamento" | "prueba" | "prova" | "cultivo" | "trasporto" | "comunicazione" | "transport" | "communication")
+                    });
+                    (matches!(w.as_str(), "de" | "del" | "di" | "do" | "da" | "dos" | "das" | "des" | "du" | "d") && !set_phrase)
+                        || matches!(w.as_str(), "y" | "e" | "et" | "i" | "o" | "ou" | "que")
+                        || crate::w2n_currency::is_currency_word(lang, &w)
+                })
+        };
+        match (value, toks.get(i + 1), half) {
+            (Some(v), Some(&c), Some((h, trail))) if ok && ends(trail) && v > 0 && v % 1_000_000 == 0 && c.eq_ignore_ascii_case(conn) && halves.contains(&h.to_lowercase().as_str()) => {
+                let mut scale = 1_000_000u64;
+                while v % (scale * 1000) == 0 {
+                    scale *= 1000;
+                }
+                out.push(format!("{}{trail}", v + scale / 2));
+                i += 3;
+            }
+            _ => {
+                out.push(t.to_string());
+                i += 1;
+            }
+        }
+    }
+    out.join(" ")
+}
+
 /// es "diez y seis" -> "dieciséis" (16..19, #866), or None when the text
-/// holds none.
+/// holds none. Not in a list after "<number>," ("cinco, diez y seis" is two
+/// numbers), not before "minutos" (a clock time), and only with a mark after
+/// the unit the walk splits off; an opener before "diez" rides along (#1213
+/// audit).
 pub(crate) fn es_split_teens(text: &str, lang: &str) -> Option<String> {
     if lang.split(['_', '-']).next() != Some("es") {
         return None;
     }
+    const CLAUSE: &str = ",.;:!?»)…%\"'”’";
     let toks: Vec<&str> = text.split(' ').collect();
     let mut out: Vec<String> = Vec::with_capacity(toks.len());
     let mut changed = false;
+    let mut last_teen = false;
     let mut i = 0;
     while i < toks.len() {
+        let head = toks[i];
+        let lead_len = head.len() - head.trim_start_matches(|c: char| !c.is_alphanumeric()).len();
+        let (lead, head_core) = head.split_at(lead_len);
         let unit = toks.get(i + 2).and_then(|u| {
             let core = u.trim_end_matches(|c: char| !c.is_alphanumeric());
             let one = match crate::normalize(core).as_str() {
@@ -4011,18 +4120,30 @@ pub(crate) fn es_split_teens(text: &str, lang: &str) -> Option<String> {
                 "nueve" => "diecinueve",
                 _ => return None,
             };
-            Some((one, &u[core.len()..]))
+            let trail = &u[core.len()..];
+            trail.chars().all(|c| CLAUSE.contains(c)).then_some((one, trail))
         });
+        // A teen just read is no list head ("diez y seis, diez y siete").
+        let listed = i > 0 && !last_teen && {
+            let prev = toks[i - 1];
+            prev.ends_with(',') && prev.trim_end_matches(',').chars().any(char::is_alphanumeric)
+        };
+        let minutes = toks.get(i + 3).is_some_and(|n| matches!(crate::normalize(n.trim_end_matches(|c: char| !c.is_alphanumeric())).as_str(), "minutos" | "minuto" | "min"));
         match unit {
             Some((one, trail))
-                if toks[i].eq_ignore_ascii_case("diez") && toks.get(i + 1).is_some_and(|y| y.eq_ignore_ascii_case("y")) =>
+                if crate::normalize(head_core) == "diez"
+                    && toks.get(i + 1).is_some_and(|y| y.eq_ignore_ascii_case("y"))
+                    && !listed
+                    && !minutes =>
             {
-                out.push(format!("{one}{trail}"));
+                out.push(format!("{lead}{one}{trail}"));
                 changed = true;
+                last_teen = true;
                 i += 3;
             }
             _ => {
-                out.push(toks[i].to_string());
+                out.push(head.to_string());
+                last_teen = false;
                 i += 1;
             }
         }
@@ -4052,9 +4173,10 @@ fn words2num_sentence_folded(
     };
     // es "diez y seis" .. "diez y nueve": the split teens the RAE accepts are
     // 16..19, not "10 y 6" (#866); after the clock pass ("a las diez y seis"
-    // is 10:06).
+    // is 10:06), and only where the teen is then read (not in ordinal mode,
+    // #1213 audit).
     let teens;
-    let sentence = match es_split_teens(sentence, &resolved_lang) {
+    let sentence = match es_split_teens(sentence, &resolved_lang).filter(|_| matches!(to, "cardinal" | "year" | "currency")) {
         Some(t) => {
             teens = t;
             teens.as_str()
@@ -4087,7 +4209,7 @@ fn words2num_sentence_folded(
         })();
         drop(_clear);
         walked?;
-        return Ok(crate::w2n_currency::fold_currency(&out, &resolved));
+        return Ok(crate::w2n_currency::fold_currency(&fold_scale_half(&out, &resolved, sentence), &resolved));
     }
     // The plain walk cuts the same subunit off: fr "douze dollars et
     // cinquante cents" is "12 dollars et 50 cents", not "… 5000" (#868).
