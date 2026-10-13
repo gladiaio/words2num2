@@ -272,6 +272,12 @@ def test_unknown_date_format():
         ("de", "x (am zwölften März) y", "x (am 12. März) y"),
         # An opener glued after the month goes after the date, not inside.
         ("en", "x the fifth of may( y", "x May 5( y"),
+        # A closer after the month or the day goes after the date (#1196).
+        ("en", "x [fifth of may] y", "x [May 5] y"),
+        ("en", "x “fifth of may” y", "x “May 5” y"),
+        ("en", "x 「fifth of may」 y", "x 「May 5」 y"),
+        ("en", "x [may fifth] y", "x [May 5] y"),
+        ("en", "x fifth of may] y", "x May 5] y"),
     ],
 )
 def test_opener_around_date_is_kept(lang, text, expected):

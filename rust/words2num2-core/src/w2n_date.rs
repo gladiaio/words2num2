@@ -68,8 +68,16 @@ fn style(lang: &str, region: Option<&str>) -> Option<Style> {
 const TRAILING: &[char] = &[',', ';', ':', '!', '?', '.', ')', '"', '\'', '»'];
 
 /// The token without its trailing punctuation, and that punctuation.
+/// Punctuation after a token: ASCII marks and every closing bracket or
+/// quote, typographic or a compatibility form ("[may fifth]", #1196).
+fn trail_mark(c: char) -> bool {
+    TRAILING.contains(&c)
+        || "]}”’›」』】》〕〉".contains(c)
+        || crate::w2n_sentence::folded_mark(c) == Some(crate::w2n_sentence::Mark::Closing)
+}
+
 fn split_trail(tok: &str) -> (&str, &str) {
-    let core = tok.trim_end_matches(TRAILING);
+    let core = tok.trim_end_matches(trail_mark);
     (core, &tok[core.len()..])
 }
 
@@ -104,7 +112,7 @@ fn day(st: Style, tok: &str) -> Option<(u32, String)> {
 fn month(lang: &str, tok: &str) -> Option<(String, String)> {
     // An opener glued after the name ("may(") is punctuation after it, not
     // part of the name: it goes after the date (#1106).
-    let bare = tok.trim_end_matches(|c: char| TRAILING.contains(&c) || crate::w2n_sentence::is_opener(c));
+    let bare = tok.trim_end_matches(|c: char| trail_mark(c) || crate::w2n_sentence::is_opener(c));
     let (core, trail) = (bare, &tok[bare.len()..]);
     let norm = crate::normalize(core);
     crate::w2n_sentence::months(lang)
