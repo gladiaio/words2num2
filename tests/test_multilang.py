@@ -759,6 +759,33 @@ def test_th_my_written_forms_sentence(lang, text, expected):
 
 
 @pytest.mark.parametrize(
+    "text, expected",
+    [
+        # lo billion "ຕື້" (#878).
+        ("ຫ້າຕື້", 5000000000),
+        ("ໜຶ່ງຕື້", 1000000000),
+        ("ສອງຕື້ສາມ", 2000000003),
+    ],
+)
+def test_lo_billion(text, expected):
+    assert words2num(text, lang="lo") == expected
+
+
+def test_lo_billion_elided_place():
+    # "ຕື້ສອງ" is 1.2 billion, as "ລ້ານສອງ" is 1.2 million; "ສອງຕື້ຫ້າ" (2.5
+    # billion or 2 000 000 005) stays, as "ສອງລ້ານຫ້າ" does (#1215 audit).
+    assert words2num("ຕື້ສອງ", lang="lo") == 1200000000
+    assert words2num_sentence("ສອງຕື້ຫ້າ ກີບ", lang="lo") == "ສອງຕື້ຫ້າ ກີບ"
+
+
+def test_lo_billion_sentence():
+    assert (
+        words2num_sentence("ງົບປະມານ ຫ້າຕື້ ກີບ", lang="lo")
+        == "ງົບປະມານ 5000000000 ກີບ"
+    )
+
+
+@pytest.mark.parametrize(
     "lang, text, expected",
     [
         # A spelled-out alternative or range shares its scale (#865).
