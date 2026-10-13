@@ -4170,6 +4170,83 @@ fn fold_scale_half(text: &str, lang: &str, input: &str) -> String {
     out.join(" ")
 }
 
+/// es "diez y seis" -> "dieciséis" (16..19, #866), or None when the text
+/// holds none. Not in a list after "<number>," ("cinco, diez y seis" is two
+/// numbers), not before "minutos" (a clock time), and only with a mark after
+/// the unit the walk splits off; an opener before "diez" rides along (#1213
+/// audit).
+pub(crate) fn es_split_teens(text: &str, lang: &str) -> Option<String> {
+    if lang.split(['_', '-']).next() != Some("es") {
+        return None;
+    }
+    const CLAUSE: &str = ",.;:!?»)…%\"'”’";
+    let toks: Vec<&str> = text.split(' ').collect();
+    let mut out: Vec<String> = Vec::with_capacity(toks.len());
+    let mut changed = false;
+    let mut last_teen = false;
+    let mut i = 0;
+    while i < toks.len() {
+        let head = toks[i];
+        // Only an opener rides along ("¿diez"); "#diez", "$diez" stay (#1213
+        // audit).
+        let lead_len = head.len() - head.trim_start_matches(is_opener).len();
+        let (lead, head_core) = head.split_at(lead_len);
+        let unit = toks.get(i + 2).and_then(|u| {
+            let core = u.trim_end_matches(|c: char| !c.is_alphanumeric());
+            let one = match crate::normalize(core).as_str() {
+                "seis" => "dieciséis",
+                "siete" => "diecisiete",
+                "ocho" => "dieciocho",
+                "nueve" => "diecinueve",
+                _ => return None,
+            };
+            let trail = &u[core.len()..];
+            trail.chars().all(|c| CLAUSE.contains(c)).then_some((one, trail))
+        });
+        // A teen just read is no list head ("diez y seis, diez y siete").
+        // After "<number>," it is a list ("cinco, diez y seis"); "Sí, diez y
+        // seis" is the teen (#1213 audit).
+        let listed = i > 0 && !last_teen && {
+            let prev = toks[i - 1].trim_end_matches(',');
+            toks[i - 1].ends_with(',')
+                && !prev.is_empty()
+                && (prev.chars().all(|c| c.is_ascii_digit())
+                    || matches!(crate::normalize(prev).as_str(), "una" | "un" | "uno")
+                    || matches!(crate::lookup_norm(lang, &crate::normalize(prev), false, &[]), Ok(Some(_))))
+        };
+        // After "las" it is a clock time: "las diez y seis minutos", and with
+        // to="currency" (no clock pass) "a las diez y seis" (#1213 audit).
+        let after_las = i > 0 && crate::normalize(toks[i - 1]) == "las";
+        let unit_word = |n: &str| crate::normalize(n.trim_end_matches(|c: char| !c.is_alphanumeric()));
+        // A mark on the unit ends the time too ("a las diez y seis. Luego").
+        let unit_marked = toks.get(i + 2).is_some_and(|u| u.ends_with(|c: char| !c.is_alphanumeric()));
+        let minutes = after_las
+            && (unit_marked || toks.get(i + 3).is_none_or(|n| matches!(unit_word(n).as_str(), "minutos" | "minuto" | "min" | "y" | "de" | "en" | "punto")));
+        match unit {
+            Some((one, trail))
+                // The bare word: a mark on "diez" ("diez, y seis", "…diez") is a
+                // boundary or would be lost (#1213 audit).
+                if head_core.chars().all(char::is_alphabetic)
+                    && crate::normalize(head_core) == "diez"
+                    && toks.get(i + 1).is_some_and(|y| y.eq_ignore_ascii_case("y"))
+                    && !listed
+                    && !minutes =>
+            {
+                out.push(format!("{lead}{one}{trail}"));
+                changed = true;
+                last_teen = true;
+                i += 3;
+            }
+            _ => {
+                out.push(head.to_string());
+                last_teen = false;
+                i += 1;
+            }
+        }
+    }
+    changed.then(|| out.join(" "))
+}
+
 fn words2num_sentence_folded(
     sentence: &str,
     lang: &str,
@@ -4189,6 +4266,18 @@ fn words2num_sentence_folded(
         timed.as_str()
     } else {
         sentence
+    };
+    // es "diez y seis" .. "diez y nueve": the split teens the RAE accepts are
+    // 16..19, not "10 y 6" (#866); after the clock pass ("a las diez y seis"
+    // is 10:06), and only where the teen is then read (not in ordinal mode,
+    // #1213 audit).
+    let teens;
+    let sentence = match es_split_teens(sentence, &resolved_lang).filter(|_| matches!(to, "cardinal" | "year" | "currency")) {
+        Some(t) => {
+            teens = t;
+            teens.as_str()
+        }
+        None => sentence,
     };
     if currency {
         let resolved = resolved_lang.clone();

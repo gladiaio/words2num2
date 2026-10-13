@@ -9,16 +9,24 @@ name: Scheduled release
 #      (rust/, words2num2/, pyproject.toml), bump the patch version with
 #      .github/scripts/bump_version.py (Python X.Y.Z+1, crates patch + 1, CHANGELOG
 #      [Unreleased] -> [X.Y.Z+1]), push it on release/vX.Y.Z+1 and open a PR with auto-merge.
-#   3. main requires a PR and the CI checks, and a push or PR made with GITHUB_TOKEN triggers
-#      no workflow, so the job dispatches ci.yml and lint.yml on the release branch itself and
-#      waits for the PR to merge, then dispatches auto-release.yml (which tags, publishes to
-#      PyPI + GitHub Release, crates.io and AUR). If the merge takes longer than the wait,
-#      step 1 of the next run releases it.
+#   3. main requires a PR and the CI checks. The branch is pushed and the PR opened with the
+#      RELEASE_TOKEN secret, so the PR runs its pull_request workflows like any other PR and
+#      auto-merge fires once they pass. The job waits for the merge, then dispatches
+#      auto-release.yml (which tags, publishes to PyPI + GitHub Release, crates.io and AUR).
+#      If the merge takes longer than the wait, step 1 of the next run releases it.
+#
+# RELEASE_TOKEN: a fine-grained personal access token (or a GitHub App installation token)
+# on gladiaio/words2num2 with Contents, Pull requests and Actions read/write. With
+# GITHUB_TOKEN alone the release PR's pull_request runs wait for a maintainer's approval
+# ("action required"), which blocks the merge (0.4.1). Without the secret the job falls back
+# to GITHUB_TOKEN and dispatches ci.yml and lint.yml on the branch; a maintainer then has to
+# approve the waiting runs or merge the PR.
 #
 # Minor and major versions stay manual: bump pyproject.toml / _version.py / rust/Cargo.toml
 # with bump_version.py in a PR; auto-release.yml publishes it on merge.
 #
-# Needs the repository setting "Allow GitHub Actions to create and approve pull requests".
+# Needs the repository setting "Allow GitHub Actions to create and approve pull requests"
+# only for the GITHUB_TOKEN fallback.
 
 on:
   schedule:
@@ -45,6 +53,9 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
+          # A push made with RELEASE_TOKEN triggers the branch's workflows; one made with
+          # GITHUB_TOKEN does not.
+          token: ${{ secrets.RELEASE_TOKEN || github.token }}
 
       - name: Decide what to release
         id: plan
@@ -88,7 +99,8 @@ jobs:
         id: pr
         if: steps.plan.outputs.action == 'bump'
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
+          HAS_RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN != '' }}
           NEXT: ${{ steps.plan.outputs.next }}
           PREV: ${{ steps.plan.outputs.prev }}
         run: |
@@ -106,8 +118,13 @@ jobs:
             --title "release: $NEXT" \
             --body "$(printf 'Scheduled release %s (words2num2-core %s).\n\nChanges since the last release:\n\n%s\n' "$NEXT" "$core" "$notes")")
           echo "url=$url" >> "$GITHUB_OUTPUT"
-          gh workflow run ci.yml --ref "release/v$NEXT"
-          gh workflow run lint.yml --ref "release/v$NEXT"
+          if [ "$HAS_RELEASE_TOKEN" != "true" ]; then
+            # GITHUB_TOKEN fallback: the PR's own runs wait for approval, so run the
+            # required checks on the branch directly.
+            echo "::warning::RELEASE_TOKEN is not set: the release PR's checks need a maintainer's approval."
+            gh workflow run ci.yml --ref "release/v$NEXT"
+            gh workflow run lint.yml --ref "release/v$NEXT"
+          fi
           gh pr merge "$url" --auto --squash --delete-branch
 
       - name: Wait for the release PR to merge

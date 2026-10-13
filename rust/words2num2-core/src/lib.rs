@@ -84,6 +84,15 @@ pub fn words2num(
         };
     }
     let res = w2n_sentence::words2num(text, lang, to);
+    // es "diez y seis": the split teens (#866), in cardinal and year mode.
+    if res.is_err() && matches!(to, "cardinal" | "year") {
+        let resolved = w2n_sentence::resolve_lang(lang).unwrap_or_default();
+        if let Some(t) = w2n_sentence::es_split_teens(text.trim(), &resolved) {
+            if let Ok(v) = w2n_sentence::words2num(&t, lang, to) {
+                return Ok(v);
+            }
+        }
+    }
     if res.is_err() && to == "cardinal" {
         let resolved = w2n_sentence::resolve_lang(lang).unwrap_or_default();
         // "un millón y medio": whole millions and a half (#859).
@@ -3109,6 +3118,19 @@ mod tests {
             crate::w2n_sentence::words2num_sentence("dos millones y medio de personas", "es", "cardinal", false).unwrap(),
             "2500000 de personas"
         );
+    }
+
+    /// #866: es split teens.
+    #[test]
+    fn es_split_teens_rewrite() {
+        let r = |t: &str| crate::w2n_sentence::es_split_teens(t, "es");
+        assert_eq!(r("tenía diez y ocho años").as_deref(), Some("tenía dieciocho años"));
+        assert_eq!(r("¿diez y seis?").as_deref(), Some("¿dieciséis?"));
+        assert_eq!(r("diez y seis€"), None);
+        assert_eq!(r("cinco, diez y seis"), None);
+        assert_eq!(r("las diez y seis minutos"), None);
+        assert_eq!(r("diez y tres"), None);
+        assert_eq!(crate::w2n_sentence::es_split_teens("dez e seis", "pt"), None);
     }
 
     /// gladiaio/words2num2#90, #91, #92, #99, #100, #239: glued scales.
