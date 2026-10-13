@@ -291,3 +291,48 @@ def test_unknown_date_format():
 )
 def test_opener_around_date_is_kept(lang, text, expected):
     assert words2num_sentence(text, lang=lang, date=True) == expected
+
+
+@pytest.mark.parametrize(
+    "lang, text, expected",
+    [
+        # "may"/"march" after a count are verbs; "of" takes an ordinal day
+        # (#907).
+        ("en", "all three may come", "all 3 may come"),
+        ("en", "the twelve may be late", "the 12 may be late"),
+        ("en", "the two march together", "the 2 march together"),
+        ("en", "chapter twelve of march", "chapter 12 of march"),
+        ("en", "they march two thousand miles", "they march 2000 miles"),
+        # Still dates: an ordinal, a cue, a year.
+        ("en", "the twelfth of may", "May 12"),
+        ("en", "since may 2020", "since May 2020"),
+        ("en", "it was may 2020", "it was May 2020"),
+        ("en", "three may twenty twenty", "May 3, 2020"),
+        ("en_GB", "on three may was great", "on 3 May was great"),
+        # A cardinal day or a year before a plural noun counts it (#931).
+        ("en_GB", "in june twelve people died", "in june 12 people died"),
+        ("en_GB", "by july fifteen trucks had left", "by july 15 trucks had left"),
+        ("en", "june twelve was great", "June 12 was great"),
+        # Real dates the rules must keep (#1203 audit, #1204, #1205).
+        ("en", "in march 2020 prices rose", "in March 2020 prices rose"),
+        ("en", "the june 2020 results", "the June 2020 results"),
+        ("en", "on june 5 2021 prices rose", "on June 5, 2021 prices rose"),
+        ("en", "born march 1990", "born March 1990"),
+        ("en", "report for jan 2020", "report for Jan 2020"),
+        ("en", "march 2020 – may 2021", "March 2020 – May 2021"),
+        ("en_GB", "12 march", "12 March"),
+        ("en_GB", "deadline: three may", "deadline: 3 May"),
+        ("en_GB", "dated 3 sept", "dated 3 Sept"),
+        ("en", "june twelve works for me", "June 12 works for me"),
+        ("en", "on june twelve people protested", "on June 12 people protested"),
+        # Ranges, cues and adverbs after "may"/"march" (#1203 audit).
+        ("en", "from 3 march to 5 april", "from March 3 to April 5"),
+        ("en", "1 march to 30 april", "March 1 to April 30"),
+        ("en", "on 3 march in london", "on March 3 in london"),
+        ("en", "on 3 may now", "on May 3 now"),
+        ("en", "see you may 2020", "see you May 2020"),
+        ("en", "deadline 3 may also applies", "deadline May 3 also applies"),
+    ],
+)
+def test_en_month_homographs_and_counts(lang, text, expected):
+    assert words2num_sentence(text, lang=lang, date=True) == expected
