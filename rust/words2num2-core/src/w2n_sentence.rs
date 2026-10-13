@@ -4109,7 +4109,9 @@ pub(crate) fn es_split_teens(text: &str, lang: &str) -> Option<String> {
     let mut i = 0;
     while i < toks.len() {
         let head = toks[i];
-        let lead_len = head.len() - head.trim_start_matches(|c: char| !c.is_alphanumeric()).len();
+        // Only an opener rides along ("¿diez"); "#diez", "$diez" stay (#1213
+        // audit).
+        let lead_len = head.len() - head.trim_start_matches(is_opener).len();
         let (lead, head_core) = head.split_at(lead_len);
         let unit = toks.get(i + 2).and_then(|u| {
             let core = u.trim_end_matches(|c: char| !c.is_alphanumeric());
@@ -4124,11 +4126,19 @@ pub(crate) fn es_split_teens(text: &str, lang: &str) -> Option<String> {
             trail.chars().all(|c| CLAUSE.contains(c)).then_some((one, trail))
         });
         // A teen just read is no list head ("diez y seis, diez y siete").
+        // After "<number>," it is a list ("cinco, diez y seis"); "Sí, diez y
+        // seis" is the teen (#1213 audit).
         let listed = i > 0 && !last_teen && {
-            let prev = toks[i - 1];
-            prev.ends_with(',') && prev.trim_end_matches(',').chars().any(char::is_alphanumeric)
+            let prev = toks[i - 1].trim_end_matches(',');
+            toks[i - 1].ends_with(',')
+                && !prev.is_empty()
+                && (prev.chars().all(|c| c.is_ascii_digit()) || matches!(crate::lookup_norm(lang, &crate::normalize(prev), false, &[]), Ok(Some(_))))
         };
-        let minutes = toks.get(i + 3).is_some_and(|n| matches!(crate::normalize(n.trim_end_matches(|c: char| !c.is_alphanumeric())).as_str(), "minutos" | "minuto" | "min"));
+        // After "las" it is a clock time: "las diez y seis minutos", and with
+        // to="currency" (no clock pass) "a las diez y seis" (#1213 audit).
+        let after_las = i > 0 && crate::normalize(toks[i - 1]) == "las";
+        let unit_word = |n: &str| crate::normalize(n.trim_end_matches(|c: char| !c.is_alphanumeric()));
+        let minutes = after_las && toks.get(i + 3).is_none_or(|n| matches!(unit_word(n).as_str(), "minutos" | "minuto" | "min" | "y" | "de" | "en" | "punto"));
         match unit {
             Some((one, trail))
                 if crate::normalize(head_core) == "diez"

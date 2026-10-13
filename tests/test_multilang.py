@@ -580,6 +580,11 @@ def test_written_compounds_reject_non_numbers(lang, text):
         ("a las diez y seis minutos", "a las 10 y 6 minutos"),
         ("diez y seis€", "10 y seis€"),
         ("¿diez y seis?", "¿16?"),
+        # Only an opener leads; a duration and "Sí," read the teen (#1213
+        # audit).
+        ("#diez y seis", "#diez y 6"),
+        ("esperé diez y seis minutos", "esperé 16 minutos"),
+        ("Sí, diez y seis", "Sí, 16"),
     ],
 )
 def test_es_split_teens(text, expected):
@@ -603,6 +608,10 @@ def test_es_split_teens_modes():
             "el diez y seis de mayo de dos mil diez y nueve", lang="es", date=True
         )
         == "el 16 de mayo de 2019"
+    )
+    assert (
+        words2num_sentence("a las diez y seis", lang="es", to="currency")
+        == "a las 10 y 6"
     )
 
 
