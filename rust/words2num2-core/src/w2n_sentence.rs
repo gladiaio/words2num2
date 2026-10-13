@@ -3842,9 +3842,21 @@ fn en_time_run(parts: &[String], i: usize) -> Option<(String, usize)> {
     // something ("nine fifty each", "five twenty five percent", "twelve
     // fifteen times") (#928, #904).
     let ends_cleanly = trailing_mark(&parts[end]).is_empty().then_some(()).map_or(true, |_| {
+        // "each" / "per" count only when they end the clause ("nine fifty
+        // each"); "each morning", "per the schedule" keep the time (#1192).
+        let then = next_word_index(parts, end).and_then(|k| next_word(parts, k));
+        let ends_after = next_word_index(parts, end).is_none_or(|k| !trailing_mark(&parts[k]).is_empty() || then.is_none());
         next.as_deref().is_none_or(|w| {
             !(crate::w2n_lang_en::is_scale_word(w)
-                || matches!(w, "hundred" | "thousand" | "point" | "each" | "per" | "percent" | "times" | "year" | "years" | "people" | "dollars" | "dollar" | "cents" | "euros" | "pounds" | "minutes" | "seconds" | "hours" | "days" | "weeks" | "months" | "items" | "units")
+                || (matches!(w, "each" | "per") && ends_after)
+                || matches!(
+                    w,
+                    "hundred" | "thousand" | "point" | "percent" | "%" | "times" | "year" | "years" | "people"
+                        | "dollars" | "dollar" | "cents" | "euros" | "pounds" | "pence" | "yen" | "minutes"
+                        | "seconds" | "hours" | "days" | "weeks" | "months" | "items" | "units" | "grams"
+                        | "kilograms" | "kg" | "miles" | "kilometers" | "kilometres" | "km" | "meters" | "metres"
+                        | "feet" | "inches" | "pounds-force" | "litres" | "liters"
+                )
                 || crate::w2n_lang_en::ordinal_cardinal(w).is_some())
         })
     });

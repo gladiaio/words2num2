@@ -86,9 +86,9 @@ fn number_at(lang: &str, toks: &[Tok], i: usize, range: std::ops::RangeInclusive
 /// zwanzig Leute", "las dos y cinco personas", #933).
 fn counted(lang: &str, w: &str) -> bool {
     let nouns: &[&str] = match lang {
-        "fr" => &["fois", "jour", "jours", "minute", "minutes", "seconde", "secondes", "semaine", "semaines", "mois", "an", "ans", "année", "années", "personne", "personnes", "euro", "euros", "dollar", "dollars", "%", "pour", "fr", "km", "kilomètres", "mètres", "€", "$"],
-        "de" => &["mal", "leute", "minuten", "minute", "sekunden", "tage", "tag", "jahre", "jahr", "personen", "euro", "dollar", "prozent", "%", "km", "meter", "€", "$"],
-        "es" => &["veces", "vez", "personas", "minutos", "segundos", "días", "dias", "años", "anos", "semanas", "meses", "euros", "dólares", "dolares", "por", "%", "km", "€", "$"],
+        "fr" => &["fois", "jour", "jours", "minute", "minutes", "seconde", "secondes", "semaine", "semaines", "mois", "an", "ans", "année", "années", "personne", "personnes", "euro", "euros", "dollar", "dollars", "livre", "livres", "%", "fr", "km", "kg", "kilomètres", "mètres", "grammes", "€", "$", "£"],
+        "de" => &["mal", "leute", "minuten", "minute", "sekunden", "tage", "tag", "jahre", "jahr", "personen", "euro", "dollar", "pfund", "prozent", "%", "km", "kg", "meter", "kilometer", "gramm", "€", "$", "£"],
+        "es" => &["veces", "vez", "personas", "minutos", "segundos", "días", "dias", "años", "anos", "semanas", "meses", "euros", "dólares", "dolares", "libras", "%", "km", "kg", "kilómetros", "metros", "gramos", "€", "$", "£"],
         _ => &[],
     };
     nouns.contains(&w)
@@ -98,18 +98,26 @@ fn counted(lang: &str, w: &str) -> bool {
 /// number right before its hour or right after it ("cent vingt heures quinze",
 /// "trente et une heures", "moins trente et un", #935).
 fn cuts_number(lang: &str, toks: &[Tok], start: usize, end: usize) -> bool {
-    let is_num = |k: usize| toks.get(k).is_some_and(|t| number(lang, &[t.word.as_str()]).is_some());
-    let conn = |k: usize| toks.get(k).is_some_and(|t| matches!(t.word.as_str(), "et" | "y" | "und" | "e"));
+    let val = |k: usize| toks.get(k).and_then(|t| number(lang, &[t.word.as_str()]));
+    let is_num = |k: usize| val(k).is_some();
+    let conn = |k: usize| toks.get(k).is_some_and(|t| matches!(t.word.as_str(), "et" | "y" | "e"));
     let clean = |k: usize| toks.get(k).is_some_and(|t| t.trail.is_empty());
+    // "et"/"y" joins one number only as tens and a unit ("trente et un",
+    // "treinta y uno", "soixante et onze"); "neuf et dix", "zwischen neun und
+    // zehn" are ranges of two (#1193).
+    let compound = |tens: usize, unit: usize| {
+        val(tens).is_some_and(|t| t >= 20 && t < 100 && t % 10 == 0) && val(unit).is_some_and(|u| (1..=9).contains(&u) || u == 11)
+    };
     let before = start > 0
         && clean(start - 1)
-        && (is_num(start - 1) || (start > 1 && conn(start - 1) && clean(start - 2) && is_num(start - 2)));
+        && (is_num(start - 1) || (start > 1 && conn(start - 1) && clean(start - 2) && compound(start - 2, start)));
     // Only when the span ends on its minutes: "neuf heures et dix heures"
     // is a range of two times.
+    // The minutes may have taken the connector with them ("treinta y").
     let after = end > 0
         && clean(end - 1)
-        && !matches!(toks[end - 1].word.as_str(), "heure" | "heures" | "h" | "uhr")
-        && (is_num(end) || (conn(end) && clean(end) && is_num(end + 1)));
+        && ((is_num(end - 1) && (is_num(end) || (conn(end) && clean(end) && compound(end - 1, end + 1))))
+            || (end > 1 && conn(end - 1) && compound(end - 2, end)));
     before || after
 }
 

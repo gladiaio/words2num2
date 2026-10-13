@@ -94,6 +94,18 @@ def test_only_plain_modes():
         ("à neuf heures quinze demain", "fr", "à 9h15 demain"),
         ("um neun Uhr fünfzehn", "de", "um 9:15 Uhr"),
         ("a las nueve y cuarto", "es", "a las 9:15"),
+        # "por"/"pour" and "each morning" keep the time; ranges keep both
+        # hours; more units (#1191-#1194).
+        ("a las ocho y diez por la mañana", "es", "a las 8:10 por la mañana"),
+        (
+            "rendez-vous à huit heures quinze pour le dîner",
+            "fr",
+            "rendez-vous à 8h15 pour le dîner",
+        ),
+        ("we start at nine thirty each morning", "en", "we start at 9:30 each morning"),
+        ("entre huit et neuf heures et quart", "fr", "entre 8 et 9h15"),
+        ("zwischen neun und zehn Uhr dreißig", "de", "zwischen 9 und 10:30 Uhr"),
+        ("it weighs about nine fifty grams", "en", "it weighs about 9 50 grams"),
     ],
 )
 def test_time_reader_leaves_longer_numbers_and_counts(text, lang, expected):
