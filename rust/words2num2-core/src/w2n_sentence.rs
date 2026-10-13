@@ -3649,23 +3649,21 @@ fn label_words(resolved: &str) -> &'static str {
             "number option press dial select choose enter step page room floor line level \
              chapter part section extension ext channel gate terminal platform zone phase \
              round item question unit exhibit table figure seat car bus route grade day week \
-             plan tier code pin speaker participant interviewer respondent caller guest \
-             panelist voice person"
+             plan tier code pin"
         }
         "fr" => {
             "numero option tapez appuyez composez faites etape page chambre ligne niveau \
              chapitre partie section poste quai zone phase question article siege salle voie \
-             porte jour semaine bus code locuteur intervenant participant"
+             porte jour semaine bus code"
         }
         "es" | "gl" => {
             "numero opcion marque pulse presione oprima digite paso pagina habitacion linea \
              nivel capitulo parte seccion extension anden zona fase pregunta articulo asiento \
-             sala puerta dia semana codigo hablante locutor interlocutor participante"
+             sala puerta dia semana codigo"
         }
         "pt" => {
             "numero opcao digite tecle pressione passo pagina quarto linha nivel capitulo \
-             parte secao ramal zona fase pergunta artigo assento sala porta dia semana codigo \
-             locutor falante participante"
+             parte secao ramal zona fase pergunta artigo assento sala porta dia semana codigo"
         }
         "it" => {
             "numero opzione premi prema digiti passo pagina camera linea livello capitolo \
@@ -3684,6 +3682,11 @@ fn label_words(resolved: &str) -> &'static str {
     }
 }
 
+/// Is the next non-space part after `i` exactly `text` (a spaced ":")?
+fn next_part_is(parts: &[String], i: usize, text: &str) -> bool {
+    parts[i + 1..].iter().find(|t| !py_str_isspace(t)).is_some_and(|t| t == text)
+}
+
 /// Is the lone article-number at `i` a count? Yes in front of a unit or
 /// currency, in front of the percent phrase, after a label word or after a
 /// month ("december one"). "one of them", "no one", "un instant", "one
@@ -3698,25 +3701,39 @@ fn article_is_count(resolved: &str, parts: &[String], i: usize, next_is_number: 
         label_words(resolved).split_whitespace().any(|l| l == p) || is_month(resolved, Some(p))
     });
     let punct = trailing_mark(&parts[i]);
+    let base = resolved.split(&['_', '-'][..]).next().unwrap_or(resolved);
+    // "Speaker one:", fr "Locuteur un :": a speaker label, only before its
+    // colon ("a guest, one of hundreds" keeps the pronoun, #912, #1175).
+    let colon = punct.starts_with(':') || next_part_is(parts, i, ":");
+    let speaker = colon
+        && prev.as_deref().is_some_and(|p| {
+            matches!(
+                p,
+                "speaker" | "participant" | "interviewer" | "respondent" | "panelist" | "caller" | "guest"
+                    | "voice" | "person" | "locuteur" | "intervenant" | "hablante" | "locutor"
+                    | "interlocutor" | "participante" | "falante" | "parlante" | "oratore" | "relatore"
+                    | "partecipante" | "interlocutore"
+            )
+        });
+    // "three, two, one", "press one one": right after a cardinal number,
+    // with no sentence mark between, it counts on when it ends its clause
+    // ("trois, deux, un, partez", "three, two, one!"); "deux, un instant",
+    // "two, one of them" keep the article (#911, #1176, #1177).
+    let prev_raw = parts[..i].iter().rev().find(|t| !py_str_isspace(t));
+    let next_raw = parts[i + 1..].iter().find(|t| !py_str_isspace(t));
+    let item = !punct.is_empty() || next.is_none() || next_raw.is_some_and(|t| !t.chars().any(char::is_alphanumeric));
+    let after_number = item
+        && prev_raw.is_some_and(|r| matches!(trailing_mark(r).as_str(), "" | ","))
+        && prev.as_deref().is_some_and(|p| !p.is_empty() && matches!(crate::lookup_norm(resolved, p, false, &[]), Ok(Some(_))))
+        && !(base == "en" && next.as_deref() == Some("of"));
+    if after_number || speaker {
+        return true;
+    }
     if !punct.is_empty() && punct != "," {
         return labelled;
     }
     // "one, two, three", "le un janvier".
     if next_is_number || is_month(resolved, next.as_deref()) {
-        return true;
-    }
-    // "three, two, one", "press one one": right after a number, with no
-    // sentence mark between, it counts on; not "two, one of them" (#911).
-    let base = resolved.split(&['_', '-'][..]).next().unwrap_or(resolved);
-    let prev_raw = parts[..i].iter().rev().find(|t| !py_str_isspace(t));
-    // Only as an item that ends its clause ("trois, deux, un, partez",
-    // "the score was two one"): "deux, un instant" keeps the article.
-    let item = !punct.is_empty() || next.is_none();
-    let after_number = item
-        && prev_raw.is_some_and(|r| matches!(trailing_mark(r).as_str(), "" | ","))
-        && prev.as_deref().is_some_and(|p| !p.is_empty() && crate::token_may_be_number(base, p))
-        && !(base == "en" && next.as_deref() == Some("of"));
-    if after_number {
         return true;
     }
     if let Some(n) = next.as_deref() {

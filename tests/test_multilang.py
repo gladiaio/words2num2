@@ -485,6 +485,15 @@ def test_currency_marks_by_nfkc_fold_issue_1099(text, expected):
         ("en", "Speaker one: hello", "Speaker 1: hello"),
         ("fr", "Locuteur un : bonjour", "Locuteur 1 : bonjour"),
         ("es", "Hablante uno: hola", "Hablante 1: hola"),
+        ("it", "Parlante uno: ciao", "Parlante 1: ciao"),
+        # Not a pronoun after a person noun, nor after an ordinal (#1175,
+        # #1176); a sentence mark after the item is fine (#1177).
+        ("en", "he was a guest, one of hundreds", "he was a guest, one of hundreds"),
+        ("en", "give each person one", "give each person one"),
+        ("en", "the hundredth one, not the first", "the 100th one, not the first"),
+        ("fr", "dans la famille, un", "dans la famille, un"),
+        ("en", "three, two, one!", "3, 2, 1!"),
+        ("fr", "trois, deux, un !", "3, 2, 1 !"),
     ],
 )
 def test_article_one_after_a_number_or_speaker_label(lang, text, expected):
