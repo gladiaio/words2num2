@@ -1860,7 +1860,8 @@ fn glued_number(lang: &str, s: &str, sc: &Scales) -> Option<i64> {
     if base == Some("th") {
         let ed = normalize("เอ็ด");
         let one = normalize("หนึ่ง");
-        if let Some(head) = s.strip_suffix(ed.as_str()) {
+        // Not a bare "เอ็ด" (the verb "to scold"): it needs a place before it.
+        if let Some(head) = s.strip_suffix(ed.as_str()).filter(|h| !h.is_empty()) {
             if let Some(v) = lookup_plain(lang, &format!("{head}{one}")) {
                 return Some(v);
             }

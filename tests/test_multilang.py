@@ -671,6 +671,21 @@ def test_th_my_written_forms(lang, text, expected):
 
 
 @pytest.mark.parametrize(
+    "lang, text",
+    [
+        # Not the official forms, or no number (#1214 audit).
+        ("th", "เอ็ด"),
+        ("th", "สิบหนึ่ง"),
+        ("th", "ร้อยหนึ่ง"),
+        ("my", "ဆယ်တန်း"),
+    ],
+)
+def test_th_my_written_forms_reject(lang, text):
+    with pytest.raises(Words2NumError):
+        words2num(text, lang=lang)
+
+
+@pytest.mark.parametrize(
     "lang, text, expected",
     [
         ("th", "ห้องสองร้อยหนึ่ง", "ห้อง201"),
