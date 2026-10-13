@@ -83,7 +83,94 @@ pub fn words2num(
             Err(e) => Err(w2n_sentence::W2nError::Words2Num(e.0)),
         };
     }
-    w2n_sentence::words2num(text, lang, to)
+    let res = w2n_sentence::words2num(text, lang, to);
+    if res.is_err() && to == "cardinal" {
+        let resolved = w2n_sentence::resolve_lang(lang).unwrap_or_default();
+        match resolved.split(['_', '-']).next().unwrap_or("") {
+            // Georgian as it is written: "ოცდაერთი" (20 and 1), "ოცდა ათი",
+            // "ას ოცდაერთი"; the table only knows num2words2's forms (#989).
+            "ka" => {
+                if let Some(v) = ka_cardinal(text) {
+                    return Ok(w2n_lang_en::W2nValue::Int(v.into()));
+                }
+            }
+            // Burmese writes a number unspaced: "တစ်ဆယ့် တစ်" is
+            // "တစ်ဆယ့်တစ်" (11, #989).
+            "my" => {
+                let glued: String = text.split_whitespace().collect();
+                // Number words only: separate figures ("1 2", "၁ ၂", "2 3.5")
+                // stay separate (#1199).
+                let words_only = text.split_whitespace().all(|p| p.chars().all(|c| !c.is_numeric() && !c.is_ascii_punctuation()));
+                if glued != text.trim() && words_only {
+                    if let Ok(v) = w2n_sentence::words2num(&glued, lang, to) {
+                        return Ok(v);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    res
+}
+
+/// A Georgian cardinal below a million in its standard spelling: units and
+/// teens, the vigesimal tens joined by "და" ("ოცდაერთი" 21, "სამოცდაცხრამეტი"
+/// 79, also spaced "ოცდა ათი"), hundreds ("ას", "ორასი") and "ათასი".
+fn ka_cardinal(text: &str) -> Option<i64> {
+    const UNITS: [&str; 19] = [
+        "ერთი", "ორი", "სამი", "ოთხი", "ხუთი", "ექვსი", "შვიდი", "რვა", "ცხრა", "ათი", "თერთმეტი", "თორმეტი",
+        "ცამეტი", "თოთხმეტი", "თხუთმეტი", "თექვსმეტი", "ჩვიდმეტი", "თვრამეტი", "ცხრამეტი",
+    ];
+    const TENS: [(&str, i64); 4] = [("ოც", 20), ("ორმოც", 40), ("სამოც", 60), ("ოთხმოც", 80)];
+    const HUNDREDS: [&str; 9] = ["ას", "ორას", "სამას", "ოთხას", "ხუთას", "ექვსას", "შვიდას", "რვაას", "ცხრაას"];
+    let unit = |w: &str| UNITS.iter().position(|&u| u == w).map(|k| k as i64 + 1);
+    // A sign word and trailing punctuation, as the table path reads them
+    // ("მინუს ოცდაერთი", "ოცდაერთი.", #1198 audit).
+    let text = text.trim().trim_end_matches(['.', ',', '!', '?', ';', ':']);
+    let (sign, text) = match text.strip_prefix("მინუს") {
+        Some(rest) if rest.starts_with(char::is_whitespace) => (-1, rest),
+        _ => (1, text),
+    };
+    // "ოცდა ათი": the joining "და" ends a word only before its unit.
+    let mut words: Vec<String> = Vec::new();
+    for w in text.split_whitespace() {
+        match words.last_mut() {
+            Some(prev) if prev.ends_with("და") => prev.push_str(w),
+            _ => words.push(w.to_string()),
+        }
+    }
+    if words.is_empty() {
+        return None;
+    }
+    let (mut total, mut group) = (0i64, 0i64);
+    for w in &words {
+        let w = w.as_str();
+        // Below 100, only once per group and after any hundreds.
+        let small = |v: i64, group: i64| (group % 100 == 0).then_some(group + v);
+        if w == "ათასი" || w == "ათას" {
+            if total > 0 {
+                return None;
+            }
+            total = if group == 0 { 1000 } else { group * 1000 };
+            group = 0;
+        } else if let Some(k) = HUNDREDS.iter().position(|&h| w == h || w.strip_suffix('ი') == Some(h)) {
+            if group != 0 {
+                return None;
+            }
+            group = (k as i64 + 1) * 100;
+        } else if let Some(&(_, t)) = TENS.iter().find(|(stem, _)| w.strip_suffix('ი') == Some(*stem)) {
+            group = small(t, group)?;
+        } else if let Some(v) = TENS.iter().find_map(|&(stem, t)| {
+            w.strip_prefix(stem).and_then(|r| r.strip_prefix("და")).and_then(unit).map(|u| t + u)
+        }) {
+            group = small(v, group)?;
+        } else if let Some(v) = unit(w) {
+            group = small(v, group)?;
+        } else {
+            return None;
+        }
+    }
+    Some(sign * (total + group))
 }
 
 /// A numerical symbol, no digit of a figure: a superscript or subscript
