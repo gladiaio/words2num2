@@ -1170,6 +1170,9 @@ fn scale_aliases(lang: &str) -> &'static [(&'static str, i64)] {
             ("trillion", 1_000_000_000_000_000_000),
         ],
         "sl" => &[("milijonov", 1_000_000), ("milijard", 1_000_000_000)],
+        // num2words2 writes lo 10^9 and up in figures, so the billion is never
+        // probed (#878).
+        "lo" => &[("ຕື້", 1_000_000_000)],
         _ => &[],
     }
 }
@@ -1444,7 +1447,7 @@ fn derive_scales(lang: &str) -> Scales {
         add(&mut sc.words, joined, *mag);
     }
     for (w, mag) in scale_aliases(lang) {
-        add(&mut sc.words, w, *mag);
+        add(&mut sc.words, &normalize(w), *mag);
     }
     sc.words.retain(|(w, _)| !short_postfix.contains(w));
     // Plus grande magnitude d'abord : « million » se scinde avant « mille ».
@@ -1613,7 +1616,8 @@ pub fn elided_place(lang: &str, norm: &str) -> Option<(bool, i64)> {
             &["หนึ่ง", "สอง", "สาม", "สี่", "ห้า", "หก", "เจ็ด", "แปด", "เก้า"],
         ),
         "lo" => (
-            &[("ພັນ", 1_000), ("ໝື່ນ", 10_000), ("ແສນ", 100_000), ("ລ້ານ", 1_000_000)],
+            // "ຕື້" (10^9) too, now that it reads (#1215 audit).
+            &[("ພັນ", 1_000), ("ໝື່ນ", 10_000), ("ແສນ", 100_000), ("ລ້ານ", 1_000_000), ("ຕື້", 1_000_000_000)],
             &["ໜຶ່ງ", "ສອງ", "ສາມ", "ສີ່", "ຫ້າ", "ຫົກ", "ເຈັດ", "ແປດ", "ເກົ້າ"],
         ),
         "km" => (
