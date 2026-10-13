@@ -6,6 +6,8 @@ follows [Semantic Versioning](https://semver.org/) and uses
 
 ## [Unreleased]
 
+## [0.4.2] — 2026-10-13
+
 ### Fixed
 
 - Sentence mode, clock times: es "entre las dos y tres" is a range ("entre las 2 y 3", was "entre las 2:03") (#937); "y tres cuartos" / "trois quarts" are 45 minutes ("a las 2:45", was "a las 2:03 cuartos"; fr "à 3h45", was "à 3h03 quarts") (#934); a connector after the minutes is no longer dropped ("las 2:10 y las 3", was "las 2:10 las 3"; de "um 5:12 Uhr und 6 Uhr", was "um 5:12 Uhr 6 Uhr").
