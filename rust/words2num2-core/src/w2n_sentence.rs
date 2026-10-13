@@ -3991,6 +3991,70 @@ pub fn words2num_sentence_full(
     Ok(if date { crate::w2n_date::fold_dates_with(&out, lang, region, iso) } else { out })
 }
 
+/// "cinco pesos y medio" -> "$5.50", not "$5 y medio" (#860): a spelled-out
+/// whole amount, its currency word and "and a half" read as the amount and
+/// a half. The figure gets ".5" before the currency pass renders it.
+fn fold_currency_half(text: &str, lang: &str, input: &str) -> String {
+    let base = lang.split(['_', '-']).next().unwrap_or(lang).to_lowercase();
+    let (conn, halves): (&str, &[&str]) = match base.as_str() {
+        "es" => ("y", &["medio", "media"]),
+        "gl" => ("e", &["medio", "media"]),
+        "pt" => ("e", &["meio", "meia"]),
+        "fr" => ("et", &["demi", "demie"]),
+        "it" => ("e", &["mezzo", "mezza"]),
+        "ca" => ("i", &["mig", "mitja"]),
+        _ => return text.to_string(),
+    };
+    let core = |t: &str| crate::normalize(t.trim_end_matches(|c: char| !c.is_alphanumeric()));
+    let currency = |t: &str| !t.is_empty() && crate::w2n_currency::is_currency_word(lang, &core(t));
+    let half_at = |toks: &[&str], k: usize| {
+        toks.get(k).is_some_and(|c| c.eq_ignore_ascii_case(conn)) && toks.get(k + 1).is_some_and(|h| halves.contains(&core(h).as_str()))
+    };
+    // Each "<currency> <conn> <half>" of the input, in order: was the amount
+    // before it spelled out? A figure as written is never added to (#1208).
+    let words: Vec<&str> = input.split_whitespace().collect();
+    let spelled: Vec<bool> = (2..words.len())
+        .filter(|&k| currency(words[k - 1]) && half_at(&words, k))
+        .map(|k| !words[k - 2].chars().any(|c| c.is_numeric()))
+        .collect();
+    let toks: Vec<&str> = text.split(' ').collect();
+    let pairs = (2..toks.len()).filter(|&k| currency(toks[k - 1]) && half_at(&toks, k)).count();
+    if pairs != spelled.len() || pairs == 0 {
+        return text.to_string();
+    }
+    let real = |from: usize| (from..toks.len()).find(|&k| !toks[k].trim().is_empty());
+    let mut seen = 0;
+    let mut out: Vec<String> = Vec::with_capacity(toks.len());
+    let mut i = 0;
+    while i < toks.len() {
+        let t = toks[i];
+        if i + 2 < toks.len() && currency(toks[i + 1]) && half_at(&toks, i + 2) {
+            seen += 1;
+            let h = toks[i + 3];
+            let h_core = h.trim_end_matches(|c: char| !c.is_alphanumeric());
+            let trail = &h[h_core.len()..];
+            // "y medio" ends the amount: the end, a mark, "de" or a
+            // conjunction ("cinco euros y medio kilo" keeps its words).
+            let ends = !trail.is_empty()
+                || real(i + 4).map(|k| toks[k]).is_none_or(|n| {
+                    !n.chars().any(char::is_alphanumeric)
+                        || matches!(core(n).as_str(), "de" | "del" | "di" | "do" | "da" | "des" | "du" | "y" | "e" | "et" | "i" | "o" | "ou" | "que")
+                });
+            let whole = !t.is_empty() && t.len() <= 15 && t.bytes().all(|b| b.is_ascii_digit()) && toks[i + 1].trim_end_matches(|c: char| !c.is_alphanumeric()).len() == toks[i + 1].len();
+            if spelled[seen - 1] && ends && whole {
+                // The mark after "medio." goes after the amount.
+                out.push(format!("{t}.5"));
+                out.push(format!("{}{trail}", toks[i + 1]));
+                i += 4;
+                continue;
+            }
+        }
+        out.push(t.to_string());
+        i += 1;
+    }
+    out.join(" ")
+}
+
 fn words2num_sentence_folded(
     sentence: &str,
     lang: &str,
@@ -4037,7 +4101,7 @@ fn words2num_sentence_folded(
         })();
         drop(_clear);
         walked?;
-        return Ok(crate::w2n_currency::fold_currency(&out, &resolved));
+        return Ok(crate::w2n_currency::fold_currency(&fold_currency_half(&out, &resolved, sentence), &resolved));
     }
     // The plain walk cuts the same subunit off: fr "douze dollars et
     // cinquante cents" is "12 dollars et 50 cents", not "… 5000" (#868).
