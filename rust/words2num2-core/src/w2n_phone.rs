@@ -74,9 +74,6 @@ struct Run {
     /// Digits between the commas the run crossed ("612, 34, 56, 78" ->
     /// [3, 2, 2, 2]); one entry when it crossed none.
     segs: Vec<usize>,
-    /// Some comma segment is several figures ("9 1, 123"): digits dictated
-    /// one by one, not a list of values.
-    dictated: bool,
 }
 
 /// `commas`: may the run cross a comma between groups?
@@ -88,8 +85,6 @@ fn run_at(toks: &[&str], i: usize, commas: bool) -> Option<Run> {
     let mut digits = String::new();
     let mut trail = String::new();
     let mut segs = vec![0usize];
-    let mut seg_toks = 0usize;
-    let mut dictated = false;
     while let Some(tok) = toks.get(k) {
         let (core, t) = split_trail(tok);
         let core = match core.strip_prefix('+') {
@@ -104,15 +99,12 @@ fn run_at(toks: &[&str], i: usize, commas: bool) -> Option<Run> {
         }
         digits.push_str(core);
         *segs.last_mut().unwrap() += core.len();
-        seg_toks += 1;
-        dictated |= seg_toks > 1;
         trail = t.to_string();
         k += 1;
         // A comma may sit between groups ("06, 12, 34"); the caller decides
         // whether that run is a phone number. Anything else ends it.
         if t == "," && (commas || plus) {
             segs.push(0);
-            seg_toks = 0;
             continue;
         }
         if !t.is_empty() {
@@ -122,7 +114,7 @@ fn run_at(toks: &[&str], i: usize, commas: bool) -> Option<Run> {
     if segs.last() == Some(&0) {
         segs.pop();
     }
-    (!digits.is_empty()).then_some(Run { plus, digits, taken: k - i, trail, segs, dictated })
+    (!digits.is_empty()).then_some(Run { plus, digits, taken: k - i, trail, segs })
 }
 
 fn only_digits(s: &str) -> String {
@@ -182,16 +174,20 @@ pub fn fold_phones(text: &str, lang: &str, region: Option<&str>) -> String {
         // ("612, 34, 56, 78", "212, 555, 1234"), not a year and a count or a
         // list (#939, #1179 audit). Otherwise the run ends at its first comma.
         let run = run_at(&toks, i, !in_list).and_then(|run| {
-            if run.segs.len() < 2 || run.plus || run.digits.starts_with('0') || (run.dictated && !(run.segs[0] == 4 && run.digits[..4].parse::<u32>().is_ok_and(|y| (1000..=2999).contains(&y)))) {
+            if run.segs.len() < 2 || run.plus || run.digits.starts_with('0') {
                 return Some(run);
             }
+            // With no prefix: some group of three figures or more (a list of
+            // one- and two-figure items is no number), no year first ("2019,
+            // 312000 cars"), and no "and N" after it, which makes it a list
+            // ("812, 911, 1066 and 1215") (#939, #1184, #1185).
             let year = run.segs[0] == 4 && run.digits[..4].parse::<u32>().is_ok_and(|y| (1000..=2999).contains(&y));
-            let shaped = !year
-                && written(&run, &candidates).is_some_and(|w| {
-                    let groups: Vec<usize> = w.split(|c: char| !c.is_ascii_digit()).filter(|g| !g.is_empty()).map(str::len).collect();
-                    groups == run.segs
-                });
-            if shaped { Some(run) } else { run_at(&toks, i, false) }
+            let big = run.segs.iter().any(|&g| g >= 3);
+            let end = i + run.taken;
+            let list_tail = matches!(run.trail.as_str(), "" | ",")
+                && toks.get(end).is_some_and(|t| matches!(split_trail(t).0.to_lowercase().as_str(), "and" | "y" | "e" | "et" | "und" | "en" | "i" | "och" | "og" | "a"))
+                && toks.get(end + 1).is_some_and(|t| split_trail(t).0.starts_with(|c: char| c.is_ascii_digit()));
+            if big && !year && !list_tail { Some(run) } else { run_at(&toks, i, false) }
         });
         match run {
             // A day, a month and a year ("23 10 2026", "02 20 1984") is a

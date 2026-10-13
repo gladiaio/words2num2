@@ -131,6 +131,23 @@ def test_off_by_default():
         ),
         ("ext 2, +1, 212, 555, 1234", "en", {}, "ext 2, +1 212-555-1234"),
         ("ruf 030 12 2345 an", "de", {}, "ruf 030 122345 an"),
+        # Lists of one- and two-figure items, or ending "and N" (#1184,
+        # #1185); a number with groups of three (#1182); a 0-prefixed number
+        # holding "dd mm yyyy" is read whole (#1181).
+        (
+            "pages 1 2, 3 4, 5 6, 7 8, 9 0 and 91",
+            "en",
+            {},
+            "pages 1 2, 3 4, 5 6, 7 8, 9 0 and 91",
+        ),
+        ("in 812, 911, 1066 and 1215", "en", {}, "in 812, 911, 1066 and 1215"),
+        (
+            "ligue para nove um dois, três quatro cinco, seis sete oito",
+            "pt",
+            {},
+            "ligue para 912 345 678",
+        ),
+        ("appelez le 06 12 2024 56", "fr", {"date": True}, "appelez le 06 12 20 24 56"),
         # A date is read first, or left alone (#940).
         (
             "né le vingt-trois dix deux mille vingt-six",
