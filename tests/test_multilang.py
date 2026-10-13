@@ -531,6 +531,12 @@ def test_written_compounds_read(lang, text, expected):
         ("ka", "ოცდა ოცი"),
         ("my", "တစ် နှစ်"),
         ("my", "ငါး ငါး"),
+        # Separate figures are not glued (#1199).
+        ("my", "1 2"),
+        ("my", "၁ ၂"),
+        ("my", "12 34"),
+        ("my", "2 3.5"),
+        ("my_MM", "1 2"),
     ],
 )
 def test_written_compounds_reject_non_numbers(lang, text):

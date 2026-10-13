@@ -98,7 +98,10 @@ pub fn words2num(
             // "တစ်ဆယ့်တစ်" (11, #989).
             "my" => {
                 let glued: String = text.split_whitespace().collect();
-                if glued != text.trim() {
+                // Number words only: separate figures ("1 2", "၁ ၂", "2 3.5")
+                // stay separate (#1199).
+                let words_only = text.split_whitespace().all(|p| p.chars().all(|c| !c.is_numeric() && !c.is_ascii_punctuation()));
+                if glued != text.trim() && words_only {
                     if let Ok(v) = w2n_sentence::words2num(&glued, lang, to) {
                         return Ok(v);
                     }
