@@ -151,6 +151,19 @@ def test_off_by_default():
         ),
         # Not after a figure that ends its clause (#1179 audit).
         (
+            "Speaker 2: four fifteen eight six seven fifty three oh nine",
+            "en",
+            {},
+            "Speaker 2: (415) 867-5309",
+        ),
+        # One walked token is never a piece (#1179 audit).
+        (
+            "call 2, two one two five five five one two three four",
+            "en",
+            {},
+            "call 2, (212) 555-1234",
+        ),
+        (
             "Speaker two: four one five, five five five, zero one two three",
             "en",
             {},
