@@ -281,6 +281,13 @@ fn default_currency(lang: &str) -> Currency {
 /// Is `norm` (normalized) a subunit word of `lang`: "cents", "centimes",
 /// "centesimi"? The walker asks before reading it as an ordinal (it
 /// "centesimo" is both the hundredth and the cent).
+/// A currency or subunit name of the language ("pesos", "Pfund", "rupees"):
+/// minutes before one count it, they are no clock time (#1194).
+/// Not the names that are mostly other words ("won", "real", "corona").
+pub fn is_currency_word(lang: &str, norm: &str) -> bool {
+    !matches!(norm, "won" | "real" | "corona") && lexicon(lang).iter().any(|(name, _)| name == norm)
+}
+
 pub fn is_subunit_word(lang: &str, norm: &str) -> bool {
     lexicon(lang).iter().any(|(name, w)| w.sub && name == norm)
 }

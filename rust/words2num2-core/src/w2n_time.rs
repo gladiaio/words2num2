@@ -86,12 +86,13 @@ fn number_at(lang: &str, toks: &[Tok], i: usize, range: std::ops::RangeInclusive
 /// zwanzig Leute", "las dos y cinco personas", #933).
 fn counted(lang: &str, w: &str) -> bool {
     let nouns: &[&str] = match lang {
-        "fr" => &["fois", "jour", "jours", "minute", "minutes", "seconde", "secondes", "semaine", "semaines", "mois", "an", "ans", "année", "années", "personnes", "euro", "euros", "dollar", "dollars", "livre", "livres", "%", "fr", "km", "kg", "kilomètres", "mètres", "grammes", "€", "$", "£"],
-        "de" => &["leute", "minuten", "minute", "sekunden", "tage", "tag", "jahre", "jahr", "personen", "euro", "dollar", "pfund", "prozent", "%", "km", "kg", "meter", "kilometer", "gramm", "€", "$", "£"],
-        "es" => &["veces", "vez", "personas", "minutos", "segundos", "días", "dias", "años", "anos", "semanas", "meses", "euros", "dólares", "dolares", "libras", "%", "km", "kg", "kilómetros", "metros", "gramos", "€", "$", "£"],
+        "fr" => &["fois", "jour", "jours", "minute", "minutes", "seconde", "secondes", "semaine", "semaines", "mois", "an", "ans", "année", "années", "personnes", "enfants", "hommes", "femmes", "élèves", "kilos", "kilo", "litres", "litre", "euro", "euros", "dollar", "dollars", "livre", "livres", "%", "fr", "km", "kg", "kilomètres", "mètres", "grammes", "€", "$", "£"],
+        "de" => &["leute", "kinder", "männer", "frauen", "schüler", "stück", "kilo", "liter", "minuten", "minute", "sekunden", "tage", "tag", "jahre", "jahr", "personen", "euro", "dollar", "pfund", "prozent", "%", "km", "kg", "meter", "kilometer", "gramm", "€", "$", "£"],
+        "es" => &["veces", "vez", "personas", "niños", "hombres", "mujeres", "alumnos", "kilos", "kilo", "litros", "litro", "minutos", "segundos", "días", "dias", "años", "anos", "semanas", "meses", "euros", "dólares", "dolares", "libras", "%", "km", "kg", "kilómetros", "metros", "gramos", "€", "$", "£"],
         _ => &[],
     };
-    nouns.contains(&w)
+    // Any currency name of the language too ("pesos", "Pfund") (#1194).
+    nouns.contains(&w) || crate::w2n_currency::is_currency_word(lang, &crate::normalize(w))
 }
 
 /// The time would cut a longer number: a number word or "et"/"y"/"und" and a

@@ -123,3 +123,30 @@ def test_only_plain_modes():
 )
 def test_time_reader_leaves_longer_numbers_and_counts(text, lang, expected):
     assert words2num_sentence(text, lang=lang) == expected
+
+
+@pytest.mark.parametrize(
+    "text, lang, kwargs, expected",
+    [
+        # Minutes before a currency name of the language or a counted noun
+        # are an amount or a count, not a clock time (#1194).
+        (
+            "shares closed at nine fifty pence",
+            "en",
+            {"currency": True},
+            "shares closed at 9 £0.50",
+        ),
+        ("at nine fifty rupees", "en", {}, "at 9 50 rupees"),
+        ("six heures dix livres", "fr", {"currency": True}, "6 heures 10 £"),
+        ("huit heures trois kilos", "fr", {}, "8 heures 3 kilos"),
+        ("um neun Uhr zwanzig Kinder", "de", {}, "um 9 Uhr 20 Kinder"),
+        ("um neun Uhr zwanzig Pfund", "de", {"currency": True}, "um 9 Uhr 20 £"),
+        ("las dos y cinco pesos", "es", {"currency": True}, "las 2 y $5"),
+        ("las dos y cinco niños", "es", {}, "las 2 y 5 niños"),
+        # A name that is mostly another word keeps the time.
+        ("at nine fifteen won the race", "en", {}, "at 9:15 won the race"),
+        ("a las dos y cinco real", "es", {}, "a las 2:05 real"),
+    ],
+)
+def test_time_reader_leaves_currency_and_counted_nouns(text, lang, kwargs, expected):
+    assert words2num_sentence(text, lang=lang, **kwargs) == expected

@@ -3864,8 +3864,11 @@ fn en_time_run(parts: &[String], i: usize) -> Option<(String, usize)> {
                         | "dollars" | "dollar" | "cents" | "euros" | "pounds" | "pence" | "yen" | "minutes"
                         | "seconds" | "hours" | "days" | "weeks" | "months" | "items" | "units" | "grams"
                         | "kilograms" | "kg" | "miles" | "kilometers" | "kilometres" | "km" | "meters" | "metres"
-                        | "feet" | "inches" | "pounds-force" | "litres" | "liters"
+                        | "feet" | "inches" | "pounds-force" | "litres" | "liters" | "children" | "men"
+                        | "women" | "students" | "pieces" | "kilos"
                 )
+                // Any currency name ("rupees", "francs") (#1194).
+                || crate::w2n_currency::is_currency_word("en", w)
                 // "twenty first": the minutes and the ordinal are one ordinal;
                 // "fifteen first" is not (#1190 audit).
                 || (minutes % 10 == 0
