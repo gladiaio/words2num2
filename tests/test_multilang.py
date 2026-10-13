@@ -494,6 +494,8 @@ def test_currency_marks_by_nfkc_fold_issue_1099(text, expected):
         ("fr", "dans la famille, un", "dans la famille, un"),
         ("en", "three, two, one!", "3, 2, 1!"),
         ("fr", "trois, deux, un !", "3, 2, 1 !"),
+        # de "ein" is also a verb particle (#1174 audit).
+        ("de", "Er schläft um zwei ein", "Er schläft um 2 ein"),
     ],
 )
 def test_article_one_after_a_number_or_speaker_label(lang, text, expected):

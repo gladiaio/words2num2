@@ -3725,7 +3725,11 @@ fn article_is_count(resolved: &str, parts: &[String], i: usize, next_is_number: 
     let after_number = item
         && prev_raw.is_some_and(|r| matches!(trailing_mark(r).as_str(), "" | ","))
         && prev.as_deref().is_some_and(|p| !p.is_empty() && matches!(crate::lookup_norm(resolved, p, false, &[]), Ok(Some(_))))
-        && !(base == "en" && next.as_deref() == Some("of"));
+        && !(base == "en" && next.as_deref() == Some("of"))
+        // de "ein" is also a verb particle ("er schläft um zwei ein"), and
+        // counts as "eins"; ro "o" is the article (#1174 audit).
+        && !(base == "de" && crate::normalize(&parts[i]).trim().starts_with("ein") && crate::normalize(&parts[i]).trim() != "eins")
+        && !(base == "ro" && crate::normalize(&parts[i]).trim() == "o");
     if after_number || speaker {
         return true;
     }
