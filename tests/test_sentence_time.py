@@ -199,6 +199,14 @@ def test_time_reader_leaves_currency_and_counted_nouns(text, lang, kwargs, expec
         ("entre la una y tres", "es", "entre la 1 y 3"),
         ("entre las dos y veinte", "es", "entre las 2:20"),
         ("a las dos y tres", "es", "a las 2:03"),
+        # Both hours in figures; an earlier second hour only past noon
+        # (#1200 audit).
+        ("entre las once y una", "es", "entre las 11 y 1"),
+        ("entre las cinco y dos", "es", "entre las 5:02"),
+        ("entre las dos y dos", "es", "entre las 2:02"),
+        # Not across a mark.
+        ("a las dos y tres. cuartos", "es", "a las 2:03. cuartos"),
+        ("à trois heures trois. quarts", "fr", "à 3h03. quarts"),
         # Three quarters of an hour (#934).
         ("a las dos y tres cuartos", "es", "a las 2:45"),
         ("à trois heures trois quarts", "fr", "à 3h45"),

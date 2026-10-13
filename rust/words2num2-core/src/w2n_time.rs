@@ -163,8 +163,9 @@ fn minutes_fr(lang: &str, toks: &[Tok], k: usize) -> Option<(i64, usize)> {
     match (word(toks, k), word(toks, k + 1), word(toks, k + 2)) {
         (Some("et"), Some("quart"), _) => Some((15, 2)),
         // Three quarters of an hour (#934).
-        (Some("et"), Some("trois"), Some("quarts")) => Some((45, 3)),
-        (Some("trois"), Some("quarts"), _) => Some((45, 2)),
+        // Not across a mark ("trois. quarts", #1200 audit).
+        (Some("et"), Some("trois"), Some("quarts")) if toks[k + 1].trail.is_empty() && toks[k].trail.is_empty() => Some((45, 3)),
+        (Some("trois"), Some("quarts"), _) if toks[k].trail.is_empty() => Some((45, 2)),
         (Some("et"), Some("demie" | "demi"), _) => Some((30, 2)),
         (Some("moins"), Some("le"), Some("quart")) => Some((-15, 3)),
         (Some("moins"), Some("quart"), _) => Some((-15, 2)),
@@ -181,7 +182,7 @@ fn minutes_es(lang: &str, toks: &[Tok], k: usize) -> Option<(i64, usize)> {
     match (word(toks, k), word(toks, k + 1)) {
         (Some("y"), Some("cuarto")) => Some((15, 2)),
         // "y tres cuartos": three quarters of an hour (#934).
-        (Some("y"), Some("tres")) if word(toks, k + 2) == Some("cuartos") => Some((45, 3)),
+        (Some("y"), Some("tres")) if word(toks, k + 2) == Some("cuartos") && toks[k].trail.is_empty() && toks[k + 1].trail.is_empty() => Some((45, 3)),
         (Some("y"), Some("media")) => Some((30, 2)),
         (Some("menos"), Some("cuarto")) => Some((-15, 2)),
         (Some("en"), Some("punto")) => Some((0, 2)),
@@ -317,11 +318,14 @@ fn span_es(toks: &[Tok], i: usize) -> Option<Span> {
         && word(toks, key) == Some("y")
         && plain
         && (1..=12).contains(&add)
+        // "entre las cinco y dos" is 5:02, not 5 to 2; a later hour, or an
+        // earlier one past noon ("entre las once y una") (#1200 audit).
+        && (add > h || (add < h && h >= 8))
         && !matches!(word(toks, key + m), Some("y" | "minutos"));
     if range {
-        // The first hour alone: "entre la 1 y 3", not "la una" left a word.
+        // Both hours in figures: "entre las 11 y 1", not "y una" left a word.
         let article = &toks[i].word;
-        return Some(Span { len: 1 + n, text: format!("{article} {h}") });
+        return Some(Span { len: 1 + n + m, text: format!("{article} {h} y {add}") });
     }
     let (h, mm) = clock(h, add, 24);
     let article = &toks[i].word;
