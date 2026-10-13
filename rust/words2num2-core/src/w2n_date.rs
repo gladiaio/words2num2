@@ -181,6 +181,32 @@ fn en_homograph(m: &str) -> bool {
     m == "may" || m == "march" || (m.len() <= 4 && !matches!(m.as_str(), "june" | "july"))
 }
 
+/// An English word that a number before it counts: a plural noun
+/// ("people", "trucks", "years"). "june twelve people died" is twelve
+/// people, not June 12 (#931).
+fn en_counted(w: &str) -> bool {
+    let w = w.to_lowercase();
+    const PLURAL: &[&str] = &["people", "men", "women", "children", "police", "staff", "cattle", "sheep", "fish", "feet", "teeth", "mice", "geese", "persons"];
+    // Words in "-s" that are no plural noun.
+    const NOT: &[&str] = &[
+        "was", "is", "has", "does", "this", "its", "his", "hers", "ours", "yours", "theirs", "us", "yes", "as", "thus", "plus",
+        "less", "unless", "across", "always", "perhaps", "towards", "afterwards", "besides", "whereas", "sometimes", "news",
+    ];
+    PLURAL.contains(&w.as_str())
+        || (w.len() > 3 && w.ends_with('s') && !w.ends_with("ss") && w.chars().all(|c| c.is_ascii_alphabetic()) && !NOT.contains(&w.as_str()))
+}
+
+/// A word before "may"/"march" that makes it the month: "in march 2026",
+/// "since may 2020" (not "they march 2000 miles", #907).
+fn en_month_cue(w: &str) -> bool {
+    matches!(
+        w,
+        "in" | "of" | "by" | "since" | "until" | "till" | "from" | "on" | "during" | "early" | "late" | "mid" | "last" | "next" | "this"
+            | "that" | "every" | "each" | "before" | "after" | "through" | "to" | "and" | "or" | "between" | "was" | "is"
+            | "be" | "been" | "were" | "are"
+    )
+}
+
 /// The month as the language writes it: capitalised in en and de.
 fn written_month(st: Style, m: &str) -> String {
     let lower = m.to_lowercase();
@@ -506,7 +532,9 @@ fn span_at(lang: &str, st: Style, toks: &[&str], i: usize, chained: bool) -> Opt
             return (None, month_trail.to_string(), 0);
         }
         let (k, extra) = if de_of && low(k).as_deref() == Some("de") { (k + 1, 1) } else { (k, 0) };
-        match at(k).and_then(year) {
+        // en "june first 1999 people": the figure counts the noun (#931).
+        let counts = en && at(k).is_some_and(|t| split_trail(t).1.is_empty()) && low(k + 1).is_some_and(|w| en_counted(&w));
+        match at(k).and_then(year).filter(|_| !counts) {
             Some((y, trail)) => (Some(y), trail, extra + 1),
             None => (None, String::new(), 0),
         }
@@ -525,7 +553,17 @@ fn span_at(lang: &str, st: Style, toks: &[&str], i: usize, chained: bool) -> Opt
             let link = (en && low(d_at + 1).as_deref() == Some("of")) || (de_of && low(d_at + 1).as_deref() == Some("de"));
             let m_at = d_at + 1 + usize::from(link);
             if let Some((m, m_trail)) = at(m_at).and_then(|t| month(lang, t)) {
+                // en: a cardinal day ("three may come", "chapter twelve of
+                // march") is the date only before a plain month: "of" takes
+                // an ordinal, and "may"/"march" after a count are verbs (#907).
+                let ordinal = en && split_trail(at(d_at).unwrap_or("")).0.ends_with(|c: char| c.is_ascii_alphabetic());
                 let (y, trail, n) = with_year(m_at + 1, &m_trail);
+                // A year after it makes it the date ("three may twenty twenty"),
+                // and so does a cue before it ("on three may").
+                let cued = i > 0 && low(i - 1).is_some_and(|w| matches!(w.as_str(), "on" | "by" | "since" | "until" | "till" | "from" | "before" | "after"));
+                if en && !ordinal && (link || (en_homograph(&m) && n == 0 && !cued)) {
+                    return None;
+                }
                 let trail = if n == 0 { m_trail } else { trail };
                 return Some(Span { day: Some(d), month_no: month_number(lang, &m), month: m, year: y, trail, len: m_at + 1 + n - i });
             }
@@ -547,12 +585,23 @@ fn span_at(lang: &str, st: Style, toks: &[&str], i: usize, chained: bool) -> Opt
                 if en_homograph(&m) && !(ordinal || skip == 1 || n > 0) {
                     return None;
                 }
+                // "in june twelve people died": a cardinal day before a plural
+                // noun counts it (#931).
+                if !ordinal && n == 0 && open(&d_trail) && low(i + 2 + skip).is_some_and(|w| en_counted(&w)) {
+                    return None;
+                }
                 let trail = if n == 0 { d_trail } else { trail };
                 return Some(Span { day: Some(d), month_no: month_number(lang, &m), month: m, year: y, trail, len: 2 + skip + n });
             }
         }
         // A month and a year: "march 2026", "mars 2026", "marzo de 2026".
         let (y, trail, n) = with_year(i + 1, &m_trail);
+        // "they march 2000 miles": "may"/"march" and a figure are the month
+        // and its year only after a cue or first in the text (#907).
+        let cued = i == 0 || low(i - 1).is_some_and(|w| en_month_cue(&w));
+        if n > 0 && en && en_homograph(&m) && !cued {
+            return None;
+        }
         if n > 0 {
             return Some(Span { day: None, month_no: month_number(lang, &m), month: m, year: y, trail, len: 1 + n });
         }

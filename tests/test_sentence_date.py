@@ -291,3 +291,30 @@ def test_unknown_date_format():
 )
 def test_opener_around_date_is_kept(lang, text, expected):
     assert words2num_sentence(text, lang=lang, date=True) == expected
+
+
+@pytest.mark.parametrize(
+    "lang, text, expected",
+    [
+        # "may"/"march" after a count are verbs; "of" takes an ordinal day
+        # (#907).
+        ("en", "all three may come", "all 3 may come"),
+        ("en", "the twelve may be late", "the 12 may be late"),
+        ("en", "the two march together", "the 2 march together"),
+        ("en", "chapter twelve of march", "chapter 12 of march"),
+        ("en", "they march two thousand miles", "they march 2000 miles"),
+        # Still dates: an ordinal, a cue, a year.
+        ("en", "the twelfth of may", "May 12"),
+        ("en", "since may 2020", "since May 2020"),
+        ("en", "it was may 2020", "it was May 2020"),
+        ("en", "three may twenty twenty", "May 3, 2020"),
+        ("en_GB", "on three may was great", "on 3 May was great"),
+        # A cardinal day or a year before a plural noun counts it (#931).
+        ("en_GB", "in june twelve people died", "in june 12 people died"),
+        ("en_GB", "by july fifteen trucks had left", "by july 15 trucks had left"),
+        ("en", "june first 1999 people", "June 1 1999 people"),
+        ("en", "june twelve was great", "June 12 was great"),
+    ],
+)
+def test_en_month_homographs_and_counts(lang, text, expected):
+    assert words2num_sentence(text, lang=lang, date=True) == expected
