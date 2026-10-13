@@ -632,6 +632,7 @@ def test_tens_and_article(lang, text, expected):
             "2000000 y medio  de comunicación",
         ),
         ("pt_BR", "um trilhão e meio", "1500000000000"),
+        ("it", "due milioni e mezzo i bambini", "2500000 i bambini"),
         ("es", "dos millones y medio\t ambiente", "2000000 y medio\t ambiente"),
         ("es", "dos millones y medio\u00a0 kilo", "2000000 y medio\u00a0 kilo"),
     ],

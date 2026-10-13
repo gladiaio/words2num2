@@ -533,3 +533,45 @@ def test_article_one_counts_only_before_a_subunit_amount(text, lang, expected):
 )
 def test_opener_around_amount_is_kept(text, lang, expected):
     assert words2num_sentence(text, lang=lang, currency=True) == expected
+
+
+@pytest.mark.parametrize(
+    "text, lang, expected",
+    [
+        # A spelled-out amount "and a half" (#860).
+        (
+            "Um dólar vale cerca de cinco reais e meio.",
+            "pt_BR",
+            "US$ 1 vale cerca de R$ 5,50.",
+        ),
+        ("cinco pesos y medio", "es_MX", "$5.50"),
+        ("dos dólares y medio", "es_US", "$2.50"),
+        ("cinq euros et demi", "fr", "5,50 €"),
+        ("cinco euros y medio de propina", "es", "5,50 € de propina"),
+        # A half that is the next noun's, or a figure as written, stays.
+        ("cinco euros y medio kilo", "es", "5 € y medio kilo"),
+        ("cinco euros y media hora", "es", "5 € y media hora"),
+        ("5 euros y medio", "es", "5 € y medio"),
+        # Subunits, currencies with no minor unit, glued whitespace, set
+        # phrases (#1212 audit).
+        ("cinco dólares con veinte centavos y medio", "es", "$5.20 y medio"),
+        ("cinco yenes y medio", "es", "5 ¥ y medio"),
+        ("cinco euros y medio\t kilo", "es", "5 € y medio\t kilo"),
+        ("cinco euros y medio de comunicación", "es", "5 € y medio de comunicación"),
+        ("cinq euros et demi d'avance", "fr", "5,50 € d'avance"),
+        ("¿cinco euros y medio?", "es", "¿5,50 €?"),
+        # A lead or trail the currency pass does not render, a half that is
+        # the next currency's (#1212 audit).
+        ("Son —cinco euros y medio— dijo.", "es", "Son —5 euros y medio— dijo."),
+        ("cinco euros y medio€", "es", "5 € y medio€"),
+        ("cinco euros y media libra", "es", "5 € y media libra"),
+        ("cinco euros y medio\u200b", "es", "5 € y medio\u200b"),
+        (
+            "un millón y medio de personas pagaron cinco euros y medio",
+            "es",
+            "1500000 de personas pagaron 5,50 €",
+        ),
+    ],
+)
+def test_amount_and_a_half(text, lang, expected):
+    assert words2num_sentence(text, lang=lang, currency=True) == expected
