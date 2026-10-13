@@ -585,6 +585,9 @@ def test_written_compounds_reject_non_numbers(lang, text):
         ("#diez y seis", "#diez y 6"),
         ("esperé diez y seis minutos", "esperé 16 minutos"),
         ("Sí, diez y seis", "Sí, 16"),
+        # A mark on "diez" is a boundary or would be lost (#1213 audit).
+        ("Fueron diez, y seis se quedaron", "Fueron 10, y 6 se quedaron"),
+        ("…diez y ocho años", "…10 y 8 años"),
     ],
 )
 def test_es_split_teens(text, expected):

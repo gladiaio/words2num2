@@ -4210,16 +4210,24 @@ pub(crate) fn es_split_teens(text: &str, lang: &str) -> Option<String> {
             let prev = toks[i - 1].trim_end_matches(',');
             toks[i - 1].ends_with(',')
                 && !prev.is_empty()
-                && (prev.chars().all(|c| c.is_ascii_digit()) || matches!(crate::lookup_norm(lang, &crate::normalize(prev), false, &[]), Ok(Some(_))))
+                && (prev.chars().all(|c| c.is_ascii_digit())
+                    || matches!(crate::normalize(prev).as_str(), "una" | "un" | "uno")
+                    || matches!(crate::lookup_norm(lang, &crate::normalize(prev), false, &[]), Ok(Some(_))))
         };
         // After "las" it is a clock time: "las diez y seis minutos", and with
         // to="currency" (no clock pass) "a las diez y seis" (#1213 audit).
         let after_las = i > 0 && crate::normalize(toks[i - 1]) == "las";
         let unit_word = |n: &str| crate::normalize(n.trim_end_matches(|c: char| !c.is_alphanumeric()));
-        let minutes = after_las && toks.get(i + 3).is_none_or(|n| matches!(unit_word(n).as_str(), "minutos" | "minuto" | "min" | "y" | "de" | "en" | "punto"));
+        // A mark on the unit ends the time too ("a las diez y seis. Luego").
+        let unit_marked = toks.get(i + 2).is_some_and(|u| u.ends_with(|c: char| !c.is_alphanumeric()));
+        let minutes = after_las
+            && (unit_marked || toks.get(i + 3).is_none_or(|n| matches!(unit_word(n).as_str(), "minutos" | "minuto" | "min" | "y" | "de" | "en" | "punto")));
         match unit {
             Some((one, trail))
-                if crate::normalize(head_core) == "diez"
+                // The bare word: a mark on "diez" ("diez, y seis", "…diez") is a
+                // boundary or would be lost (#1213 audit).
+                if head_core.chars().all(char::is_alphabetic)
+                    && crate::normalize(head_core) == "diez"
                     && toks.get(i + 1).is_some_and(|y| y.eq_ignore_ascii_case("y"))
                     && !listed
                     && !minutes =>
