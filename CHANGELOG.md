@@ -6,6 +6,10 @@ follows [Semantic Versioning](https://semver.org/) and uses
 
 ## [Unreleased]
 
+## [0.4.6] — 2026-10-14
+
+Maintenance release; see the commits since the previous version.
+
 ## [0.4.5] — 2026-10-14
 
 ### Fixed
