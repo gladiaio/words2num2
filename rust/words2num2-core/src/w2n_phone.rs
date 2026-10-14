@@ -68,6 +68,8 @@ fn regions(lang: &str, region: Option<&str>) -> Vec<Id> {
 /// A run of digit groups at token `i`.
 struct Run {
     plus: bool,
+    /// Opened by a word that also means "more" (es "más", it "più", pt "mais").
+    native: bool,
     digits: String,
     taken: usize,
     trail: String,
@@ -127,7 +129,7 @@ fn run_at(toks: &[&str], i: usize, commas: bool, base: &str) -> Option<Run> {
     if segs.last() == Some(&0) {
         segs.pop();
     }
-    (!digits.is_empty()).then_some(Run { plus, digits, taken: k - i, trail, segs })
+    (!digits.is_empty()).then_some(Run { plus, native: native && !(first == "plus" || first == "+"), digits, taken: k - i, trail, segs })
 }
 
 fn only_digits(s: &str) -> String {
@@ -187,6 +189,19 @@ pub fn fold_phones(text: &str, lang: &str, region: Option<&str>) -> String {
         // number dictated in comma groups cannot be told apart from the walked
         // figures alone); only not inside a list, where "+" still joins.
         let run = run_at(&toks, i, !in_list, &base);
+        // es "más", it "più", pt "mais" also mean "more", "no longer", "once
+        // more": they are the "+" only when the digits make an international
+        // number and no national one ("no es más 912 34 56 78", "não é mais
+        // (33) 98765-4321" keep the local reading, #1273 audit).
+        if run.as_ref().is_some_and(|r| r.native) {
+            let r = run.as_ref().unwrap();
+            let national = run_at(&toks, i + 1, !in_list, &base).and_then(|n| written(&n, &candidates));
+            if written(r, &candidates).is_none() || national.is_some() {
+                out.push(toks[i].to_string());
+                i += 1;
+                continue;
+            }
+        }
         // A run that crossed a comma and is no phone number is tried again
         // up to its first comma: a phone after a list figure still reads
         // ("call 2, 212 555 1234", #1179 audit).
