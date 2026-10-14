@@ -4170,47 +4170,6 @@ fn fold_scale_half(text: &str, lang: &str, input: &str) -> String {
     out.join(" ")
 }
 
-/// es "tres con cinco por ciento" -> "tres coma cinco por ciento" (#864): in
-/// Latin American usage "con" is the decimal comma. In a sentence only
-/// before a percent, where nothing else reads ("café con leche"); `whole`:
-/// the text is just "<number> con <number>" (the cardinal API).
-pub(crate) fn es_con_decimal(text: &str, lang: &str, whole: bool) -> Option<String> {
-    if lang.split(['_', '-']).next() != Some("es") {
-        return None;
-    }
-    let toks: Vec<&str> = text.split(' ').collect();
-    let core = |t: &str| crate::normalize(t);
-    let number = |t: &str| {
-        t.chars().all(char::is_alphabetic) && matches!(crate::lookup_norm(lang, &core(t), false, &[]), Ok(Some(_)))
-    };
-    let mut out: Vec<String> = toks.iter().map(|t| t.to_string()).collect();
-    let mut changed = false;
-    for k in 1..toks.len() {
-        if !toks[k].eq_ignore_ascii_case("con") || !number(toks[k - 1]) {
-            continue;
-        }
-        // The fraction: number words, joined by "y".
-        let mut j = k + 1;
-        while j < toks.len() && (number(toks[j]) || (j > k + 1 && toks[j].eq_ignore_ascii_case("y") && toks.get(j + 1).is_some_and(|t| number(t)))) {
-            j += 1;
-        }
-        if j == k + 1 {
-            continue;
-        }
-        let percent = || {
-            let next = toks.get(j).map(|t| core(t)).unwrap_or_default();
-            let after = toks.get(j + 1).map(|t| core(t)).unwrap_or_default();
-            (next == "por" && after.starts_with("ciento")) || next.starts_with("porciento") || next == "%"
-        };
-        let end = j == toks.len() && whole && k == 1;
-        if percent() || end {
-            out[k] = "coma".to_string();
-            changed = true;
-        }
-    }
-    changed.then(|| out.join(" "))
-}
-
 /// es "diez y seis" -> "dieciséis" (16..19, #866), or None when the text
 /// holds none. Not in a list after "<number>," ("cinco, diez y seis" is two
 /// numbers), not before "minutos" (a clock time), and only with a mark after
@@ -4317,16 +4276,6 @@ fn words2num_sentence_folded(
         Some(t) => {
             teens = t;
             teens.as_str()
-        }
-        None => sentence,
-    };
-    // es "tres con cinco por ciento": "con" is the decimal comma before a
-    // percent (#864).
-    let con;
-    let sentence = match es_con_decimal(sentence, &resolved_lang, false).filter(|_| matches!(to, "cardinal" | "currency")) {
-        Some(t) => {
-            con = t;
-            con.as_str()
         }
         None => sentence,
     };

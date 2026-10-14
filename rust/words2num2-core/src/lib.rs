@@ -84,12 +84,19 @@ pub fn words2num(
         };
     }
     let res = w2n_sentence::words2num(text, lang, to);
-    // es "tres con cinco": "con" is the decimal comma (#864).
+    // es "tres con cinco": in Latin American usage "con" is the decimal
+    // comma (#864). Only for a whole number, never in a sentence, where it is
+    // as often "with" ("uno con cinco por ciento de grasa", #1224).
     if res.is_err() && to == "cardinal" {
         let resolved = w2n_sentence::resolve_lang(lang).unwrap_or_default();
-        if let Some(t) = w2n_sentence::es_con_decimal(text.trim(), &resolved, true) {
-            if let Ok(v) = w2n_sentence::words2num(&t, lang, to) {
-                return Ok(v);
+        if resolved.split(['_', '-']).next() == Some("es") {
+            let words: Vec<&str> = text.split_whitespace().collect();
+            if let Some(k) = words.iter().position(|w| w.eq_ignore_ascii_case("con")).filter(|&k| k > 0 && k + 1 < words.len()) {
+                let mut joined = words.clone();
+                joined[k] = "coma";
+                if let Ok(v) = w2n_sentence::words2num(&joined.join(" "), lang, to) {
+                    return Ok(v);
+                }
             }
         }
     }

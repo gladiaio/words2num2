@@ -786,25 +786,34 @@ def test_lo_billion_sentence():
 
 
 @pytest.mark.parametrize(
-    "lang, text, expected",
+    "text, expected",
     [
-        # es "con" is the decimal comma before a percent (#864).
-        (
-            "es_AR",
-            "La inflación cerró en tres con cinco por ciento, por debajo.",
-            "La inflación cerró en 3,5 por ciento, por debajo.",
-        ),
-        ("es_CL", "dos con siete por ciento", "2,7 por ciento"),
-        ("es_MX", "tres con cinco por ciento", "3.5 por ciento"),
-        ("es", "tres con treinta y cinco por ciento", "3,35 por ciento"),
-        # Not elsewhere in a sentence.
-        ("es", "llegaron tres con cinco amigos", "llegaron 3 con 5 amigos"),
-        ("es", "café con leche", "café con leche"),
+        # es "con" as the decimal comma of a whole number (#864, #1226).
+        ("tres con cinco", Decimal("3.5")),
+        ("treinta y tres con cinco", Decimal("33.5")),
+        ("mil quinientos con veinte", Decimal("1500.20")),
+        ("menos tres con cinco", Decimal("-3.5")),
+        ("tres con cinco.", Decimal("3.5")),
+        ("tres  con cinco", Decimal("3.5")),
     ],
 )
-def test_es_con_decimal(lang, text, expected):
-    assert words2num_sentence(text, lang=lang) == expected
+def test_es_con_decimal_cardinal(text, expected):
+    assert words2num(text, lang="es") == expected
 
 
-def test_es_con_decimal_cardinal():
-    assert words2num("tres con cinco", lang="es") == Decimal("3.5")
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        # In a sentence "con" is as often "with": never the decimal (#1224,
+        # #1225, #1223 audit).
+        (
+            "hay dos yogures: uno con cinco por ciento de grasa",
+            "hay 2 yogures: uno con 5 por ciento de grasa",
+        ),
+        ("tres coma cinco con dos por ciento", "3,5 con 2 por ciento"),
+        ("tres con cinco por ciento", "3 con 5 por ciento"),
+        ("café con leche", "café con leche"),
+    ],
+)
+def test_es_con_not_decimal_in_sentence(text, expected):
+    assert words2num_sentence(text, lang="es") == expected
