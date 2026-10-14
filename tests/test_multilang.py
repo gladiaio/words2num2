@@ -1387,6 +1387,37 @@ def test_phone_native_plus_word(lang, text, expected):
 @pytest.mark.parametrize(
     "lang, text, expected",
     [
+        # A list glued by its commas, no space after them, reads item by item
+        # and keeps its spacing (#1276).
+        ("en", "3,2,one", "3,2,1"),
+        ("en", "Countdown: 3,2,one, go!", "Countdown: 3,2,1, go!"),
+        ("en", "4,8,2,one.", "4,8,2,1."),
+        ("en", "three,two,one", "3,2,1"),
+        ("en", "(one,two,three)", "(1,2,3)"),
+        ("en", "twenty-one,twenty-two,twenty-three", "21,22,23"),
+        ("fr", "trois,deux,un", "3,2,1"),
+        ("es", "tres,dos,uno", "3,2,1"),
+        ("de", "drei,zwei,eins", "3,2,1"),
+        # Left as written: figures alone (a decimal or thousands mark), a
+        # glued pair (#283), an item that is no number.
+        ("en", "3,2", "3,2"),
+        ("en", "1,000,000", "1,000,000"),
+        ("fr", "3,2,1", "3,2,1"),
+        ("en", "twenty,two", "twenty,two"),
+        ("fr", "vingt,deux", "vingt,deux"),
+        ("en", "one,two,buckle my shoe", "one,two,buckle my shoe"),
+        ("en", "yes,no,maybe", "yes,no,maybe"),
+        # The spaced list is unchanged.
+        ("en", "3, 2, one", "3, 2, 1"),
+    ],
+)
+def test_glued_comma_list(lang, text, expected):
+    assert words2num_sentence(text, lang=lang) == expected
+
+
+@pytest.mark.parametrize(
+    "lang, text, expected",
+    [
         # A unit and the word for ten, spaced, read as their tens word (#983).
         ("lv", "trīs desmit pieci", "35"),
         ("hr", "tri deset sedam", "37"),

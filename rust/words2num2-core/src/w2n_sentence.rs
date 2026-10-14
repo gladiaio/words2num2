@@ -4144,6 +4144,11 @@ pub fn words2num_sentence_full(
     if out.contains(SHARE_MARK) && !sentence.contains(SHARE_MARK) {
         out = out.replace(SHARE_MARK, "");
     }
+    // The blanks `split_glued_lists` opened after a glued list's commas go
+    // again: "3,2,one" -> "3,2,1" (#1276).
+    if out.contains(GLUE_MARK) && !sentence.contains(GLUE_MARK) {
+        out = out.replace(GLUE_MARK, "");
+    }
     if !currency {
         out = fold_scale_half(&out, lang, sentence);
     }
@@ -4767,6 +4772,49 @@ pub(crate) fn it_elided_tens(text: &str, lang: &str) -> Option<String> {
     changed.then_some(out)
 }
 
+/// The blank [`split_glued_lists`] puts after each comma it opens: U+205F
+/// MEDIUM MATHEMATICAL SPACE, which the walk splits on like a space and keeps
+/// as written. It is removed once the walk is done (when the input held none),
+/// so "3,2,one" comes back as "3,2,1" (#1276).
+pub(crate) const GLUE_MARK: char = '\u{205F}';
+
+/// "3,2,one", "three,two,one": a list written with no space after its commas
+/// is a single token, which the walk never reads (#1276). Split such a token
+/// at its commas when it holds three items or more, every item is a number (a
+/// figure, or a word the table reads as a cardinal) and at least one item is
+/// a word. Left as written: a run of figures alone ("3,2", "1,000", "12,50"),
+/// where the comma may be a decimal or a thousands mark; a glued pair
+/// ("twenty,two", #283), which would read as a decimal ("vingt,deux" ->
+/// "20,2"); and a script written without spaces, where a glued mark ends a
+/// run (#1028). None when the text holds no such token.
+pub(crate) fn split_glued_lists(text: &str, lang: &str) -> Option<String> {
+    if !text.contains(',') || text.contains(GLUE_MARK) || unspaced_script(lang) {
+        return None;
+    }
+    let figure = |p: &str| p.bytes().all(|b| b.is_ascii_digit());
+    let number = |p: &str| !p.is_empty() && (figure(p) || crate::words2num(p, lang, "cardinal").is_ok());
+    let mut changed = false;
+    let mut out = String::with_capacity(text.len() + 16);
+    // Word by word, any run of blanks kept as written.
+    let mut rest = text;
+    while !rest.is_empty() {
+        let blank = rest.len() - rest.trim_start().len();
+        out.push_str(&rest[..blank]);
+        rest = &rest[blank..];
+        let end = rest.find(char::is_whitespace).unwrap_or(rest.len());
+        let tok = &rest[..end];
+        rest = &rest[end..];
+        let items: Vec<&str> = rstrip_punct(tok.trim_start_matches(is_opener)).split(',').collect();
+        if items.len() > 2 && items.iter().all(|p| number(p)) && !items.iter().all(|p| figure(p)) {
+            changed = true;
+            out.push_str(&tok.replace(',', &format!(",{GLUE_MARK}")));
+        } else {
+            out.push_str(tok);
+        }
+    }
+    changed.then_some(out)
+}
+
 /// es "diez y seis" -> "dieciséis" (16..19, #866), or None when the text
 /// holds none. Not in a list after "<number>," ("cinco, diez y seis" is two
 /// numbers), not before "minutos" (a clock time), and only with a mark after
@@ -4883,6 +4931,16 @@ fn words2num_sentence_folded(
         Some(t) => {
             elided = t;
             elided.as_str()
+        }
+        None => sentence,
+    };
+    // "3,2,one": a list glued by its commas, split for the walk; the blanks
+    // go again once it is read (#1276).
+    let unglued;
+    let sentence = match split_glued_lists(sentence, &resolved_lang).filter(|_| matches!(to, "cardinal" | "year" | "currency")) {
+        Some(t) => {
+            unglued = t;
+            unglued.as_str()
         }
         None => sentence,
     };
