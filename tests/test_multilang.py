@@ -1030,6 +1030,8 @@ def test_fi_sataa_homograph(text, expected):
         ("en", "zero five hundred and two", "0 502"),
         ("en", "meet at oh six hundred", "meet at 06 hundred"),
         ("en", "zero double five hundred", "055 hundred"),
+        ("en", "zero nine hundred thirty hours", "09 130 hours"),
+        ("en", "zero-five hundred", "05 hundred"),
         (
             "en",
             "zero six hundred to zero eight hundred hours",

@@ -2524,6 +2524,14 @@ fn en_digit_run(parts: &[String], i: usize) -> Option<(String, usize)> {
             && !ends_run_mark(&parts[part])
             && next_word(parts, part).is_some_and(|n| is_scale_word(&Converter::En, &n, 100))
             && next_word2(parts, part).is_some_and(|n| goes_on(&n))
+            // One digit word in its own part ("zero-five hundred" stays).
+            && !parts[part].contains('-')
+            // "zero nine hundred thirty hours": a military time.
+            && !parts[part + 1..]
+                .iter()
+                .filter(|t| !py_str_isspace(t))
+                .take(4)
+                .any(|t| matches!(rstrip_punct(t).to_lowercase().as_str(), "hours" | "hrs" | "hr"))
         {
             end = prev_end;
         }
