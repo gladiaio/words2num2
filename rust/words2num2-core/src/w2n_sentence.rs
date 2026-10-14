@@ -4286,6 +4286,14 @@ pub(crate) fn share_scale_words(text: &str, lang: &str) -> Option<String> {
             if prev.ends_with(',') && !scale(&prev_bare) && matches!(crate::lookup_norm(lang, &core(&prev_bare), false, &[]), Ok(Some(_))) {
                 continue;
             }
+            // A number word right before A, with no mark between, is a figure
+            // of its own or the head of A's number: either way not a range
+            // bound ("cinco seis o siete mil", "zéro six douze ou treize
+            // mille", #1243). A scale with a comma ends the previous range.
+            let marked = prev.ends_with(['.', '!', '?', ';', ':', ',', '…']);
+            if !marked && walk(prev).chars().any(|c| c.is_ascii_digit()) {
+                continue;
+            }
             // A is the tail of a longer number when the walk joins it to the
             // words before it ("ciento cinco", "treinta y cinco", "one point
             // two", "triple five"), and not across a mark ("veinte. Cinco",

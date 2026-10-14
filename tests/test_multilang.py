@@ -892,6 +892,10 @@ def test_es_con_not_decimal_in_sentence(text, expected):
         ("de", "hundert fünf oder sechs Millionen", "105 oder 6000000"),
         ("en", "triple five or six thousand", "555 or 6000"),
         ("en", "two dot five or six million", "2.5 or 6000000"),
+        # A number word right before A is no range bound (#1243).
+        ("en", "five six or seven thousand", "5 6 or 7000"),
+        ("fr", "zéro six douze ou treize mille", "06 12 ou 13000"),
+        ("en", "(five) six or seven thousand", "(5) 6 or 7000"),
         # Blanks between the words (#1234).
         ("en", "one hundred  five or six thousand", "105 or 6000"),
         ("en", "one hundred \t five or six thousand", "105 or 6000"),
