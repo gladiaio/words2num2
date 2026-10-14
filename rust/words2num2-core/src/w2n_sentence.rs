@@ -4202,6 +4202,7 @@ pub(crate) fn share_scale_words(text: &str, lang: &str) -> Option<String> {
         _ => return None,
     };
     let core = |t: &str| crate::normalize(t);
+    let bare = |t: &str| t.trim_end_matches(|c: char| !c.is_alphanumeric()).to_string();
     let scale = |t: &str| {
         t.chars().all(char::is_alphabetic)
             && matches!(
@@ -4218,7 +4219,7 @@ pub(crate) fn share_scale_words(text: &str, lang: &str) -> Option<String> {
         }
         let w = core(t);
         // "one", "un", "ein": the article form the table may leave out.
-        if matches!(w.as_str(), "one" | "un" | "uno" | "una" | "um" | "uma" | "ein" | "eine" | "een" | "een" | "unha") {
+        if matches!(w.as_str(), "one" | "un" | "une" | "uno" | "una" | "um" | "uma" | "ein" | "eine" | "een" | "unha") {
             return Some(1);
         }
         match crate::lookup_norm(lang, &w, false, &[]) {
@@ -4226,50 +4227,100 @@ pub(crate) fn share_scale_words(text: &str, lang: &str) -> Option<String> {
             _ => None,
         }
     };
-    let mut toks: Vec<String> = text.split(' ').map(str::to_string).collect();
+    // A word that would make the first bound the tail of a longer number:
+    // another number word, a scale, a decimal word or a joining connector
+    // ("one hundred five or six thousand", "uno coma dos o tres millones",
+    // "treinta y cinco o seis mil", #1227).
+    let joins = |t: &str| {
+        let w = core(t);
+        t.chars().any(|c| c.is_ascii_digit())
+            || matches!(crate::lookup_norm(lang, &w, false, &[]), Ok(Some(_)))
+            || scale(t)
+            || matches!(
+                w.as_str(),
+                "hundred" | "point" | "coma" | "punto" | "virgule" | "virgula" | "virgola" | "komma" | "punt" | "and" | "y" | "e" | "et"
+                    | "und" | "en" | "i"
+            )
+    };
+    let toks: Vec<&str> = text.split(' ').collect();
+    // The scale words appended after each token, built right to left so a
+    // chain shares them ("five or six or seven thousand", #1219); the text
+    // is rebuilt once at the end (#1230).
+    let mut after: Vec<Vec<String>> = vec![Vec::new(); toks.len()];
+    let mut mark: Vec<bool> = vec![false; toks.len()];
+    // The range mark is only safe when the input holds none (#1231).
+    let marks_ok = !text.contains(SHARE_MARK);
     let mut changed = false;
-    // Right to left: the scale words of a later bound reach every earlier one.
-    let mut k = toks.len();
-    while k > 1 {
-        k -= 1;
-        let conn = core(&toks[k]);
+    for k in (1..toks.len().saturating_sub(1)).rev() {
+        let conn = core(toks[k]);
         let is_or = or_words.contains(&conn.as_str());
-        let is_and = and_words.contains(&conn.as_str()) && k >= 2 && range_cues.contains(&core(&toks[k - 2]).as_str());
+        let is_and = marks_ok && and_words.contains(&conn.as_str()) && k >= 2 && range_cues.contains(&core(toks[k - 2]).as_str());
         if !(is_or || is_and) || !toks[k].chars().all(char::is_alphabetic) {
             continue;
         }
-        // An opener may stand before the first bound ("(cinco o seis mil)").
-        let (Some(a), Some(b)) = (value(toks[k - 1].trim_start_matches(is_opener)), toks.get(k + 1).and_then(|t| value(t))) else { continue };
-        // The scale words right after the second bound.
-        let mut j = k + 2;
-        while j < toks.len() && scale(toks[j].trim_end_matches(|c: char| !c.is_alphanumeric())) {
-            let last = toks[j].trim_end_matches(|c: char| !c.is_alphanumeric()).len() != toks[j].len();
-            j += 1;
-            if last {
-                break;
+        let a_tok = toks[k - 1].trim_start_matches(is_opener);
+        let (Some(a), Some(b)) = (value(a_tok), value(toks[k + 1])) else { continue };
+        // Rising, and of one order ("cinco o seis mil", not "veinte o dos
+        // mil" nor "cinco o seiscientos mil").
+        if a >= b || b >= 10 * a {
+            continue;
+        }
+        // Not the tail of a longer number, not an item of a comma list
+        // ("cinco, seis o siete mil", "5, six or seven thousand", #1229).
+        let lead_clean = a_tok.len() == toks[k - 1].len();
+        // A connector joins a number only after one ("treinta y cinco"); after
+        // a noun it is the clause's ("pesos y cinco o seis mil").
+        let joined = |i: usize| {
+            let w = core(toks[i]);
+            if matches!(w.as_str(), "and" | "y" | "e" | "et" | "und" | "en" | "i") {
+                i >= 1 && joins(toks[i - 1]) && !matches!(core(toks[i - 1]).as_str(), "and" | "y" | "e" | "et" | "und" | "en" | "i")
+            } else {
+                joins(toks[i])
             }
-        }
-        if j == k + 2 || a >= b {
+        };
+        if k >= 2 && !is_and && lead_clean && (joined(k - 2) || toks[k - 2].ends_with(',')) {
             continue;
         }
-        // A comma list ("cinco, seis o siete mil") is no pair.
-        if k >= 2 && toks[k - 2].ends_with(',') && value(toks[k - 2].trim_end_matches(',')).is_some() {
+        // The scale words of the second bound: those shared from its right,
+        // or the run that follows it.
+        let words: Vec<String> = if !after[k + 1].is_empty() {
+            after[k + 1].clone()
+        } else {
+            let mut run = Vec::new();
+            for t in &toks[k + 2..] {
+                let w = bare(t);
+                if !scale(&w) {
+                    break;
+                }
+                let marked = w.len() != t.len();
+                run.push(w);
+                if marked {
+                    break;
+                }
+            }
+            run
+        };
+        if words.is_empty() {
             continue;
         }
-        let words: Vec<String> = toks[k + 2..j].iter().map(|t| t.trim_end_matches(|c: char| !c.is_alphanumeric()).to_string()).collect();
-        // "and" would join the bounds into one number ("five thousand and
-        // six" is 5006): a private-use mark glued to it keeps them apart, and
-        // `SHARE_MARK` is stripped after the walk.
-        if is_and {
-            toks[k] = format!("{SHARE_MARK}{}", toks[k]);
+        // Only scale words the language reads after this bound ("dous
+        // millóns" is no gl number, #1228).
+        if crate::words2num(&format!("{} {}", bare(toks[k + 1]), words.join(" ")), lang, "cardinal").is_err() {
+            continue;
         }
-        let at = k;
-        for (n, w) in words.into_iter().enumerate() {
-            toks.insert(at + n, w);
-        }
+        after[k - 1] = words;
+        mark[k] = is_and;
         changed = true;
     }
-    changed.then(|| toks.join(" "))
+    if !changed {
+        return None;
+    }
+    let mut out: Vec<String> = Vec::with_capacity(toks.len() + 8);
+    for (i, t) in toks.iter().enumerate() {
+        out.push(if mark[i] { format!("{SHARE_MARK}{t}") } else { t.to_string() });
+        out.extend(after[i].iter().cloned());
+    }
+    Some(out.join(" "))
 }
 
 /// es "diez y seis" -> "dieciséis" (16..19, #866), or None when the text
