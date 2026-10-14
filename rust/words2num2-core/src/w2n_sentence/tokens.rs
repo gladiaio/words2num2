@@ -541,27 +541,33 @@ fn suffixes(lang: &str) -> &'static [&'static str] {
     }
 }
 
-/// Does the tr ending `suf` agree in vowel backness with the last vowel of
-/// `stem`? Front e i ö ü, back a ı o u; an ending with no vowel agrees. An
-/// ASCII capital "I" may stand for either i or ı ("IKIDE" typed without a
-/// Turkish keyboard), so it agrees with both.
+/// Does the tr ending `suf` (as typed) agree in vowel backness with the
+/// number word that ends `stem`? The backness comes from the numeral itself,
+/// read through `normalize`, so ASCII spellings ("sifir", "uc", "ALTMIS",
+/// "BINA") are judged like the Turkish ones (#826, #1260, #1259 audit). An
+/// ending with no vowel agrees; an ASCII capital "I" in the ending may be i
+/// or ı and agrees with both.
 fn tr_harmony(stem: &str, suf: &str) -> bool {
+    // The numerals by their normalized form, and whether their last vowel is
+    // front.
+    const NUMERALS: [(&str, bool); 25] = [
+        ("sifir", false), ("bir", true), ("iki", true), ("uc", true), ("dort", true),
+        ("bes", true), ("alti", false), ("yedi", true), ("sekiz", true), ("dokuz", false),
+        ("on", false), ("yirmi", true), ("otuz", false), ("kirk", false), ("elli", true),
+        ("altmis", false), ("yetmis", true), ("seksen", true), ("doksan", false), ("yuz", true),
+        ("bin", true), ("milyon", false), ("milyar", false), ("trilyon", false), ("katrilyon", false),
+    ];
+    let norm = crate::normalize(stem.trim_end_matches(['\'', '\u{2019}']));
+    let stem_front = NUMERALS
+        .iter()
+        .filter(|(w, _)| norm.ends_with(w))
+        .max_by_key(|(w, _)| w.len())
+        .map(|&(_, front)| front);
     let vowel = |c: &char| "eiöüEİÖÜaıouAIOU".contains(*c);
     let front = |c: char| "eiöüEİÖÜ".contains(c);
-    // In a number stem the lexicon resolves an ASCII "I": only "altı",
-    // "kırk", "altmış" and "sıfır" have ı ("BIN" is "bin", "BINA" no dative,
-    // #1260).
-    let back_i = ["altı", "kırk", "altmış", "sıfır"];
-    let dotless: String = stem.chars().map(|c| if c == 'I' { 'ı' } else { c }).collect::<String>().to_lowercase();
-    let stem: String = if back_i.iter().any(|w| dotless.ends_with(w)) {
-        dotless
-    } else {
-        stem.chars().map(|c| if c == 'I' { 'i' } else { c }).collect()
-    };
-    match (stem.chars().rev().find(vowel), suf.chars().find(vowel)) {
-        (_, Some('I')) => true,
-        (Some(s), Some(e)) => front(s) == front(e),
-        _ => true,
+    match (stem_front, suf.chars().find(vowel)) {
+        (_, Some('I')) | (_, None) | (None, _) => true,
+        (Some(s), Some(e)) => s == front(e),
     }
 }
 

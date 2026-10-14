@@ -1096,6 +1096,10 @@ def test_fi_sataa_homograph(text, expected):
         ("SAAT IKIDE", "SAAT 2'DE"),
         ("YENI BINA YAPILDI", "YENI BINA YAPILDI"),
         ("KIRKTA", "40'TA"),
+        # Typed without Turkish letters: the numeral decides (#1259 audit).
+        ("saat ucte bulusalim", "saat 3'te bulusalim"),
+        ("iki yuzden fazla", "200'den fazla"),
+        ("ALTMISA", "60'A"),
     ],
 )
 def test_tr_vowel_harmony(text, expected):
