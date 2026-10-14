@@ -783,3 +783,40 @@ def test_lo_billion_sentence():
         words2num_sentence("ງົບປະມານ ຫ້າຕື້ ກີບ", lang="lo")
         == "ງົບປະມານ 5000000000 ກີບ"
     )
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        # es "con" as the decimal comma of a whole number (#864, #1226).
+        ("tres con cinco", Decimal("3.5")),
+        ("treinta y tres con cinco", Decimal("33.5")),
+        ("mil quinientos con veinte", Decimal("1500.20")),
+        ("menos tres con cinco", Decimal("-3.5")),
+        ("tres con cinco.", Decimal("3.5")),
+        ("tres  con cinco", Decimal("3.5")),
+        # The split teens read before "con" too (#1223 audit A).
+        ("diez y seis con cinco", Decimal("16.5")),
+        ("diez y nueve con cincuenta", Decimal("19.50")),
+    ],
+)
+def test_es_con_decimal_cardinal(text, expected):
+    assert words2num(text, lang="es") == expected
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        # In a sentence "con" is as often "with": never the decimal (#1224,
+        # #1225, #1223 audit).
+        (
+            "hay dos yogures: uno con cinco por ciento de grasa",
+            "hay 2 yogures: uno con 5 por ciento de grasa",
+        ),
+        ("tres coma cinco con dos por ciento", "3,5 con 2 por ciento"),
+        ("tres con cinco por ciento", "3 con 5 por ciento"),
+        ("café con leche", "café con leche"),
+    ],
+)
+def test_es_con_not_decimal_in_sentence(text, expected):
+    assert words2num_sentence(text, lang="es") == expected
