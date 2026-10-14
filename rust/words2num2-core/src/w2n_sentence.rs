@@ -2884,14 +2884,11 @@ fn percent_phrase(resolved: &str) -> Option<(&'static str, &'static [&'static st
 /// cien", "lo vendió por cien", #863, #1238, #1239).
 fn percent_word_at(parts: &[String], j: usize, resolved: &str) -> bool {
     let word = |t: &String| crate::normalize(rstrip_punct(t).to_lowercase().as_str());
-    // gl "cento vinte" is 120: a number word after "cento" (with or without
-    // "e") continues the number ("cinco por cento vinte", #1237 audit).
+    // gl "cento vinte" is 120: a number word right after "cento" continues
+    // the number ("cinco por cento vinte"); gl writes 101..199 without "e",
+    // so "por cento e catro" is "percent and four" (#1237 audit).
     if word(&parts[j]) == "cento" && resolved.split(['_', '-']).next() == Some("gl") && !ends_run_mark(&parts[j]) {
-        let mut next = parts[j + 1..].iter().filter(|t| !py_str_isspace(t));
-        let mut n = next.next();
-        if n.is_some_and(|t| word(t) == "e" && !ends_run_mark(t)) {
-            n = next.next();
-        }
+        let n = parts[j + 1..].iter().find(|t| !py_str_isspace(t));
         return !n.is_some_and(|t| matches!(crate::lookup_norm(resolved, &word(t), false, &[]), Ok(Some(_))));
     }
     if word(&parts[j]) != "cien" {

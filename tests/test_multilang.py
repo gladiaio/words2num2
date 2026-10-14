@@ -927,6 +927,7 @@ def test_es_many_con_fails_fast():
         ("gl", "baixou cinco por cento", "baixou 5 por cento"),
         ("gl", "cinco por cento vinte", "5 por 120"),
         ("gl", "dous por cento e medio", "2 por cento e medio"),
+        ("gl", "tres por cento e catro por cento", "3 por cento e 4 por cento"),
         ("es_MX", "cien por cien", "100 por cien"),
         ("es", "el diez por ciento", "el 10 por ciento"),
         ("es", "cien por cien de los votos", "100 por cien de los votos"),
