@@ -1227,6 +1227,59 @@ def test_shared_scale_closed_compound(lang, text, expected):
 
 
 @pytest.mark.parametrize(
+    "lang, text, kwargs, expected",
+    [
+        # A comma before the year keeps it in the date (#946).
+        ("en", "on March 12, 2026", {"date_format": "iso"}, "on 2026-03-12"),
+        (
+            "en",
+            "on march twelfth, twenty twenty six",
+            {"date_format": "iso"},
+            "on 2026-03-12",
+        ),
+        ("en", "march 12, 2026", {}, "March 12, 2026"),
+        (
+            "fr",
+            "le douze mars, deux mille vingt-six",
+            {"date_format": "iso"},
+            "le 2026-03-12",
+        ),
+        ("fr", "le douze mars, deux mille vingt-six", {}, "le 12 mars 2026"),
+        # Not before a counted noun.
+        ("en", "March 12, 2000 people marched", {}, "March 12, 2000 people marched"),
+        # Before a word the number may be a count, in any language (#1269 audit).
+        ("fr", "le 12 mars, 2000  personnes", {}, "le 12 mars, 2000  personnes"),
+        (
+            "fr",
+            "le 12 mars, 2000 personnes sont venues",
+            {},
+            "le 12 mars, 2000 personnes sont venues",
+        ),
+        (
+            "es",
+            "el 5 de mayo, 2000 personas murieron",
+            {},
+            "el 5 de mayo, 2000 personas murieron",
+        ),
+        (
+            "en",
+            "on March 12, 2000 protesters marched",
+            {"date_format": "iso"},
+            "on March 12, 2000 protesters marched",
+        ),
+        (
+            "en",
+            "on May 5, 2026, we met",
+            {"date_format": "iso"},
+            "on 2026-05-05, we met",
+        ),
+    ],
+)
+def test_date_comma_before_year(lang, text, kwargs, expected):
+    assert words2num_sentence(text, lang=lang, date=True, **kwargs) == expected
+
+
+@pytest.mark.parametrize(
     "lang, text, expected",
     [
         # A "to" range shares the scale like an alternative (#1263).
