@@ -30,44 +30,12 @@ pub(super) enum Glue {
 /// quotes (straight, curly, guillemets, CJK corner brackets), the Spanish
 /// inverted marks.
 fn is_leading_punct(c: char) -> bool {
-    super::folded_mark(c) == Some(super::Mark::Opening)
-        || matches!(
-            c,
-            '(' | '['
-                | '{'
-                | '"'
-                | '\''
-                | '`'
-                | '«'
-                | '‹'
-                | '“'
-                | '”'
-                | '„'
-                | '‟'
-                | '‘'
-                | '’'
-                | '‚'
-                | '‛'
-                | '¿'
-                | '¡'
-                | '（'
-                | '「'
-                | '『'
-                | '【'
-                | '〈'
-                | '《'
-                | '〔'
-                | '…'
-                | '—'
-                | '–'
-                | '＂'
-                | '＇'
-                | '｀'
-                | '｢'
-                | '﹙'
-                | '﹛'
-                | '﹝'
-        )
+    super::folded_mark(c) == Some(super::Mark::Opening) || matches!(
+        c,
+        '(' | '[' | '{' | '"' | '\'' | '`' | '«' | '‹' | '“' | '”' | '„' | '‟' | '‘' | '’' | '‚'
+            | '‛' | '¿' | '¡' | '（' | '「' | '『' | '【' | '〈' | '《' | '〔' | '…' | '—' | '–'
+            | '＂' | '＇' | '｀' | '｢' | '﹙' | '﹛' | '﹝'
+    )
 }
 
 /// A clause mark glued to the next word (",deux cents", "।पाँच सौ"): cut off
@@ -75,56 +43,13 @@ fn is_leading_punct(c: char) -> bool {
 /// #1044, #1049). Not in zh / ja / th, where a lone numeral after a mark
 /// stays as written (#1028, #1048).
 pub(crate) fn is_leading_clause_mark(c: char) -> bool {
-    super::folded_mark(c) == Some(super::Mark::Terminal)
-        || matches!(
-            c,
-            ',' | '.'
-                | ';'
-                | ':'
-                | '!'
-                | '?'
-                | '।'
-                | '॥'
-                | '،'
-                | '؛'
-                | '؟'
-                | '۔'
-                | '։'
-                | '።'
-                | '፣'
-                | '፤'
-                | '，'
-                | '．'
-                | '！'
-                | '？'
-                | '；'
-                | '：'
-                | '。'
-                | '、'
-                | '‼'
-                | '‥'
-                | '⁇'
-                | '⁈'
-                | '⁉'
-                | '｡'
-                | '､'
-                | '﹐'
-                | '﹒'
-                | '﹔'
-                | '﹖'
-                | '﹗'
-                | '․'
-                | '፧'
-                | '\u{037E}'
-                | '︐'
-                | '︑'
-                | '︒'
-                | '︓'
-                | '︔'
-                | '︕'
-                | '︖'
-                | '﹕'
-        )
+    super::folded_mark(c) == Some(super::Mark::Terminal) || matches!(
+        c,
+        ',' | '.' | ';' | ':' | '!' | '?' | '।' | '॥' | '،' | '؛' | '؟' | '۔' | '։' | '።' | '፣' | '፤'
+            | '，' | '．' | '！' | '？' | '；' | '：' | '。' | '、'
+            | '‼' | '‥' | '⁇' | '⁈' | '⁉' | '｡' | '､' | '﹐' | '﹒' | '﹔' | '﹖' | '﹗' | '․' | '፧'
+            | '\u{037E}' | '︐' | '︑' | '︒' | '︓' | '︔' | '︕' | '︖' | '﹕'
+    )
 }
 
 /// The trailing punctuation the walker has always handled itself: it strips
@@ -142,82 +67,12 @@ pub(super) fn is_trailing_punct(c: char) -> bool {
         || super::folded_mark(c).is_some()
         || matches!(
             c,
-            ')' | ']'
-                | '}'
-                | '%'
-                | '…'
-                | '»'
-                | '«'
-                | '›'
-                | '‹'
-                | '“'
-                | '”'
-                | '‘'
-                | '’'
-                | '„'
-                | '）'
-                | '」'
-                | '』'
-                | '】'
-                | '〉'
-                | '》'
-                | '〕'
-                | '、'
-                | '。'
-                | '，'
-                | '！'
-                | '？'
-                | '：'
-                | '；'
-                | '।'
-                | '॥'
-                | '،'
-                | '؛'
-                | '؟'
-                | '٪'
-                | '።'
-                | '፣'
-                | '፤'
-                | '·'
-                | '—'
-                | '–'
-                | '¡'
-                | '¿'
-                | '‼'
-                | '‥'
-                | '⁇'
-                | '⁈'
-                | '⁉'
-                | '｡'
-                | '､'
-                | '﹐'
-                | '﹒'
-                | '﹔'
-                | '﹖'
-                | '﹗'
-                | '․'
-                | '։'
-                | '՝'
-                | '፧'
-                | '．'
-                | '\u{037E}'
-                | '︐'
-                | '︑'
-                | '︒'
-                | '︓'
-                | '︔'
-                | '︕'
-                | '︖'
-                | '﹕'
-                | '｣'
-                | '＂'
-                | '＇'
-                | '﹑'
-                | '︰'
-                | '﹚'
-                | '﹜'
-                | '﹞'
-                | '（'
+            ')' | ']' | '}' | '%' | '…' | '»' | '«' | '›' | '‹' | '“' | '”' | '‘' | '’' | '„'
+                | '）' | '」' | '』' | '】' | '〉' | '》' | '〕' | '、' | '。' | '，' | '！'
+                | '？' | '：' | '；' | '।' | '॥' | '،' | '؛' | '؟' | '٪' | '።' | '፣' | '፤'
+                | '·' | '—' | '–' | '¡' | '¿' | '‼' | '‥' | '⁇' | '⁈' | '⁉' | '｡' | '､' | '﹐' | '﹒'
+                | '﹔' | '﹖' | '﹗' | '․' | '։' | '՝' | '፧' | '．' | '\u{037E}' | '︐' | '︑' | '︒'
+                | '︓' | '︔' | '︕' | '︖' | '﹕' | '｣' | '＂' | '＇' | '﹑' | '︰' | '﹚' | '﹜' | '﹞' | '（'
         )
 }
 
@@ -241,13 +96,7 @@ fn split_punct_with(tok: &str, clause_lead: bool) -> Vec<&str> {
         .filter(|&(_, c)| lead_mark(c))
         .last()
         .map_or(0, |(k, c)| k + c.len_utf8());
-    let lead_end = if lead_end == 0 {
-        tok.char_indices()
-            .find(|&(_, c)| !lead_mark(c))
-            .map_or(tok.len(), |(k, _)| k)
-    } else {
-        lead_end
-    };
+    let lead_end = if lead_end == 0 { tok.char_indices().find(|&(_, c)| !lead_mark(c)).map_or(tok.len(), |(k, _)| k) } else { lead_end };
     if lead_end == tok.len() {
         return vec![tok];
     }
@@ -269,12 +118,7 @@ fn split_punct_with(tok: &str, clause_lead: bool) -> Vec<&str> {
     if !lead.is_empty() {
         out.push(lead);
     }
-    if !trail.is_empty()
-        && trail
-            .chars()
-            .any(|c| !is_legacy_trailing(c) && !is_format(c))
-        && !core.is_empty()
-    {
+    if !trail.is_empty() && trail.chars().any(|c| !is_legacy_trailing(c) && !is_format(c)) && !core.is_empty() {
         out.push(core);
         out.push(trail);
     } else {
@@ -292,17 +136,7 @@ pub(crate) fn has_interior_punct(part: &str) -> bool {
     let core = part.trim_matches(edge);
     core.chars().any(|c| {
         (c == '_' || is_leading_punct(c) || is_trailing_punct(c))
-            && !matches!(
-                c,
-                '\'' | '\u{2019}'
-                    | '\u{2018}'
-                    | '\u{02BC}'
-                    | '\u{02BB}'
-                    | '\u{FF07}'
-                    | '`'
-                    | '-'
-                    | '\u{2010}'..='\u{2015}' | '.' | '\u{00B7}'
-            )
+            && !matches!(c, '\'' | '\u{2019}' | '\u{2018}' | '\u{02BC}' | '\u{02BB}' | '\u{FF07}' | '`' | '-' | '\u{2010}'..='\u{2015}' | '.' | '\u{00B7}')
     })
 }
 
@@ -311,9 +145,7 @@ pub(crate) fn has_interior_punct(part: &str) -> bool {
 pub(super) fn is_punct_part(part: &str) -> bool {
     !part.is_empty()
         && part.chars().any(|c| !is_format(c))
-        && part.chars().all(|c| {
-            is_leading_punct(c) || is_trailing_punct(c) || is_leading_clause_mark(c) || is_format(c)
-        })
+        && part.chars().all(|c| is_leading_punct(c) || is_trailing_punct(c) || is_leading_clause_mark(c) || is_format(c))
 }
 
 /// An invisible format character (ZWSP, ZWNJ, ZWJ, word joiner, BOM, soft
@@ -352,9 +184,7 @@ pub(super) fn split_parts(
                 None => peel(converter, resolved, piece, prev_number),
             };
             prev_number = peels(resolved)
-                && pieces
-                    .iter()
-                    .any(|(p, g)| *g == Glue::Free && number_like(converter, resolved, p));
+                && pieces.iter().any(|(p, g)| *g == Glue::Free && number_like(converter, resolved, p));
             for (p, g) in pieces {
                 parts.push(p.to_string());
                 glue.push(g);
@@ -388,10 +218,7 @@ fn number_like(converter: &super::Converter, resolved: &str, word: &str) -> bool
 
 /// The languages whose words may carry a proclitic or a case ending.
 fn peels(resolved: &str) -> bool {
-    matches!(
-        base(resolved),
-        "ar" | "he" | "fr" | "it" | "ca" | "tr" | "hu" | "bn" | "fi"
-    )
+    matches!(base(resolved), "ar" | "he" | "fr" | "it" | "ca" | "tr" | "hu" | "bn" | "fi")
 }
 
 fn base(resolved: &str) -> &str {
@@ -407,26 +234,8 @@ fn base(resolved: &str) -> &str {
 fn is_cjk_numeral(c: char) -> bool {
     matches!(
         c,
-        '零' | '〇'
-            | '一'
-            | '二'
-            | '三'
-            | '四'
-            | '五'
-            | '六'
-            | '七'
-            | '八'
-            | '九'
-            | '十'
-            | '百'
-            | '千'
-            | '万'
-            | '萬'
-            | '亿'
-            | '億'
-            | '兆'
-            | '两'
-            | '兩'
+        '零' | '〇' | '一' | '二' | '三' | '四' | '五' | '六' | '七' | '八' | '九' | '十' | '百'
+            | '千' | '万' | '萬' | '亿' | '億' | '兆' | '两' | '兩'
     )
 }
 
@@ -434,114 +243,14 @@ fn is_cjk_numeral(c: char) -> bool {
 /// 三個, 十二月, 五元, 三人, 三つ. Compared on the first characters of what
 /// follows the numeral.
 const CJK_COUNTERS: &[&str] = &[
-    "个",
-    "個",
-    "只",
-    "隻",
-    "本",
-    "张",
-    "張",
-    "件",
-    "位",
-    "名",
-    "人",
-    "岁",
-    "歲",
-    "歳",
-    "才",
-    "年",
-    "月",
-    "日",
-    "号",
-    "號",
-    "点",
-    "點",
-    "時",
-    "时",
-    "分",
-    "秒",
-    "元",
-    "块",
-    "塊",
-    "角",
-    "円",
-    "圆",
-    "米",
-    "公里",
-    "公斤",
-    "斤",
-    "克",
-    "升",
-    "次",
-    "回",
-    "倍",
-    "天",
-    "小时",
-    "小時",
-    "周",
-    "週",
-    "层",
-    "層",
-    "楼",
-    "樓",
-    "階",
-    "条",
-    "條",
-    "头",
-    "頭",
-    "双",
-    "雙",
-    "种",
-    "種",
-    "家",
-    "间",
-    "間",
-    "部",
-    "支",
-    "辆",
-    "輛",
-    "台",
-    "臺",
-    "杯",
-    "瓶",
-    "碗",
-    "份",
-    "页",
-    "頁",
-    "章",
-    "节",
-    "節",
-    "度",
-    "%",
-    "％",
-    "枚",
-    "匹",
-    "冊",
-    "册",
-    "番",
-    "つ",
-    "ヶ",
-    "ケ",
-    "か月",
-    "カ月",
-    "キロ",
-    "メートル",
-    "グラム",
-    "ドル",
-    "ユーロ",
-    "美元",
-    "欧元",
-    "歩",
-    "着",
-    "軒",
-    "足",
-    "粒",
-    "通",
-    "曲",
-    "話",
-    "行",
-    "課",
-    "课",
+    "个", "個", "只", "隻", "本", "张", "張", "件", "位", "名", "人", "岁", "歲", "歳", "才", "年",
+    "月", "日", "号", "號", "点", "點", "時", "时", "分", "秒", "元", "块", "塊", "角", "円", "圆",
+    "米", "公里", "公斤", "斤", "克", "升", "次", "回", "倍", "天", "小时", "小時", "周", "週", "层",
+    "層", "楼", "樓", "階", "条", "條", "头", "頭", "双", "雙", "种", "種", "家", "间", "間", "部",
+    "支", "辆", "輛", "台", "臺", "杯", "瓶", "碗", "份", "页", "頁", "章", "节", "節", "度", "%",
+    "％", "枚", "匹", "冊", "册", "番", "つ", "ヶ", "ケ", "か月", "カ月", "キロ", "メートル",
+    "グラム", "ドル", "ユーロ", "美元", "欧元", "歩", "着", "軒", "足", "粒", "通", "曲", "話", "行",
+    "課", "课",
 ];
 
 /// Numeral strings that are ordinary words: 十分 (very, enough), 千万 (by all means),
@@ -553,9 +262,7 @@ fn cjk_idiom(seg: &str, after: &str) -> bool {
         "十分" | "千万" | "千萬" | "万一" | "萬一" | "一一" | "万万" | "萬萬" => {
             !CJK_COUNTERS.iter().any(|c| after.starts_with(c))
         }
-        "一" => ["个", "個", "つ", "天", "点", "點", "下"]
-            .iter()
-            .any(|c| after.starts_with(c)),
+        "一" => ["个", "個", "つ", "天", "点", "點", "下"].iter().any(|c| after.starts_with(c)),
         // 十分 is "very" (zh) / "enough" (ja); 十分钟 is ten minutes.
         "十" => after.starts_with('分') && !["分钟", "分鐘"].iter().any(|c| after.starts_with(c)),
         _ => false,
@@ -565,63 +272,16 @@ fn cjk_idiom(seg: &str, after: &str) -> bool {
 /// Thai numeral morphemes, as written: the digits, ten, the "ยี่" of twenty,
 /// the "เอ็ด" of x1, and the scales.
 const TH_MORPHEMES: &[&str] = &[
-    "ศูนย์",
-    "หนึ่ง",
-    "สอง",
-    "สาม",
-    "สี่",
-    "ห้า",
-    "หก",
-    "เจ็ด",
-    "แปด",
-    "เก้า",
-    "สิบ",
-    "ยี่",
-    "เอ็ด",
-    "ร้อย",
-    "พัน",
-    "หมื่น",
-    "แสน",
-    "ล้าน",
+    "ศูนย์", "หนึ่ง", "สอง", "สาม", "สี่", "ห้า", "หก", "เจ็ด", "แปด", "เก้า", "สิบ", "ยี่", "เอ็ด",
+    "ร้อย", "พัน", "หมื่น", "แสน", "ล้าน",
 ];
 
 /// Thai classifiers and units after a single numeral morpheme: สามบาท,
 /// ห้าคน.
 const TH_CLASSIFIERS: &[&str] = &[
-    "บาท",
-    "คน",
-    "ตัว",
-    "อัน",
-    "ชิ้น",
-    "ปี",
-    "เดือน",
-    "วัน",
-    "ชั่วโมง",
-    "นาที",
-    "วินาที",
-    "ครั้ง",
-    "กิโล",
-    "เมตร",
-    "ขวด",
-    "แก้ว",
-    "ใบ",
-    "เล่ม",
-    "คัน",
-    "หลัง",
-    "ข้อ",
-    "เท่า",
-    "โมง",
-    "ทุ่ม",
-    "ห้อง",
-    "ชั้น",
-    "จาน",
-    "ถ้วย",
-    "ดอลลาร์",
-    "เปอร์เซ็นต์",
-    "สัปดาห์",
-    "ลูก",
-    "แผ่น",
-    "ที่",
+    "บาท", "คน", "ตัว", "อัน", "ชิ้น", "ปี", "เดือน", "วัน", "ชั่วโมง", "นาที", "วินาที", "ครั้ง",
+    "กิโล", "เมตร", "ขวด", "แก้ว", "ใบ", "เล่ม", "คัน", "หลัง", "ข้อ", "เท่า", "โมง", "ทุ่ม", "ห้อง",
+    "ชั้น", "จาน", "ถ้วย", "ดอลลาร์", "เปอร์เซ็นต์", "สัปดาห์", "ลูก", "แผ่น", "ที่",
 ];
 
 /// A Thai mark or vowel that belongs to the syllable before it: a numeral
@@ -641,64 +301,17 @@ fn th_leading_vowel(c: char) -> bool {
 fn is_ko_sino(c: char) -> bool {
     matches!(
         c,
-        '영' | '공'
-            | '일'
-            | '이'
-            | '삼'
-            | '사'
-            | '오'
-            | '육'
-            | '칠'
-            | '팔'
-            | '구'
-            | '십'
-            | '백'
-            | '천'
-            | '만'
-            | '억'
-            | '조'
+        '영' | '공' | '일' | '이' | '삼' | '사' | '오' | '육' | '칠' | '팔' | '구' | '십' | '백'
+            | '천' | '만' | '억' | '조'
     )
 }
 
 /// Counters a glued Sino number may carry. A one-syllable number only before
 /// the unambiguous ones: 구원 is "salvation", 사명 "mission", 일부 "part".
 const KO_COUNTERS: &[&str] = &[
-    "원",
-    "개월",
-    "개",
-    "명",
-    "년",
-    "월",
-    "일",
-    "시간",
-    "시",
-    "분",
-    "초",
-    "번",
-    "층",
-    "세",
-    "달러",
-    "퍼센트",
-    "킬로",
-    "미터",
-    "권",
-    "대",
-    "회",
-    "호",
-    "장",
-    "마리",
-    "병",
-    "잔",
-    "주",
-    "배",
-    "등",
-    "점",
-    "인분",
-    "그램",
-    "리터",
-    "센티",
-    "유로",
-    "엔",
+    "원", "개월", "개", "명", "년", "월", "일", "시간", "시", "분", "초", "번", "층", "세", "달러",
+    "퍼센트", "킬로", "미터", "권", "대", "회", "호", "장", "마리", "병", "잔", "주", "배", "등",
+    "점", "인분", "그램", "리터", "센티", "유로", "엔",
 ];
 const KO_COUNTERS_AFTER_ONE_SYLLABLE: &[&str] = &["월", "년", "개", "층", "달러", "퍼센트", "유로"];
 
@@ -734,11 +347,7 @@ fn segment<'a>(
                 let counted = CJK_COUNTERS.iter().any(|c| after.starts_with(c));
                 let ordinal = piece[..b0].ends_with('第');
                 let ok = !cjk_idiom(seg, after)
-                    && (if k - start >= 2 {
-                        true
-                    } else {
-                        counted || ordinal
-                    })
+                    && (if k - start >= 2 { true } else { counted || ordinal })
                     && parses(seg);
                 if ok {
                     cuts.push((b0, b1));
@@ -792,11 +401,7 @@ fn segment<'a>(
             }
             let b = chars[n].0;
             let (num, rest) = piece.split_at(b);
-            let counters = if n >= 2 {
-                KO_COUNTERS
-            } else {
-                KO_COUNTERS_AFTER_ONE_SYLLABLE
-            };
+            let counters = if n >= 2 { KO_COUNTERS } else { KO_COUNTERS_AFTER_ONE_SYLLABLE };
             // 이 alone is "this" (이번, 이분, 이년): never a glued number.
             let ok = !(n == 1 && num == "이")
                 && counters.iter().any(|c| rest.starts_with(c))
@@ -859,11 +464,7 @@ fn peel<'a>(
 
 /// The byte length of a proclitic of `core` and the separator to write after
 /// it, when the rest is a number word (#76, #184).
-fn prefix_cut(
-    converter: &super::Converter,
-    lang: &str,
-    core: &str,
-) -> Option<(usize, &'static str)> {
+fn prefix_cut(converter: &super::Converter, lang: &str, core: &str) -> Option<(usize, &'static str)> {
     let rest_is_number = |k: usize| {
         let rest = &core[k..];
         let w = rest.to_lowercase();
@@ -978,10 +579,7 @@ fn suffix_cut(
         let Some(stem) = core.strip_suffix(suf).or_else(|| {
             // Case-insensitive ending ("ÜÇTE" is rare; the stem keeps its case).
             let lower = core.to_lowercase();
-            lower
-                .ends_with(suf)
-                .then(|| &core[..core.len() - suf.len()])
-                .filter(|_| core.len() == lower.len())
+            lower.ends_with(suf).then(|| &core[..core.len() - suf.len()]).filter(|_| core.len() == lower.len())
         }) else {
             continue;
         };

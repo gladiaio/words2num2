@@ -51,17 +51,9 @@ enum Style {
 fn style(lang: &str, region: Option<&str>) -> Option<Style> {
     let mut it = lang.split(&['_', '-'][..]);
     let base = it.next().unwrap_or(lang).to_lowercase();
-    let region = region
-        .unwrap_or_else(|| it.next().unwrap_or(""))
-        .to_uppercase();
+    let region = region.unwrap_or_else(|| it.next().unwrap_or("")).to_uppercase();
     Some(match base.as_str() {
-        "en" if matches!(
-            region.as_str(),
-            "GB" | "UK" | "AU" | "NZ" | "IE" | "IN" | "ZA"
-        ) =>
-        {
-            Style::EnGb
-        }
+        "en" if matches!(region.as_str(), "GB" | "UK" | "AU" | "NZ" | "IE" | "IN" | "ZA") => Style::EnGb,
         "en" => Style::EnUs,
         "fr" => Style::Fr,
         "de" => Style::De,
@@ -106,14 +98,10 @@ fn day(st: Style, tok: &str) -> Option<(u32, String)> {
             .iter()
             .find_map(|s| digits.strip_suffix(s))
             .unwrap_or(digits),
-        Style::Fr => ["er", "re", "e"]
-            .iter()
-            .find_map(|s| digits.strip_suffix(s))
-            .unwrap_or(digits),
-        Style::Es | Style::Pt | Style::It => ["º", "ª", "°", "o"]
-            .iter()
-            .find_map(|s| digits.strip_suffix(s))
-            .unwrap_or(digits),
+        Style::Fr => ["er", "re", "e"].iter().find_map(|s| digits.strip_suffix(s)).unwrap_or(digits),
+        Style::Es | Style::Pt | Style::It => {
+            ["º", "ª", "°", "o"].iter().find_map(|s| digits.strip_suffix(s)).unwrap_or(digits)
+        }
         Style::De | Style::Nl => digits,
     };
     if digits.is_empty() || digits.len() > 2 || !digits.bytes().all(|b| b.is_ascii_digit()) {
@@ -141,11 +129,7 @@ fn month(lang: &str, tok: &str) -> Option<(String, String)> {
 /// "sept", es "setiembre", de "jänner").
 fn month_number(lang: &str, name: &str) -> Option<u32> {
     let norm = crate::normalize(name);
-    let base = lang
-        .split(&['_', '-'][..])
-        .next()
-        .unwrap_or(lang)
-        .to_lowercase();
+    let base = lang.split(&['_', '-'][..]).next().unwrap_or(lang).to_lowercase();
     match (base.as_str(), norm.as_str()) {
         ("es", "setiembre") => return Some(9),
         ("de", "janner") => return Some(1),
@@ -161,25 +145,16 @@ fn month_number(lang: &str, name: &str) -> Option<u32> {
         return u32::try_from(k + 1).ok();
     }
     // en abbreviations: the first three letters of a full name.
-    full.iter()
-        .position(|m| m.len() > 3 && m[..3] == norm[..])
-        .and_then(|k| u32::try_from(k + 1).ok())
+    full.iter().position(|m| m.len() > 3 && m[..3] == norm[..]).and_then(|k| u32::try_from(k + 1).ok())
 }
 
 /// A number token in figures, 1..=99, with its trailing punctuation; de
 /// "3." is the ordinal (the dot is no punctuation there).
 fn small(st: Style, tok: &str) -> Option<(u32, String)> {
     let (core, trail) = split_trail(tok);
-    let trail = if st == Style::De && trail.starts_with('.') {
-        &trail[1..]
-    } else {
-        trail
-    };
+    let trail = if st == Style::De && trail.starts_with('.') { &trail[1..] } else { trail };
     let ok = !core.is_empty() && core.len() <= 2 && core.bytes().all(|b| b.is_ascii_digit());
-    ok.then(|| core.parse().ok())
-        .flatten()
-        .filter(|v| (1..=99).contains(v))
-        .map(|v| (v, trail.to_string()))
+    ok.then(|| core.parse().ok()).flatten().filter(|v| (1..=99).contains(v)).map(|v| (v, trail.to_string()))
 }
 
 /// Days in `month` of `year` (leap years included).
@@ -195,9 +170,7 @@ fn days_in(month: u32, year: u32) -> u32 {
 /// A year in figures, 1000..=2999 (what a spoken date names).
 fn year(tok: &str) -> Option<(String, String)> {
     let (core, trail) = split_trail(tok);
-    let ok = core.len() == 4
-        && core.bytes().all(|b| b.is_ascii_digit())
-        && matches!(core.as_bytes()[0], b'1' | b'2');
+    let ok = core.len() == 4 && core.bytes().all(|b| b.is_ascii_digit()) && matches!(core.as_bytes()[0], b'1' | b'2');
     ok.then(|| (core.to_string(), trail.to_string()))
 }
 
@@ -212,21 +185,7 @@ fn en_homograph(m: &str) -> bool {
 /// died" is twelve people, not June 12 (#931). An explicit list: a word in
 /// "-s" is as often a verb or a name ("june twelve works for me").
 fn en_counted(w: &str) -> bool {
-    matches!(
-        w.to_lowercase().as_str(),
-        "people"
-            | "persons"
-            | "men"
-            | "women"
-            | "children"
-            | "kids"
-            | "students"
-            | "soldiers"
-            | "workers"
-            | "trucks"
-            | "cars"
-            | "times"
-    )
+    matches!(w.to_lowercase().as_str(), "people" | "persons" | "men" | "women" | "children" | "kids" | "students" | "soldiers" | "workers" | "trucks" | "cars" | "times")
 }
 
 /// "may"/"march" read as verbs: after a count ("all three may come") or a
@@ -242,55 +201,14 @@ fn en_verb_next(m: &str, w: &str) -> bool {
     if m.eq_ignore_ascii_case("march") {
         // Not "to"/"through"/"in"/"on": "from 3 march to 5 april", "on 3
         // march in london" (#1203 audit).
-        matches!(
-            w,
-            "together"
-                | "into"
-                | "down"
-                | "up"
-                | "along"
-                | "forward"
-                | "past"
-                | "across"
-                | "off"
-                | "back"
-                | "out"
-                | "around"
-                | "home"
-                | "away"
-        )
+        matches!(w, "together" | "into" | "down" | "up" | "along" | "forward" | "past" | "across" | "off" | "back" | "out" | "around" | "home" | "away")
     } else {
         matches!(
             w,
             // Not the adverbs that also follow a date ("on 3 may now").
-            "be" | "have"
-                | "come"
-                | "go"
-                | "take"
-                | "not"
-                | "need"
-                | "want"
-                | "get"
-                | "see"
-                | "help"
-                | "find"
-                | "make"
-                | "use"
-                | "never"
-                | "arrive"
-                | "leave"
-                | "win"
-                | "lose"
-                | "stay"
-                | "join"
-                | "apply"
-                | "vary"
-                | "differ"
-                | "change"
-                | "include"
-                | "require"
-                | "cause"
-                | "contain"
+            "be" | "have" | "come" | "go" | "take" | "not" | "need" | "want" | "get" | "see" | "help" | "find" | "make" | "use"
+                | "never" | "arrive" | "leave" | "win" | "lose"
+                | "stay" | "join" | "apply" | "vary" | "differ" | "change" | "include" | "require" | "cause" | "contain"
         )
     }
 }
@@ -299,20 +217,7 @@ fn en_verb_next(m: &str, w: &str) -> bool {
 /// (#907).
 fn en_subject(w: &str) -> bool {
     // Not "you": mostly an object ("see you may 2020").
-    matches!(
-        w,
-        "i" | "we"
-            | "they"
-            | "he"
-            | "she"
-            | "who"
-            | "people"
-            | "soldiers"
-            | "troops"
-            | "protesters"
-            | "students"
-            | "workers"
-    )
+    matches!(w, "i" | "we" | "they" | "he" | "she" | "who" | "people" | "soldiers" | "troops" | "protesters" | "students" | "workers")
 }
 
 /// The month as the language writes it: capitalised in en and de.
@@ -320,9 +225,7 @@ fn written_month(st: Style, m: &str) -> String {
     let lower = m.to_lowercase();
     if matches!(st, Style::EnUs | Style::EnGb | Style::De) {
         let mut c = lower.chars();
-        c.next()
-            .map(|f| f.to_uppercase().chain(c).collect())
-            .unwrap_or_default()
+        c.next().map(|f| f.to_uppercase().chain(c).collect()).unwrap_or_default()
     } else {
         lower
     }
@@ -394,26 +297,12 @@ fn open(trail: &str) -> bool {
 /// A word that announces a date: "on", "born", "le", "am", "el" ...
 fn date_cue(st: Style, w: &str) -> bool {
     let cues: &[&str] = match st {
-        Style::EnUs | Style::EnGb => &[
-            "on", "born", "dob", "dated", "date", "since", "until", "till", "from", "by", "before",
-            "after", "between",
-        ],
-        Style::Fr => &[
-            "le", "du", "au", "depuis", "jusqu'au", "entre", "né", "née", "daté", "datée", "date",
-        ],
-        Style::De => &[
-            "am", "vom", "bis", "seit", "ab", "zwischen", "datum", "geboren", "zum", "dem",
-        ],
-        Style::Es => &[
-            "el", "del", "al", "desde", "hasta", "entre", "fecha", "nació", "nacido", "nacida",
-        ],
-        Style::Pt => &[
-            "em", "no", "dia", "de", "desde", "até", "entre", "data", "nasceu", "nascido",
-            "nascida",
-        ],
-        Style::It => &[
-            "il", "dal", "al", "tra", "fra", "nato", "nata", "data", "fino",
-        ],
+        Style::EnUs | Style::EnGb => &["on", "born", "dob", "dated", "date", "since", "until", "till", "from", "by", "before", "after", "between"],
+        Style::Fr => &["le", "du", "au", "depuis", "jusqu'au", "entre", "né", "née", "daté", "datée", "date"],
+        Style::De => &["am", "vom", "bis", "seit", "ab", "zwischen", "datum", "geboren", "zum", "dem"],
+        Style::Es => &["el", "del", "al", "desde", "hasta", "entre", "fecha", "nació", "nacido", "nacida"],
+        Style::Pt => &["em", "no", "dia", "de", "desde", "até", "entre", "data", "nasceu", "nascido", "nascida"],
+        Style::It => &["il", "dal", "al", "tra", "fra", "nato", "nata", "data", "fino"],
         Style::Nl => &["op", "van", "tot", "sinds", "tussen", "datum", "geboren"],
     };
     cues.contains(&w)
@@ -424,10 +313,7 @@ fn date_cue(st: Style, w: &str) -> bool {
 /// "from", de "ab"), 0 for a very common word (pt "de", de "dem" / "zum").
 fn cue_strength(st: Style, w: &str) -> u8 {
     let (weak, very_weak): (&[&str], &[&str]) = match st {
-        Style::EnUs | Style::EnGb => (
-            &["by", "from", "after", "before", "since", "until", "till"],
-            &[],
-        ),
+        Style::EnUs | Style::EnGb => (&["by", "from", "after", "before", "since", "until", "till"], &[]),
         Style::Fr => (&["au", "du", "depuis", "jusqu'au"], &[]),
         Style::De => (&["ab", "bis", "seit", "vom"], &["dem", "zum"]),
         Style::Es => (&["hasta", "desde", "al", "del"], &[]),
@@ -482,11 +368,7 @@ fn range_link(st: Style, links: &[&str]) -> bool {
         .iter()
         .map(|t| {
             let (w, trail) = split_trail(t);
-            if trail.is_empty() {
-                w.to_lowercase()
-            } else {
-                String::new()
-            }
+            if trail.is_empty() { w.to_lowercase() } else { String::new() }
         })
         .collect();
     !words.is_empty()
@@ -498,19 +380,8 @@ fn range_link(st: Style, links: &[&str]) -> bool {
 fn time_word(w: &str) -> bool {
     matches!(
         w,
-        "noon"
-            | "midnight"
-            | "midi"
-            | "minuit"
-            | "mittag"
-            | "mitternacht"
-            | "mediodía"
-            | "medianoche"
-            | "meio-dia"
-            | "meia-noite"
-            | "mezzogiorno"
-            | "mezzanotte"
-            | "middernacht"
+        "noon" | "midnight" | "midi" | "minuit" | "mittag" | "mitternacht" | "mediodía" | "medianoche"
+            | "meio-dia" | "meia-noite" | "mezzogiorno" | "mezzanotte" | "middernacht"
     )
 }
 
@@ -561,22 +432,11 @@ fn numeric_at(lang: &str, st: Style, toks: &[&str], i: usize, chained: bool) -> 
     // people" is three quantities (#1031).
     let len = 3 + s1 + s2;
     // de "12. 3. 2026": the ordinal dots are a separator too.
-    let de_dots = st == Style::De
-        && [i, i + 1]
-            .iter()
-            .all(|&k| at(k).is_some_and(|t| t.ends_with('.')));
+    let de_dots = st == Style::De && [i, i + 1].iter().all(|&k| at(k).is_some_and(|t| t.ends_with('.')));
     if s1 == 0 && !de_dots && !chained {
         let word = |t: &str| t.chars().any(char::is_alphanumeric);
-        let sentence_end = |t: &str| {
-            t.trim_end_matches(['"', '\'', ')', '»', '”'])
-                .ends_with(['.', '!', '?'])
-        };
-        let back: Vec<&str> = toks[..i]
-            .iter()
-            .rev()
-            .copied()
-            .filter(|t| !t.is_empty())
-            .collect();
+        let sentence_end = |t: &str| t.trim_end_matches(['"', '\'', ')', '»', '”']).ends_with(['.', '!', '?']);
+        let back: Vec<&str> = toks[..i].iter().rev().copied().filter(|t| !t.is_empty()).collect();
         // A cue, with ":" or "," after it (also spaced: "Date : …"), a bracket
         // before it ("(on").
         let cue_at = back.iter().position(|t| word(t));
@@ -584,20 +444,14 @@ fn numeric_at(lang: &str, st: Style, toks: &[&str], i: usize, chained: bool) -> 
             .filter(|&n| back[..n].iter().all(|t| matches!(*t, ":" | ",")))
             .and_then(|n| {
                 let (prev, prev_trail) = split_trail(back[n]);
-                let prev = prev
-                    .trim_start_matches(|c: char| !c.is_alphanumeric())
-                    .to_lowercase();
+                let prev = prev.trim_start_matches(|c: char| !c.is_alphanumeric()).to_lowercase();
                 let strength = cue_strength(st, &prev);
                 // A very common word counts behind a real cue ("ab dem", "bis
                 // zum"), taking its strength.
                 let strength = if strength == 0 {
                     back.get(n + 1).map_or(0, |t| {
                         let w = split_trail(t).0.to_lowercase();
-                        if date_cue(st, &w) {
-                            cue_strength(st, &w).max(1)
-                        } else {
-                            0
-                        }
+                        if date_cue(st, &w) { cue_strength(st, &w).max(1) } else { 0 }
                     })
                 } else {
                     strength
@@ -612,26 +466,16 @@ fn numeric_at(lang: &str, st: Style, toks: &[&str], i: usize, chained: bool) -> 
             None => true,
             Some(n) => sentence_end(back[n]) && back[..n].iter().all(|t| !word(t)),
         };
-        let after: Vec<&str> = toks[(i + len).min(toks.len())..]
-            .iter()
-            .copied()
-            .filter(|t| !t.is_empty())
-            .collect();
+        let after: Vec<&str> = toks[(i + len).min(toks.len())..].iter().copied().filter(|t| !t.is_empty()).collect();
         let time_next = |k: usize| {
-            after
-                .get(k)
-                .is_some_and(|t| clock_cue(st, &split_trail(t).0.to_lowercase()))
+            after.get(k).is_some_and(|t| clock_cue(st, &split_trail(t).0.to_lowercase()))
                 && after.get(k + 1).is_some_and(|t| {
-                    t.starts_with(|c: char| c.is_ascii_digit())
-                        || time_word(&split_trail(t).0.to_lowercase())
+                    t.starts_with(|c: char| c.is_ascii_digit()) || time_word(&split_trail(t).0.to_lowercase())
                 })
         };
         let ends = if trail.is_empty() {
             match after.iter().position(|t| word(t)) {
-                None => after.iter().all(|t| {
-                    t.chars()
-                        .all(|c| matches!(c, '.' | '!' | '?' | '"' | ')' | '»' | '”'))
-                }),
+                None => after.iter().all(|t| t.chars().all(|c| matches!(c, '.' | '!' | '?' | '"' | ')' | '»' | '”'))),
                 Some(k) => after[..k].is_empty() && time_next(0),
             }
         } else {
@@ -658,9 +502,7 @@ fn numeric_at(lang: &str, st: Style, toks: &[&str], i: usize, chained: bool) -> 
         // The second end in any date form the pass reads ("4/12/2000", "4
         // slash 12 slash 2000", "december fourth 2000", es "cuatro de
         // diciembre de …"): the same span lookup, as a chained span.
-        let second_at = (i + len..toks.len())
-            .filter(|&k| !toks[k].is_empty())
-            .nth(r);
+        let second_at = (i + len..toks.len()).filter(|&k| !toks[k].is_empty()).nth(r);
         let range_next = r > 0
             && range_link(st, &after[..r])
             && second_at.is_some_and(|k| {
@@ -668,9 +510,7 @@ fn numeric_at(lang: &str, st: Style, toks: &[&str], i: usize, chained: bool) -> 
                 let core = split_trail(t).0;
                 let parts: Vec<&str> = core.split(['/', '.', '-']).collect();
                 let figure_date = parts.len() == 3
-                    && parts
-                        .iter()
-                        .all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
+                    && parts.iter().all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
                     && parts.iter().any(|p| p.len() == 4);
                 figure_date || span_at(lang, st, toks, k, true).is_some()
             });
@@ -687,14 +527,7 @@ fn numeric_at(lang: &str, st: Style, toks: &[&str], i: usize, chained: bool) -> 
     if !(1..=12).contains(&m) || d == 0 || d > days_in(m, yn) {
         return None;
     }
-    Some(Span {
-        day: Some(d),
-        month: String::new(),
-        month_no: Some(m),
-        year: Some(y),
-        trail,
-        len,
-    })
+    Some(Span { day: Some(d), month: String::new(), month_no: Some(m), year: Some(y), trail, len })
 }
 
 /// The date span starting at token `i`, if any.
@@ -711,11 +544,7 @@ fn span_at(lang: &str, st: Style, toks: &[&str], i: usize, chained: bool) -> Opt
         if !open(month_trail) {
             return (None, month_trail.to_string(), 0);
         }
-        let (k, extra) = if de_of && low(k).as_deref() == Some("de") {
-            (k + 1, 1)
-        } else {
-            (k, 0)
-        };
+        let (k, extra) = if de_of && low(k).as_deref() == Some("de") { (k + 1, 1) } else { (k, 0) };
         match at(k).and_then(year) {
             Some((y, trail)) => (Some(y), trail, extra + 1),
             None => (None, String::new(), 0),
@@ -724,9 +553,7 @@ fn span_at(lang: &str, st: Style, toks: &[&str], i: usize, chained: bool) -> Opt
     // en "the 12th of march", "12th of march"; es/pt "12 de marzo"; others "12 mars".
     // "the" with a mark after it ("(the) fifth of may", "the, fifth") is no
     // article of the date: skipping it would lose the mark (#1195 audit).
-    let the = |k: usize| {
-        low(k).as_deref() == Some("the") && at(k).is_some_and(|t| split_trail(t).1.is_empty())
-    };
+    let the = |k: usize| low(k).as_deref() == Some("the") && at(k).is_some_and(|t| split_trail(t).1.is_empty());
     let d_at = if en && the(i) && at(i + 1).and_then(|t| day(st, t)).is_some() {
         i + 1
     } else {
@@ -734,46 +561,25 @@ fn span_at(lang: &str, st: Style, toks: &[&str], i: usize, chained: bool) -> Opt
     };
     if let Some((d, d_trail)) = at(d_at).and_then(|t| day(st, t)) {
         if open(&d_trail) {
-            let link = (en && low(d_at + 1).as_deref() == Some("of"))
-                || (de_of && low(d_at + 1).as_deref() == Some("de"));
+            let link = (en && low(d_at + 1).as_deref() == Some("of")) || (de_of && low(d_at + 1).as_deref() == Some("de"));
             let m_at = d_at + 1 + usize::from(link);
             if let Some((m, m_trail)) = at(m_at).and_then(|t| month(lang, t)) {
                 // en: a cardinal day ("three may come", "chapter twelve of
                 // march") is the date only before a plain month: "of" takes
                 // an ordinal, and "may"/"march" after a count are verbs (#907).
-                let ordinal = en
-                    && split_trail(at(d_at).unwrap_or(""))
-                        .0
-                        .ends_with(|c: char| c.is_ascii_alphabetic());
+                let ordinal = en && split_trail(at(d_at).unwrap_or("")).0.ends_with(|c: char| c.is_ascii_alphabetic());
                 let (y, trail, n) = with_year(m_at + 1, &m_trail);
                 // "may"/"march" after a count are verbs only before a verb-like
                 // word ("all three may come"); at the end, before a mark or a
                 // noun ("12 march", "the 3 may meeting") it is the date.
                 // After a cue it is the date ("on 3 march", "from 3 march").
-                let cued = i > 0
-                    && low(i - 1).is_some_and(|w| {
-                        matches!(
-                            w.as_str(),
-                            "on" | "by" | "since" | "until" | "till" | "from" | "before" | "after"
-                        )
-                    });
-                let verb = !cued
-                    && en_verb_month(&m)
-                    && open(&m_trail)
-                    && n == 0
-                    && low(m_at + 1).is_some_and(|w| en_verb_next(&m, &w));
+                let cued = i > 0 && low(i - 1).is_some_and(|w| matches!(w.as_str(), "on" | "by" | "since" | "until" | "till" | "from" | "before" | "after"));
+                let verb = !cued && en_verb_month(&m) && open(&m_trail) && n == 0 && low(m_at + 1).is_some_and(|w| en_verb_next(&m, &w));
                 if en && !ordinal && (link || verb) {
                     return None;
                 }
                 let trail = if n == 0 { m_trail } else { trail };
-                return Some(Span {
-                    day: Some(d),
-                    month_no: month_number(lang, &m),
-                    month: m,
-                    year: y,
-                    trail,
-                    len: m_at + 1 + n - i,
-                });
+                return Some(Span { day: Some(d), month_no: month_number(lang, &m), month: m, year: y, trail, len: m_at + 1 + n - i });
             }
         }
     }
@@ -788,8 +594,7 @@ fn span_at(lang: &str, st: Style, toks: &[&str], i: usize, chained: bool) -> Opt
                 // "they march 12 miles", "you may 2": a verb, unless the day is an
                 // ordinal ("march 12th"), "the" opens it, or a year follows.
                 let ordinal = d_tok.is_some_and(|t| {
-                    t.trim_end_matches(|c: char| trail_mark(c) || crate::w2n_sentence::is_opener(c))
-                        .ends_with(|c: char| c.is_ascii_alphabetic())
+                    t.trim_end_matches(|c: char| trail_mark(c) || crate::w2n_sentence::is_opener(c)).ends_with(|c: char| c.is_ascii_alphabetic())
                 });
                 if en_homograph(&m) && !(ordinal || skip == 1 || n > 0) {
                     return None;
@@ -799,23 +604,11 @@ fn span_at(lang: &str, st: Style, toks: &[&str], i: usize, chained: bool) -> Opt
                 // After "on" the date is the likelier reading (#1203 audit);
                 // "by july fifteen trucks had left" is the count (#931).
                 let on = i > 0 && low(i - 1).as_deref() == Some("on");
-                if !ordinal
-                    && !on
-                    && n == 0
-                    && open(&d_trail)
-                    && low(i + 2 + skip).is_some_and(|w| en_counted(&w))
-                {
+                if !ordinal && !on && n == 0 && open(&d_trail) && low(i + 2 + skip).is_some_and(|w| en_counted(&w)) {
                     return None;
                 }
                 let trail = if n == 0 { d_trail } else { trail };
-                return Some(Span {
-                    day: Some(d),
-                    month_no: month_number(lang, &m),
-                    month: m,
-                    year: y,
-                    trail,
-                    len: 2 + skip + n,
-                });
+                return Some(Span { day: Some(d), month_no: month_number(lang, &m), month: m, year: y, trail, len: 2 + skip + n });
             }
         }
         // A month and a year: "march 2026", "mars 2026", "marzo de 2026".
@@ -826,14 +619,7 @@ fn span_at(lang: &str, st: Style, toks: &[&str], i: usize, chained: bool) -> Opt
             return None;
         }
         if n > 0 {
-            return Some(Span {
-                day: None,
-                month_no: month_number(lang, &m),
-                month: m,
-                year: y,
-                trail,
-                len: 1 + n,
-            });
+            return Some(Span { day: None, month_no: month_number(lang, &m), month: m, year: y, trail, len: 1 + n });
         }
     }
     None
@@ -859,15 +645,12 @@ pub fn fold_dates_with(text: &str, lang: &str, region: Option<&str>, iso: bool) 
     let mut after_date: Option<usize> = None;
     while i < toks.len() {
         // Up to three range words ("to", nl "tot en met").
-        let chained =
-            after_date.is_some_and(|k| k < i && i - k <= 3 && range_link(st, &toks[k..i]));
+        let chained = after_date.is_some_and(|k| k < i && i - k <= 3 && range_link(st, &toks[k..i]));
         // An opener glued before the date ("［fifth of may") goes back
         // before it (#1106).
         // Format characters around it ride with it ("\u{200b}(fifth of may",
         // "(\u{200b}the fifth of may") (#1195 audit).
-        let body = toks[i].trim_start_matches(|c: char| {
-            crate::w2n_sentence::is_opener(c) || crate::w2n_sentence::is_format_char(c)
-        });
+        let body = toks[i].trim_start_matches(|c: char| crate::w2n_sentence::is_opener(c) || crate::w2n_sentence::is_format_char(c));
         let lead = &toks[i][..toks[i].len() - body.len()];
         let span = if !lead.contains(crate::w2n_sentence::is_opener) || body.is_empty() {
             span_at(lang, st, &toks, i, chained)
@@ -878,11 +661,7 @@ pub fn fold_dates_with(text: &str, lang: &str, region: Option<&str>, iso: bool) 
         };
         match span {
             Some(s) => {
-                out.push(format!(
-                    "{}{}",
-                    if body.is_empty() { "" } else { lead },
-                    render(st, &s, iso)
-                ));
+                out.push(format!("{}{}", if body.is_empty() { "" } else { lead }, render(st, &s, iso)));
                 i += s.len;
                 after_date = open(&s.trail).then_some(i);
             }
@@ -900,171 +679,79 @@ mod tests {
     use super::fold_dates;
 
     fn walk(text: &str, lang: &str) -> String {
-        crate::w2n_sentence::words2num_sentence_full(
-            text, lang, "cardinal", false, false, true, None, "written", false,
-        )
-        .unwrap()
+        crate::w2n_sentence::words2num_sentence_full(text, lang, "cardinal", false, false, true, None, "written", false).unwrap()
     }
 
     fn walk_with(text: &str, lang: &str, region: Option<&str>, format: &str) -> String {
-        crate::w2n_sentence::words2num_sentence_full(
-            text, lang, "cardinal", false, false, true, region, format, false,
-        )
-        .unwrap()
+        crate::w2n_sentence::words2num_sentence_full(text, lang, "cardinal", false, false, true, region, format, false).unwrap()
     }
 
     #[test]
     fn numeric_dates() {
-        assert_eq!(
-            walk("born on three twelve twenty twenty six", "en"),
-            "born on 3/12/2026"
-        );
-        assert_eq!(
-            walk("three twelve twenty twenty six", "en_GB"),
-            "03/12/2026"
-        );
-        assert_eq!(
-            walk(
-                "the date is oh three slash twelve slash twenty twenty six.",
-                "en"
-            ),
-            "the date is 3/12/2026."
-        );
-        assert_eq!(
-            walk("né le douze trois deux mille vingt-six", "fr"),
-            "né le 12/03/2026"
-        );
-        assert_eq!(
-            walk("am zwölften dritten zweitausendsechsundzwanzig", "de"),
-            "am 12.03.2026"
-        );
-        assert_eq!(
-            walk("el doce del tres de dos mil veintiséis", "es"),
-            "el 12/03/2026"
-        );
+        assert_eq!(walk("born on three twelve twenty twenty six", "en"), "born on 3/12/2026");
+        assert_eq!(walk("three twelve twenty twenty six", "en_GB"), "03/12/2026");
+        assert_eq!(walk("the date is oh three slash twelve slash twenty twenty six.", "en"), "the date is 3/12/2026.");
+        assert_eq!(walk("né le douze trois deux mille vingt-six", "fr"), "né le 12/03/2026");
+        assert_eq!(walk("am zwölften dritten zweitausendsechsundzwanzig", "de"), "am 12.03.2026");
+        assert_eq!(walk("el doce del tres de dos mil veintiséis", "es"), "el 12/03/2026");
         // nl "twaalf drie" is merged by the walk ("1203"): the format on figures.
         assert_eq!(super::fold_dates("op 12 3 2026", "nl"), "op 12-03-2026");
         // Not a calendar date, no year, or half a date: left as it is.
-        assert_eq!(
-            walk("thirteen twelve twenty twenty six", "en"),
-            "13 12 2026"
-        );
+        assert_eq!(walk("thirteen twelve twenty twenty six", "en"), "13 12 2026");
         assert_eq!(walk("two thirty twenty twenty four", "en"), "2 30 2024");
-        assert_eq!(
-            walk("two twenty nine twenty twenty four", "en"),
-            "2/29/2024"
-        );
-        assert_eq!(
-            walk("two twenty nine twenty twenty five", "en"),
-            "2 29 2025"
-        );
+        assert_eq!(walk("two twenty nine twenty twenty four", "en"), "2/29/2024");
+        assert_eq!(walk("two twenty nine twenty twenty five", "en"), "2 29 2025");
         assert_eq!(walk("three twelve", "en"), "3 12");
     }
 
     #[test]
     fn region_override() {
-        assert_eq!(
-            walk_with(
-                "three twelve twenty twenty six",
-                "en",
-                Some("GB"),
-                "written"
-            ),
-            "03/12/2026"
-        );
-        assert_eq!(
-            walk_with("on march twelfth", "en", Some("au"), "written"),
-            "on 12 March"
-        );
-        assert_eq!(
-            walk_with("on march twelfth", "en_GB", Some("US"), "written"),
-            "on March 12"
-        );
+        assert_eq!(walk_with("three twelve twenty twenty six", "en", Some("GB"), "written"), "03/12/2026");
+        assert_eq!(walk_with("on march twelfth", "en", Some("au"), "written"), "on 12 March");
+        assert_eq!(walk_with("on march twelfth", "en_GB", Some("US"), "written"), "on March 12");
     }
 
     #[test]
     fn iso() {
         let iso = |t: &str, l: &str| walk_with(t, l, None, "iso");
-        assert_eq!(
-            iso("on march twelfth twenty twenty six", "en"),
-            "on 2026-03-12"
-        );
+        assert_eq!(iso("on march twelfth twenty twenty six", "en"), "on 2026-03-12");
         assert_eq!(iso("three twelve twenty twenty six", "en"), "2026-03-12");
-        assert_eq!(
-            iso("le premier avril deux mille vingt-six", "fr"),
-            "le 2026-04-01"
-        );
-        assert_eq!(
-            iso("el doce de setiembre de dos mil veintiséis", "es"),
-            "el 2026-09-12"
-        );
-        assert_eq!(
-            iso("on sept twelfth twenty twenty six", "en"),
-            "on 2026-09-12"
-        );
+        assert_eq!(iso("le premier avril deux mille vingt-six", "fr"), "le 2026-04-01");
+        assert_eq!(iso("el doce de setiembre de dos mil veintiséis", "es"), "el 2026-09-12");
+        assert_eq!(iso("on sept twelfth twenty twenty six", "en"), "on 2026-09-12");
         // No year: the written form.
         assert_eq!(iso("the first of march", "en"), "March 1");
     }
 
     #[test]
     fn english_us() {
-        assert_eq!(
-            walk("on march twelfth twenty twenty six", "en"),
-            "on March 12, 2026"
-        );
+        assert_eq!(walk("on march twelfth twenty twenty six", "en"), "on March 12, 2026");
         assert_eq!(walk("the first of march", "en"), "March 1");
-        assert_eq!(
-            walk("on the twenty first of june nineteen ninety.", "en"),
-            "on June 21, 1990."
-        );
-        assert_eq!(
-            walk("december one twenty twenty five", "en"),
-            "December 1, 2025"
-        );
+        assert_eq!(walk("on the twenty first of june nineteen ninety.", "en"), "on June 21, 1990.");
+        assert_eq!(walk("december one twenty twenty five", "en"), "December 1, 2025");
         assert_eq!(walk("march the twelfth", "en"), "March 12");
         assert_eq!(walk("in march twenty twenty six", "en"), "in March 2026");
-        assert_eq!(
-            walk("see you march twelfth, ok", "en"),
-            "see you March 12, ok"
-        );
+        assert_eq!(walk("see you march twelfth, ok", "en"), "see you March 12, ok");
         assert_eq!(walk("june twelve", "en"), "June 12");
         assert_eq!(walk("may the fourth", "en"), "May 4");
     }
 
     #[test]
     fn english_day_first() {
-        assert_eq!(
-            walk("the twelfth of march twenty twenty six", "en_GB"),
-            "12 March 2026"
-        );
+        assert_eq!(walk("the twelfth of march twenty twenty six", "en_GB"), "12 March 2026");
         assert_eq!(walk("on march twelfth", "en_AU"), "on 12 March");
     }
 
     #[test]
     fn other_languages() {
-        assert_eq!(
-            walk("le premier avril deux mille vingt-six", "fr"),
-            "le 1er avril 2026"
-        );
+        assert_eq!(walk("le premier avril deux mille vingt-six", "fr"), "le 1er avril 2026");
         assert_eq!(walk("le douze Mars", "fr"), "le 12 mars");
-        assert_eq!(
-            walk("am zwölften märz zweitausendsechsundzwanzig", "de"),
-            "am 12. März 2026"
-        );
+        assert_eq!(walk("am zwölften märz zweitausendsechsundzwanzig", "de"), "am 12. März 2026");
         assert_eq!(walk("el primero de mayo", "es"), "el 1 de mayo");
-        assert_eq!(
-            walk("el doce de marzo de dos mil veintiséis", "es"),
-            "el 12 de marzo de 2026"
-        );
-        assert_eq!(
-            walk("doze de março de dois mil e vinte e seis", "pt"),
-            "12 de março de 2026"
-        );
+        assert_eq!(walk("el doce de marzo de dos mil veintiséis", "es"), "el 12 de marzo de 2026");
+        assert_eq!(walk("doze de março de dois mil e vinte e seis", "pt"), "12 de março de 2026");
         assert_eq!(walk("il primo maggio", "it"), "il 1º maggio");
-        assert_eq!(
-            walk("twaalf maart tweeduizend zesentwintig", "nl"),
-            "12 maart 2026"
-        );
+        assert_eq!(walk("twaalf maart tweeduizend zesentwintig", "nl"), "12 maart 2026");
     }
 
     #[test]
@@ -1079,11 +766,7 @@ mod tests {
             ("page 12 of the march report", "en"),
             ("douze personnes", "fr"),
         ] {
-            assert_eq!(
-                walk(text, lang),
-                crate::w2n_sentence::words2num_sentence(text, lang, "cardinal", false).unwrap(),
-                "{text}"
-            );
+            assert_eq!(walk(text, lang), crate::w2n_sentence::words2num_sentence(text, lang, "cardinal", false).unwrap(), "{text}");
         }
         // A language with no date style passes through.
         assert_eq!(fold_dates("12 marca 2026", "pl"), "12 marca 2026");
@@ -1091,9 +774,7 @@ mod tests {
 
     #[test]
     fn off_by_default() {
-        let plain =
-            crate::w2n_sentence::words2num_sentence("march twelfth", "en", "cardinal", false)
-                .unwrap();
+        let plain = crate::w2n_sentence::words2num_sentence("march twelfth", "en", "cardinal", false).unwrap();
         assert_eq!(plain, "march 12th");
     }
 }

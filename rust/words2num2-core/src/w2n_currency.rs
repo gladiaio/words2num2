@@ -147,8 +147,8 @@ const ZAR: Currency = Currency {
 /// share a word in the renderer's forms ("dollar" is USD, CAD, AUD and NZD),
 /// the first one names it.
 const ALL: [Currency; 22] = [
-    USD, EUR, GBP, JPY, CNY, CHF, CAD, AUD, NZD, MXN, BRL, INR, KRW, RUB, TRY, PLN, SEK, NOK, DKK,
-    XOF, MAD, ZAR,
+    USD, EUR, GBP, JPY, CNY, CHF, CAD, AUD, NZD, MXN, BRL, INR, KRW, RUB, TRY, PLN, SEK, NOK,
+    DKK, XOF, MAD, ZAR,
 ];
 
 /// How a language writes an amount of a currency.
@@ -282,22 +282,7 @@ fn default_currency(lang: &str) -> Currency {
 /// word or a name ("pound the table", "Penny", "Rand des Waldes", es "peso
 /// la harina"): the time is kept (#1197 audit).
 pub fn time_homograph(norm: &str) -> bool {
-    matches!(
-        norm,
-        "pound"
-            | "penny"
-            | "buck"
-            | "quid"
-            | "sterling"
-            | "peso"
-            | "rand"
-            | "franken"
-            | "krone"
-            | "franco"
-            | "fen"
-            | "franc"
-            | "libra"
-    )
+    matches!(norm, "pound" | "penny" | "buck" | "quid" | "sterling" | "peso" | "rand" | "franken" | "krone" | "franco" | "fen" | "franc" | "libra")
 }
 
 /// A currency or subunit name of the language ("pesos", "Pfund", "rupees"):
@@ -314,10 +299,7 @@ pub fn is_currency_word(lang: &str, norm: &str) -> bool {
 /// audit).
 pub fn half_renders(lang: &str, norm: &str) -> bool {
     let base = lang.split(&['_', '-'][..]).next().unwrap_or(lang);
-    !hand_lexicon(base).is_empty()
-        && lexicon(lang)
-            .iter()
-            .any(|(name, w)| name == norm && !w.sub && w.cur.decimals == 2)
+    !hand_lexicon(base).is_empty() && lexicon(lang).iter().any(|(name, w)| name == norm && !w.sub && w.cur.decimals == 2)
 }
 
 /// Is `norm` (normalized) a subunit word of `lang`: "cents", "centimes",
@@ -705,20 +687,21 @@ static LEX_CA: &[(&str, Word)] = &[
 /// too — vi "đồng", id "rupiah", ru "рублей" — though the fold, which needs a
 /// symbol, only writes the currencies in [`ALL`].
 const OTHER_CODES: &[&str] = &[
-    "EUR", "USD", "INR", "GBP", "JPY", "KWD", "CNY", "CHF", "RUB", "BHD", "CAD", "AUD", "KRW",
-    "NOK", "ISK", "RON", "MXN", "UZS", "BYN", "SAR", "HUF", "EEK", "MYR", "ZAR", "NZD", "NGN",
-    "HKD", "SGD", "NIO", "PLN", "IDR", "IQD", "SEK", "OMR", "UAH", "TND", "PKR", "NPR", "LYD",
-    "LTL", "JOD", "DKK", "BRL", "MMK", "LAK", "XOF", "PHP", "KZT", "ETB", "AED", "TRY", "CRC",
-    "RSD", "QAR", "GEL", "LKR", "ILS", "BAM", "THB", "LVL", "GTQ", "BGN", "UGX", "DZD", "CZK",
-    "RWF", "MGA", "KPW", "KHR", "KGS", "HNL", "FRF", "MOP", "KES", "HTG", "ERN", "CDF", "AFN",
-    "VND", "VES", "TMT", "MKD", "ITL", "IRR", "HRK", "BDT", "ANG", "AMD", "ALL", "TZS", "TWD",
-    "MNT", "EGP", "COP", "BND", "AWG", "ZMW", "YER", "WST", "TJS", "SOS", "SLL", "SCR", "MWK",
-    "MVR", "MUR", "MRU", "LBP", "GHS", "BWP", "AZN", "AOA", "ZWL", "XCD", "UYU", "TTD", "TOP",
-    "SZL", "SYP", "SSP", "SRD", "SHP", "SDG", "SBD", "PYG", "PGK", "PEN", "PAB", "NAD", "MZN",
-    "MDL", "MAD", "LSL", "LRD", "KYD", "KMF", "JMD", "IRT", "GYD", "GNF", "GMD", "GIP", "FKP",
-    "FJD", "DOP", "DJF", "CVE", "CUP", "CLP", "BZD", "BTN", "BSD", "BOB", "BMD", "BIF", "BBD",
-    "ARS", "XPF", "XAF", "VUV", "VEF", "SVC", "STD", "STN", "NTD", "MRO", "ESP", "ECS", "CYP",
-    "BYR", "SKK", "FIM", "DEM", "CUC",
+    "EUR", "USD", "INR", "GBP", "JPY", "KWD", "CNY", "CHF", "RUB", "BHD", "CAD", "AUD",
+    "KRW", "NOK", "ISK", "RON", "MXN", "UZS", "BYN", "SAR", "HUF", "EEK", "MYR", "ZAR",
+    "NZD", "NGN", "HKD", "SGD", "NIO", "PLN", "IDR", "IQD", "SEK", "OMR", "UAH", "TND",
+    "PKR", "NPR", "LYD", "LTL", "JOD", "DKK", "BRL", "MMK", "LAK", "XOF", "PHP", "KZT",
+    "ETB", "AED", "TRY", "CRC", "RSD", "QAR", "GEL", "LKR", "ILS", "BAM", "THB", "LVL",
+    "GTQ", "BGN", "UGX", "DZD", "CZK", "RWF", "MGA", "KPW", "KHR", "KGS", "HNL", "FRF",
+    "MOP", "KES", "HTG", "ERN", "CDF", "AFN", "VND", "VES", "TMT", "MKD", "ITL", "IRR",
+    "HRK", "BDT", "ANG", "AMD", "ALL", "TZS", "TWD", "MNT", "EGP", "COP", "BND", "AWG",
+    "ZMW", "YER", "WST", "TJS", "SOS", "SLL", "SCR", "MWK", "MVR", "MUR", "MRU", "LBP",
+    "GHS", "BWP", "AZN", "AOA", "ZWL", "XCD", "UYU", "TTD", "TOP", "SZL", "SYP", "SSP",
+    "SRD", "SHP", "SDG", "SBD", "PYG", "PGK", "PEN", "PAB", "NAD", "MZN", "MDL", "MAD",
+    "LSL", "LRD", "KYD", "KMF", "JMD", "IRT", "GYD", "GNF", "GMD", "GIP", "FKP", "FJD",
+    "DOP", "DJF", "CVE", "CUP", "CLP", "BZD", "BTN", "BSD", "BOB", "BMD", "BIF", "BBD",
+    "ARS", "XPF", "XAF", "VUV", "VEF", "SVC", "STD", "STN", "NTD", "MRO", "ESP", "ECS",
+    "CYP", "BYR", "SKK", "FIM", "DEM", "CUC",
 ];
 
 /// The hand-written names: colloquial words the renderer never writes
@@ -793,11 +776,7 @@ fn build_lexicon(lang: &str, other_codes: bool) -> Vec<(String, Word)> {
         .iter()
         .map(|(n, w)| (n.to_string(), *w))
         .collect();
-    let key = if num2words2_core::get_lang_by_key(lang).is_some() {
-        lang
-    } else {
-        base
-    };
+    let key = if num2words2_core::get_lang_by_key(lang).is_some() { lang } else { base };
     let Some(r) = num2words2_core::get_lang_by_key(key) else {
         return out;
     };
@@ -825,11 +804,7 @@ fn build_lexicon(lang: &str, other_codes: bool) -> Vec<(String, Word)> {
         let precision = 10i64.pow(u32::from(cur.decimals));
         let subunits_ok = cur.decimals > 0 && r.currency_precision(cur.code) == precision;
         let unit_names = forms.unit.iter().map(|f| (f, false));
-        let sub_names = forms
-            .subunit
-            .iter()
-            .filter(|_| subunits_ok)
-            .map(|f| (f, true));
+        let sub_names = forms.subunit.iter().filter(|_| subunits_ok).map(|f| (f, true));
         for (form, sub) in unit_names.chain(sub_names) {
             let name = crate::normalize(form);
             if name.is_empty()
@@ -923,8 +898,7 @@ fn parse_num(word: &str) -> Option<Num> {
     let word = body;
     let core = word.trim_end_matches(crate::w2n_sentence::is_format_char);
     let invisible = word[core.len()..].to_string();
-    let trimmed =
-        core.trim_end_matches(|c: char| trailing_mark(c) || crate::w2n_sentence::is_opener(c));
+    let trimmed = core.trim_end_matches(|c: char| trailing_mark(c) || crate::w2n_sentence::is_opener(c));
     let trailing = core[trimmed.len()..].to_string();
     if trimmed.is_empty() || !trimmed.chars().next().is_some_and(|c| c.is_ascii_digit()) {
         return None;
@@ -957,9 +931,7 @@ fn trailing_mark(c: char) -> bool {
     matches!(
         crate::w2n_sentence::folded_mark(c),
         Some(crate::w2n_sentence::Mark::Terminal | crate::w2n_sentence::Mark::Closing)
-    ) || LEGACY_MARKS.contains(c)
-        || "}”’“‘›」』】》）］｝〕〉｣〗〙〛＂＇，。．！？；：、…‥‼⁇⁈⁉｡､﹒﹐﹔﹖﹗․।॥،؛؟۔።፣፤፧။၊។៕։՝๚"
-            .contains(c)
+    ) || LEGACY_MARKS.contains(c) || "}”’“‘›」』】》）］｝〕〉｣〗〙〛＂＇，。．！？；：、…‥‼⁇⁈⁉｡､﹒﹐﹔﹖﹗․।॥،؛؟۔።፣፤፧။၊។៕։՝๚".contains(c)
 }
 
 /// The marks the currency pass has always split off a word; the subunit
@@ -968,22 +940,14 @@ const LEGACY_MARKS: &str = ",.;:!?)]\"'»";
 
 fn legacy_trailing(word: &str) -> bool {
     // A mark behind format characters still counts: "un.\u{200b}" (#1155).
-    word.trim_end_matches(crate::w2n_sentence::is_format_char)
-        .ends_with(|c: char| LEGACY_MARKS.contains(c))
+    word.trim_end_matches(crate::w2n_sentence::is_format_char).ends_with(|c: char| LEGACY_MARKS.contains(c))
 }
 
 fn word_key(word: &str) -> (String, String) {
     // Format characters after the mark ride with it: "dollars,\u{200e}" keeps
     // ",\u{200e}", not lost to normalize (#1083 audit).
-    let trimmed = word.trim_end_matches(|c: char| {
-        trailing_mark(c)
-            || crate::w2n_sentence::is_opener(c)
-            || crate::w2n_sentence::is_format_char(c)
-    });
-    let trimmed = &word[..trimmed.len()
-        + word[trimmed.len()..]
-            .find(|c: char| !crate::w2n_sentence::is_format_char(c))
-            .unwrap_or(word.len() - trimmed.len())];
+    let trimmed = word.trim_end_matches(|c: char| trailing_mark(c) || crate::w2n_sentence::is_opener(c) || crate::w2n_sentence::is_format_char(c));
+    let trimmed = &word[..trimmed.len() + word[trimmed.len()..].find(|c: char| !crate::w2n_sentence::is_format_char(c)).unwrap_or(word.len() - trimmed.len())];
     let trailing = word[trimmed.len()..].to_string();
     (crate::normalize(trimmed).trim().to_string(), trailing)
 }
@@ -1203,20 +1167,10 @@ pub fn fold_currency(text: &str, lang: &str) -> String {
         // punctuation of a transcript), "twelve euros, thirty-four cents" (how
         // num2words writes English amounts, #47).
         // Format characters after the comma do not end the pause (#1154).
-        let comma = matches!(
-            trailing.trim_end_matches(crate::w2n_sentence::is_format_char),
-            "," | "，" | "、" | "､" | "၊" | "՝" | "،" | "﹐" | "﹑" | "︐" | "︑"
-        );
+        let comma = matches!(trailing.trim_end_matches(crate::w2n_sentence::is_format_char), "," | "，" | "、" | "､" | "၊" | "՝" | "،" | "﹐" | "﹑" | "︐" | "︑");
         // The format characters after a pause comma ride after the amount
         // when the subunit joins it: "dollars,\u{200b} fifty cents" (#1154).
-        let pause_fmt: String = if comma {
-            trailing
-                .chars()
-                .filter(|c| crate::w2n_sentence::is_format_char(*c))
-                .collect()
-        } else {
-            String::new()
-        };
+        let pause_fmt: String = if comma { trailing.chars().filter(|c| crate::w2n_sentence::is_format_char(*c)).collect() } else { String::new() };
         if (trailing.is_empty() || comma) && frac.is_none() && cur.decimals > 0 {
             if let Some(k) = next_word(&parts, m.end) {
                 let (kkey, ktrail) = word_key(&parts[k].text);
@@ -1225,16 +1179,10 @@ pub fn fold_currency(text: &str, lang: &str) -> String {
                     had_conn = true;
                     // A connector with a mark after it ("and)", "and.") links
                     // nothing: the mark would be lost (#1195 audit).
-                    sub_at = next_word(&parts, k).filter(|_| {
-                        ktrail
-                            .trim_end_matches(crate::w2n_sentence::is_format_char)
-                            .is_empty()
-                    });
+                    sub_at = next_word(&parts, k).filter(|_| ktrail.trim_end_matches(crate::w2n_sentence::is_format_char).is_empty());
                 }
                 let sub_num = sub_at.and_then(|s| parse_num(&parts[s].text).map(|n| (s, n)));
-                if let Some((s, sub_num)) = sub_num.filter(|(_, n)| {
-                    n.frac.is_empty() && n.lead.chars().all(crate::w2n_sentence::is_format_char)
-                }) {
+                if let Some((s, sub_num)) = sub_num.filter(|(_, n)| n.frac.is_empty() && n.lead.chars().all(crate::w2n_sentence::is_format_char)) {
                     let minor = minor_digits(&sub_num.int, cur);
                     let after = next_word(&parts, s);
                     // Explicit subunit word after it?
@@ -1246,8 +1194,7 @@ pub fn fold_currency(text: &str, lang: &str) -> String {
                             frac = Some(minor);
                             consumed_end = sw.end;
                             trailing = sw.trailing;
-                            sub_invisible =
-                                format!("{}{}{}", pause_fmt, sub_num.lead, sub_num.invisible);
+                            sub_invisible = format!("{}{}{}", pause_fmt, sub_num.lead, sub_num.invisible);
                         }
                     } else if let Some(minor) = minor.filter(|_| !comma) {
                         // "two euros fifty": bare subunit, only when nothing
@@ -1266,8 +1213,7 @@ pub fn fold_currency(text: &str, lang: &str) -> String {
                             frac = Some(minor);
                             consumed_end = s;
                             trailing = sub_num.trailing.clone();
-                            sub_invisible =
-                                format!("{}{}{}", pause_fmt, sub_num.lead, sub_num.invisible);
+                            sub_invisible = format!("{}{}{}", pause_fmt, sub_num.lead, sub_num.invisible);
                         }
                     }
                 }
@@ -1329,10 +1275,7 @@ fn article_homograph(lang: &str, name: &str) -> bool {
         (lang, name),
         ("en", "real" | "won" | "rand" | "p")
             | ("fr", "livre" | "livres" | "franc" | "real" | "couronne")
-            | (
-                "es" | "gl" | "ca" | "it",
-                "corona" | "real" | "libra" | "lliura" | "franco"
-            )
+            | ("es" | "gl" | "ca" | "it", "corona" | "real" | "libra" | "lliura" | "franco")
             | ("pt", "coroa" | "real" | "libra")
             | ("de", "krone" | "pfund" | "real")
             | ("nl", "kroon" | "pond" | "real")
@@ -1343,37 +1286,20 @@ fn article_homograph(lang: &str, name: &str) -> bool {
 /// words, then a subunit name ("dollar | and twenty cents", "livre | vingt
 /// pence"). What makes "a dollar" or "une livre" an amount, not an article
 /// before a word.
-fn subunit_follows(
-    lang: &str,
-    conns: &[&str],
-    keys: &[String],
-    named: &[Option<Match>],
-    words: &[usize],
-    parts: &[Part],
-    v: usize,
-) -> bool {
+fn subunit_follows(lang: &str, conns: &[&str], keys: &[String], named: &[Option<Match>], words: &[usize], parts: &[Part], v: usize) -> bool {
     // After the whole unit name: "a US dollar and twenty cents" (#929).
-    let end = named[v]
-        .as_ref()
-        .map_or(v, |m| words.iter().position(|&j| j == m.end).unwrap_or(v));
+    let end = named[v].as_ref().map_or(v, |m| words.iter().position(|&j| j == m.end).unwrap_or(v));
     // Not across a sentence mark after the unit: the fold never joins there
     // ("a pound sterling. And twenty pence", #1170); a pause comma does.
     let unit_mark = word_key(&parts[words[end]].text).1;
     let unit_mark = unit_mark.trim_end_matches(crate::w2n_sentence::is_format_char);
-    if !matches!(
-        unit_mark,
-        "" | "," | "，" | "、" | "､" | "﹐" | "﹑" | "︐" | "︑" | "،" | "၊" | "՝"
-    ) {
+    if !matches!(unit_mark, "" | "," | "，" | "、" | "､" | "﹐" | "﹑" | "︐" | "︑" | "،" | "၊" | "՝") {
         return false;
     }
     let mut x = end + 1;
     if keys.get(x).is_some_and(|k| conns.contains(&k.as_str())) {
         // Not past a connector with a mark after it ("and)") (#1195 audit).
-        if !word_key(&parts[words[x]].text)
-            .1
-            .trim_end_matches(crate::w2n_sentence::is_format_char)
-            .is_empty()
-        {
+        if !word_key(&parts[words[x]].text).1.trim_end_matches(crate::w2n_sentence::is_format_char).is_empty() {
             return false;
         }
         x += 1;
@@ -1389,12 +1315,7 @@ fn subunit_follows(
     // A currency with no minor unit has no subunit to fold: "a yen and
     // twenty cents" keeps its article (#1165 audit).
     let minor = named[v].as_ref().is_some_and(|m| m.word.cur.decimals > 0);
-    x > first
-        && amount
-        && minor
-        && named
-            .get(x)
-            .is_some_and(|m| m.as_ref().is_some_and(|m| m.word.sub))
+    x > first && amount && minor && named.get(x).is_some_and(|m| m.as_ref().is_some_and(|m| m.word.sub))
 }
 
 /// The article-one of a language, which counts 1 in front of a currency name.
@@ -1443,11 +1364,7 @@ pub fn subunit_pieces(sentence: &str, lang: &str, counts: bool) -> Vec<(String, 
     // skipped (#1001).
     let base = lang.split(&['_', '-'][..]).next().unwrap_or(lang);
     let mults = multiplier_subunits(base);
-    if mults.is_empty()
-        || !crate::normalize(sentence)
-            .split_whitespace()
-            .any(|w| mults.iter().any(|m| m == w))
-    {
+    if mults.is_empty() || !crate::normalize(sentence).split_whitespace().any(|w| mults.iter().any(|m| m == w)) {
         return vec![(sentence.to_string(), true)];
     }
     pieces_for_walk_with(sentence, lang, true, counts)
@@ -1456,9 +1373,8 @@ pub fn subunit_pieces(sentence: &str, lang: &str, counts: bool) -> Vec<(String, 
 /// The subunit names of `base` that are also a multiplier word (>= 100),
 /// built once per language.
 fn multiplier_subunits(base: &str) -> std::sync::Arc<Vec<String>> {
-    static CACHE: std::sync::OnceLock<
-        std::sync::RwLock<std::collections::HashMap<String, std::sync::Arc<Vec<String>>>>,
-    > = std::sync::OnceLock::new();
+    static CACHE: std::sync::OnceLock<std::sync::RwLock<std::collections::HashMap<String, std::sync::Arc<Vec<String>>>>> =
+        std::sync::OnceLock::new();
     let cache = CACHE.get_or_init(Default::default);
     if let Some(v) = cache.read().ok().and_then(|m| m.get(base).cloned()) {
         return v;
@@ -1477,12 +1393,7 @@ fn multiplier_subunits(base: &str) -> std::sync::Arc<Vec<String>> {
     v
 }
 
-fn pieces_for_walk_with(
-    sentence: &str,
-    lang: &str,
-    subunits_only: bool,
-    counts: bool,
-) -> Vec<(String, bool)> {
+fn pieces_for_walk_with(sentence: &str, lang: &str, subunits_only: bool, counts: bool) -> Vec<(String, bool)> {
     let base = lang.split(&['_', '-'][..]).next().unwrap_or(lang);
     if hand_lexicon(base).is_empty() {
         return vec![(sentence.to_string(), true)];
@@ -1491,10 +1402,7 @@ fn pieces_for_walk_with(
     let conns = connectors(base);
     let words: Vec<usize> = (0..parts.len()).filter(|&j| !parts[j].blank).collect();
     let keys: Vec<String> = words.iter().map(|&j| word_key(&parts[j].text).0).collect();
-    let named: Vec<Option<Match>> = words
-        .iter()
-        .map(|&j| match_currency(base, &parts, j))
-        .collect();
+    let named: Vec<Option<Match>> = words.iter().map(|&j| match_currency(base, &parts, j)).collect();
     let is_unit = |w: usize| named[w].as_ref().is_some_and(|m| !m.word.sub);
     // Does a unit name end exactly on word `w`?
     let unit_ends_at = |w: usize| {
@@ -1514,9 +1422,7 @@ fn pieces_for_walk_with(
             // count: fr_BE "dollars et vingt et un cents" (#1010).
             let conn = (1..=4usize)
                 .take_while(|&back| back + 2 <= w)
-                .find(|&back| {
-                    conns.contains(&keys[w - back - 1].as_str()) && unit_ends_at(w - back - 2)
-                });
+                .find(|&back| conns.contains(&keys[w - back - 1].as_str()) && unit_ends_at(w - back - 2));
             // Only a subunit name the walker would read as a number (fr
             // "cents") needs this. "<2-9> cents" is also a real hundreds
             // multiple ("mille euros et deux cents personnes" is 200 people),
@@ -1529,10 +1435,7 @@ fn pieces_for_walk_with(
                 crate::token_may_be_number(base, &keys[w])
             };
             let ends_clause = w + 1 == words.len()
-                || matches!(
-                    word_key(&parts[words[w]].text).1.as_str(),
-                    "." | "!" | "?" | ","
-                );
+                || matches!(word_key(&parts[words[w]].text).1.as_str(), "." | "!" | "?" | ",");
             // The words between the connector and the subunit are a plain
             // number, unpunctuated, naming no currency, an amount of 1-99
             // cents (#1002, #1003): not "vingt et un. trois cents", "cinq et
@@ -1544,35 +1447,24 @@ fn pieces_for_walk_with(
                 let unnamed = (w - back..w).all(|v| named[v].is_none());
                 // A count in figures: "12 dollars et 50 cents". A figure is
                 // never multiplied by "cents", so it needs no clause end.
-                let figure = (back == 1
-                    && !keys[w - 1].is_empty()
-                    && keys[w - 1].bytes().all(|b| b.is_ascii_digit()))
-                .then(|| keys[w - 1].parse::<i64>().ok())
-                .flatten();
+                let figure = (back == 1 && !keys[w - 1].is_empty() && keys[w - 1].bytes().all(|b| b.is_ascii_digit()))
+                    .then(|| keys[w - 1].parse::<i64>().ok())
+                    .flatten();
                 // The regional table: fr_CH "nonante-neuf", fr_BE "septante".
                 let all_numbers = figure.is_some()
-                    || keys[w - back..w].iter().all(|k| {
-                        crate::token_may_be_number(lang, k) || conns.contains(&k.as_str())
-                    });
+                    || keys[w - back..w].iter().all(|k| crate::token_may_be_number(lang, k) || conns.contains(&k.as_str()));
                 // Zero too: "douze dollars et zéro cent" is the renderer's
                 // spelling of 12.00 (#1019).
-                let v = figure.unwrap_or_else(|| {
-                    match crate::lookup_norm(lang, &keys[w - back..w].join(" "), false, &[]) {
-                        Ok(Some(v)) => v,
-                        _ => -1,
-                    }
+                let v = figure.unwrap_or_else(|| match crate::lookup_norm(lang, &keys[w - back..w].join(" "), false, &[]) {
+                    Ok(Some(v)) => v,
+                    _ => -1,
                 });
                 // "<2-9> cents" is also a hundreds multiple ("un cent" is no
                 // 100: French says "cent", #1063); the plain walk
                 // also takes 11-19 for one ("douze cents personnes" is 1200
                 // people), so there it must end the clause. "dix cents" is no
                 // 1000 ("mille"), so 10 is no hundreds multiple.
-                let hundreds = figure.is_none()
-                    && if subunits_only {
-                        (2..=19).contains(&v) && v != 10
-                    } else {
-                        (2..10).contains(&v)
-                    };
+                let hundreds = figure.is_none() && if subunits_only { (2..=19).contains(&v) && v != 10 } else { (2..10).contains(&v) };
                 // currency=True keeps, as written, a count it cannot read as
                 // one integer but that is one amount: a decimal ("deux virgule
                 // cinq cents", "2,5 cents"), native digits, a long figure.
@@ -1590,43 +1482,26 @@ fn pieces_for_walk_with(
                 // cents"), unless its last word is the 2-9 that multiplies
                 // "cents" ("mille deux cents personnes" is 1200), and a symbol
                 // the table does not read ("Ⅻ cents") (#1025).
-                let last_multiplies = matches!(
-                    crate::lookup_norm(lang, &keys[w - 1], false, &[]),
-                    Ok(Some(2..=9))
-                );
+                let last_multiplies = matches!(crate::lookup_norm(lang, &keys[w - 1], false, &[]), Ok(Some(2..=9)));
                 // Never when the subunit word extends the count into one
                 // number: "deux mille cent personnes" is 2100 (#1029).
                 // Only the singular: "mille cents" is no 1100.
                 // A decimal ("deux virgule cinq cent") is no integer to extend.
                 let extends = keys[w] == "cent"
                     && all_numbers
-                    && !keys[w - back..w]
-                        .iter()
-                        .any(|k| matches!(k.as_str(), "virgule" | "point"))
-                    && crate::words2num(
-                        &format!("{} {}", keys[w - back..w].join(" "), keys[w]),
-                        lang,
-                        "cardinal",
-                    )
-                    .is_ok();
-                let unread = !extends
-                    && (v == -1 || (!all_numbers && back == 1) || (v >= 100 && !last_multiplies));
+                    && !keys[w - back..w].iter().any(|k| matches!(k.as_str(), "virgule" | "point"))
+                    && crate::words2num(&format!("{} {}", keys[w - back..w].join(" "), keys[w]), lang, "cardinal").is_ok();
+                let unread = !extends && (v == -1 || (!all_numbers && back == 1) || (v >= 100 && !last_multiplies));
                 let opaque = !subunits_only
                     && unread
                     && (w - back..w).all(numberish)
-                    && !keys[w - back..w]
-                        .iter()
-                        .any(|k| conns.contains(&k.as_str()));
+                    && !keys[w - back..w].iter().any(|k| conns.contains(&k.as_str()));
                 // "cent" in the count is the number, not the subunit name.
-                let unnamed_count = (w - back..w)
-                    .all(|v| named[v].is_none() || crate::token_may_be_number(lang, &keys[v]));
+                let unnamed_count = (w - back..w).all(|v| named[v].is_none() || crate::token_may_be_number(lang, &keys[v]));
                 unit_ends_at(w - back - 2)
                     && unpunct
                     && ((opaque && unnamed_count)
-                        || (unnamed
-                            && all_numbers
-                            && (figure.is_some() || (0..=99).contains(&v))
-                            && (!hundreds || ends_clause)))
+                        || (unnamed && all_numbers && (figure.is_some() || (0..=99).contains(&v)) && (!hundreds || ends_clause)))
             });
             if numeric_sub && ok {
                 kept.push(words[w]);
@@ -1637,8 +1512,7 @@ fn pieces_for_walk_with(
                 let core = &text[..text.len() - word_key(text).1.len()];
                 // Only a bare word: a mark or format character before or in
                 // it ("(vingt", "«un", "neuf…", "vingt(") would be lost (#1075).
-                let bare =
-                    !core.is_empty() && core.chars().all(|c| c.is_alphanumeric() || c == '-');
+                let bare = !core.is_empty() && core.chars().all(|c| c.is_alphanumeric() || c == '-');
                 if counts && conn == Some(1) && bare {
                     if let Ok(Some(v)) = crate::lookup_norm(lang, &keys[w - 1], false, &[]) {
                         count_renames.push((words[w - 1], v.to_string()));
@@ -1653,14 +1527,11 @@ fn pieces_for_walk_with(
         };
         let in_compound = w > 0 && {
             let p = keys[w - 1].as_str();
-            conns.contains(&p)
-                || crate::token_may_be_number(base, p)
-                || masculine_numeral(base, p).is_some()
+            conns.contains(&p) || crate::token_may_be_number(base, p) || masculine_numeral(base, p).is_some()
         };
         // "a dollar and twenty cents", "une livre et vingt pence": the subunit
         // makes it money, whatever the article or the unit's other reading.
-        let confirmed =
-            |v: usize| is_unit(v) && subunit_follows(lang, conns, &keys, &named, &words, &parts, v);
+        let confirmed = |v: usize| is_unit(v) && subunit_follows(lang, conns, &keys, &named, &words, &parts, v);
         // "half a dollar", "twice a dollar", "a quarter of a dollar": a
         // share of one unit, not the amount 1 (#906).
         // Only right before it, no mark between ("half, a dollar …", #1167);
@@ -1668,32 +1539,14 @@ fn pieces_for_walk_with(
         // "double", #1168).
         let bare = |v: usize| word_key(&parts[words[v]].text).1.is_empty();
         let fraction = |k: &str| {
-            matches!(
-                k,
-                "quarter"
-                    | "quarters"
-                    | "third"
-                    | "thirds"
-                    | "half"
-                    | "halves"
-                    | "fraction"
-                    | "fractions"
-                    | "part"
-                    | "parts"
-                    | "percent"
-            ) || ((k.ends_with("th") || k.ends_with("ths"))
-                && matches!(
-                    crate::lookup_norm(base, k.trim_end_matches('s'), true, &[]),
-                    Ok(Some(_))
-                ))
+            matches!(k, "quarter" | "quarters" | "third" | "thirds" | "half" | "halves" | "fraction" | "fractions" | "part" | "parts" | "percent")
+                || ((k.ends_with("th") || k.ends_with("ths")) && matches!(crate::lookup_norm(base, k.trim_end_matches('s'), true, &[]), Ok(Some(_))))
         };
         let share = w > 0
             && bare(w - 1)
             && parts[words[w]].text.starts_with(char::is_alphanumeric)
-            && (matches!(
-                keys[w - 1].as_str(),
-                "half" | "twice" | "thrice" | "double" | "triple"
-            ) || (keys[w - 1] == "of" && w > 1 && bare(w - 2) && fraction(&keys[w - 2])));
+            && (matches!(keys[w - 1].as_str(), "half" | "twice" | "thrice" | "double" | "triple")
+                || (keys[w - 1] == "of" && w > 1 && bare(w - 2) && fraction(&keys[w - 2])));
         let article_unit = w + 1 < words.len()
             && ((walker_article(base, &keys[w]) && starts_unit(w + 1))
                 || (article_one(base, &keys[w]) && !share && confirmed(w + 1)));
@@ -1734,15 +1587,11 @@ fn pieces_for_walk_with(
         clause.then_some(lead)
     };
     for (j, text) in renames.into_iter().filter(|_| !subunits_only) {
-        let Some(lead) = lead_of(&parts[j].text) else {
-            continue;
-        };
+        let Some(lead) = lead_of(&parts[j].text) else { continue };
         parts[j].text = format!("{lead}{text}");
     }
     for (j, text) in count_renames {
-        let Some(lead) = lead_of(&parts[j].text) else {
-            continue;
-        };
+        let Some(lead) = lead_of(&parts[j].text) else { continue };
         let trailing = word_key(&parts[j].text).1;
         parts[j].text = format!("{lead}{text}{trailing}");
     }
@@ -1773,9 +1622,7 @@ fn pieces_for_walk_with(
 fn match_tokens(lex: &[(String, Word)], toks: &[&str], i: usize) -> Option<(Word, usize)> {
     (1..=3.min(toks.len() - i)).rev().find_map(|take| {
         let phrase = toks[i..i + take].join(" ");
-        lex.iter()
-            .find(|(n, _)| *n == phrase)
-            .map(|(_, w)| (*w, take))
+        lex.iter().find(|(n, _)| *n == phrase).map(|(_, w)| (*w, take))
     })
 }
 
@@ -1823,10 +1670,7 @@ pub fn parse_amount(
             continue;
         }
         let named = |w: &str| lex.iter().any(|(n, x)| n == w && !x.sub);
-        if let Some(stem) = t
-            .strip_suffix(sep.as_str())
-            .filter(|s| glued && !s.is_empty() && named(s))
-        {
+        if let Some(stem) = t.strip_suffix(sep.as_str()).filter(|s| glued && !s.is_empty() && named(s)) {
             owned.push(stem.to_string());
             owned.push(sep.clone());
             after_unit = false;
@@ -1843,12 +1687,7 @@ pub fn parse_amount(
             .filter(|_| cardinal(toks[i]).is_none())
             .map(|m| (i, m))
     })?;
-    let fail = || {
-        Some(Err(format!(
-            "cannot parse {} as an amount",
-            crate::w2n_sentence::py_repr_str(text)
-        )))
-    };
+    let fail = || Some(Err(format!("cannot parse {} as an amount", crate::w2n_sentence::py_repr_str(text))));
     let (i, (word, len)) = first;
     let number = |ts: &[&str]| -> Option<BigDecimal> {
         if ts.is_empty() {
@@ -1875,8 +1714,7 @@ pub fn parse_amount(
     let rest = &toks[i + len..];
     let minor = |cur: Currency, n: &BigDecimal| -> Option<BigDecimal> {
         let scale = BigDecimal::from(10u64.pow(u32::from(cur.decimals)));
-        (cur.decimals > 0 && whole(n) && *n < scale)
-            .then(|| (n / scale).with_scale(i64::from(cur.decimals)))
+        (cur.decimals > 0 && whole(n) && *n < scale).then(|| (n / scale).with_scale(i64::from(cur.decimals)))
     };
     if word.sub {
         // "ninety nine cents", "one hundred fifty cents" (1.50).
@@ -1899,9 +1737,7 @@ pub fn parse_amount(
     }
     // "<number> <subunit>" to the end, or a bare "<number>" ("two euros fifty").
     let sub_at = (1..rest.len()).find_map(|j| {
-        match_tokens(lex, rest, j)
-            .filter(|(w, l)| w.sub && j + l == rest.len())
-            .map(|_| j)
+        match_tokens(lex, rest, j).filter(|(w, l)| w.sub && j + l == rest.len()).map(|_| j)
     });
     let n = match sub_at {
         Some(j) => number(&rest[..j]),
@@ -1938,20 +1774,14 @@ mod tests {
         assert_eq!(fold("ciento cincuenta centavos", "es"), "$1.50");
         assert_eq!(fold("hundertfünfzig Cent", "de"), "1,50 €");
         // Not a subunit of the unit before it: left as said.
-        assert_eq!(
-            fold("twelve dollars and 100 cents", "en"),
-            "$12 and 100 cents"
-        );
+        assert_eq!(fold("twelve dollars and 100 cents", "en"), "$12 and 100 cents");
     }
 
     /// #46: a spoken fraction longer than the minor unit is never truncated.
     #[test]
     fn long_fraction_stays_unfolded() {
         assert_eq!(fold("three point five yen", "en"), "3.5 yen");
-        assert_eq!(
-            fold("twelve point three four five euros", "en"),
-            "12.345 euros"
-        );
+        assert_eq!(fold("twelve point three four five euros", "en"), "12.345 euros");
         assert_eq!(fold("deux virgule cinq euros", "fr"), "2,50 €");
     }
 
@@ -1960,10 +1790,7 @@ mod tests {
     fn comma_before_subunit() {
         assert_eq!(fold("twelve euros, thirty-four cents", "en"), "€12.34");
         assert_eq!(fold("twelve pounds, thirty-four pence", "en"), "£12.34");
-        assert_eq!(
-            fold("I paid twenty dollars, fifty cents", "en"),
-            "I paid $20.50"
-        );
+        assert_eq!(fold("I paid twenty dollars, fifty cents", "en"), "I paid $20.50");
         assert_eq!(fold("five dollars, please", "en"), "$5, please");
     }
 
@@ -1971,50 +1798,29 @@ mod tests {
     /// given a currency nobody said.
     #[test]
     fn subunit_after_connector_is_not_guessed() {
-        assert_eq!(
-            fold("five apples and fifty cents", "en"),
-            "5 apples and 50 cents"
-        );
-        assert_eq!(
-            fold("doce francos con treinta y cuatro céntimos", "es"),
-            "CHF 12.34"
-        );
-        assert_eq!(
-            fold("dotze reals amb trenta-quatre centaus", "ca"),
-            "12,34 R$"
-        );
-        assert_eq!(
-            fold("dotze francs amb trenta-quatre cèntims", "ca"),
-            "CHF 12.34"
-        );
+        assert_eq!(fold("five apples and fifty cents", "en"), "5 apples and 50 cents");
+        assert_eq!(fold("doce francos con treinta y cuatro céntimos", "es"), "CHF 12.34");
+        assert_eq!(fold("dotze reals amb trenta-quatre centaus", "ca"), "12,34 R$");
+        assert_eq!(fold("dotze francs amb trenta-quatre cèntims", "ca"), "CHF 12.34");
         assert_eq!(fold("duas libras e cinquenta pence", "pt"), "2,50 £");
     }
 
     /// #49: fr "cents" after "<unit> et <number>" is the US cent.
     #[test]
     fn fr_cents_subunit() {
-        assert_eq!(
-            fold("douze dollars et trente-quatre cents", "fr"),
-            "12,34 $"
-        );
+        assert_eq!(fold("douze dollars et trente-quatre cents", "fr"), "12,34 $");
         assert_eq!(fold("deux euros et cinq cents", "fr"), "2,05 €");
         assert_eq!(fold("mille dollars et cinquante cents", "fr"), "1 000,50 $");
         // Still the hundreds where they are hundreds.
         assert_eq!(fold("deux cents euros", "fr"), "200 €");
-        assert_eq!(
-            fold("mille euros et deux cents personnes", "fr"),
-            "1 000 € et 200 personnes"
-        );
+        assert_eq!(fold("mille euros et deux cents personnes", "fr"), "1 000 € et 200 personnes");
     }
 
     /// #81: "pounds of" is a weight.
     #[test]
     fn pounds_of_is_weight() {
         assert_eq!(fold("twenty pounds of flour", "en"), "20 pounds of flour");
-        assert_eq!(
-            fold("I lost five pounds of weight", "en"),
-            "I lost 5 pounds of weight"
-        );
+        assert_eq!(fold("I lost five pounds of weight", "en"), "I lost 5 pounds of weight");
         assert_eq!(fold("twenty pounds", "en"), "£20");
         assert_eq!(fold("twenty quid of change", "en"), "£20 of change");
     }
@@ -2038,31 +1844,17 @@ mod tests {
         assert_eq!(fold("vinte e uma libras", "pt"), "21 £");
         // An article and a homograph count when a subunit makes it money.
         assert_eq!(fold("a dollar and twenty cents", "en"), "$1.20");
-        assert_eq!(
-            fold("it costs an euro and fifty cents", "en"),
-            "it costs €1.50"
-        );
+        assert_eq!(fold("it costs an euro and fifty cents", "en"), "it costs €1.50");
         assert_eq!(fold("a pound and fifty pence", "en"), "£1.50");
         assert_eq!(fold("une livre et vingt pence", "fr"), "1,20 £");
         assert_eq!(fold("une livre vingt pence", "fr"), "1,20 £");
         // Without one, they stay words.
         assert_eq!(fold("a dollar", "en"), "a dollar");
-        assert_eq!(
-            fold("a dollar and two friends", "en"),
-            "a dollar and 2 friends"
-        );
-        assert_eq!(
-            fold("une livre et deux kilos", "fr"),
-            "une livre et 2 kilos"
-        );
-        assert_eq!(
-            fold("une livre de beurre et vingt centimes", "fr"),
-            "une livre de beurre et 20 centimes"
-        );
+        assert_eq!(fold("a dollar and two friends", "en"), "a dollar and 2 friends");
+        assert_eq!(fold("une livre et deux kilos", "fr"), "une livre et 2 kilos");
+        assert_eq!(fold("une livre de beurre et vingt centimes", "fr"), "une livre de beurre et 20 centimes");
         // Plain sentence mode is not touched.
-        let plain = |t: &str, l: &str| {
-            crate::w2n_sentence::words2num_sentence(t, l, "cardinal", false).unwrap()
-        };
+        let plain = |t: &str, l: &str| crate::w2n_sentence::words2num_sentence(t, l, "cardinal", false).unwrap();
         assert_eq!(plain("un livre de poche", "fr"), "un livre de poche");
         assert_eq!(plain("one real problem", "en"), "one real problem");
         assert_eq!(plain("one yen", "en"), "one yen");
@@ -2071,26 +1863,14 @@ mod tests {
     /// #104: every unit and subunit name num2words writes is read.
     #[test]
     fn renderer_currency_names() {
-        assert_eq!(
-            fold("doce rublos con treinta y cuatro kopeykas", "es"),
-            "12,34 ₽"
-        );
-        assert_eq!(
-            fold("dodici rubli e trentaquattro copechi", "it"),
-            "12,34 ₽"
-        );
-        assert_eq!(
-            fold("doze rublos e trinta e quatro copeques", "pt"),
-            "12,34 ₽"
-        );
+        assert_eq!(fold("doce rublos con treinta y cuatro kopeykas", "es"), "12,34 ₽");
+        assert_eq!(fold("dodici rubli e trentaquattro copechi", "it"), "12,34 ₽");
+        assert_eq!(fold("doze rublos e trinta e quatro copeques", "pt"), "12,34 ₽");
         assert_eq!(fold("twelve rupees, thirty-four paise", "en"), "₹12.34");
         assert_eq!(fold("zwölf Yuan und vierunddreißig Fen", "de"), "12,34 CN¥");
         assert_eq!(fold("twelve francs, thirty-four rappen", "en"), "CHF 12.34");
         assert_eq!(fold("dos francos", "es"), "CHF 2");
-        assert_eq!(
-            fold("dos iens / dos rupies / dos rubles", "ca"),
-            "2 ¥ / 2 ₹ / 2 ₽"
-        );
+        assert_eq!(fold("dos iens / dos rupies / dos rubles", "ca"), "2 ¥ / 2 ₹ / 2 ₽");
     }
 
     /// #181: "<unit> <connector> <n>" at the end of the amount.
@@ -2099,10 +1879,7 @@ mod tests {
         assert_eq!(fold("two dollars and fifty", "en"), "$2.50");
         assert_eq!(fold("cinco euros con cincuenta", "es"), "5,50 €");
         assert_eq!(fold("cinco euros con cinco", "es"), "5,05 €");
-        assert_eq!(
-            fold("two dollars and fifty people", "en"),
-            "$2 and 50 people"
-        );
+        assert_eq!(fold("two dollars and fifty people", "en"), "$2 and 50 people");
     }
 
     /// #182: a symbol written after the number is spaced in English.
@@ -2118,31 +1895,19 @@ mod tests {
         assert_eq!(amount("twelve euros, thirty-four cents", "en"), "12.34");
         assert_eq!(amount("twelve euros, fifty cents", "en"), "12.50");
         assert_eq!(amount("twelve dollars and fifty cents", "en"), "12.50");
-        assert_eq!(
-            amount("douze euros et trente-quatre centimes", "fr"),
-            "12.34"
-        );
+        assert_eq!(amount("douze euros et trente-quatre centimes", "fr"), "12.34");
         assert_eq!(amount("cent euros", "fr"), "100");
         assert_eq!(amount("zwei Euro", "de"), "2");
         assert_eq!(amount("zwölf Euro", "de"), "12");
         assert_eq!(amount("un dólar", "es"), "1");
         assert_eq!(amount("ninety nine cents", "en"), "0.99");
         assert_eq!(amount("two euros fifty", "en"), "2.50");
-        assert_eq!(
-            amount("двенадцать рублей тридцать четыре копейки", "ru"),
-            "12.34"
-        );
+        assert_eq!(amount("двенадцать рублей тридцать четыре копейки", "ru"), "12.34");
         // pt feminine numerals (#266).
         assert_eq!(amount("duas libras", "pt"), "2");
         // he: num2words glues "and" to the unit (#264); speech to the amount.
-        assert_eq!(
-            amount("שתים עשרה דולריםו שלושים וארבע סנטים", "he"),
-            "12.34"
-        );
-        assert_eq!(
-            amount("שתים עשרה דולרים ושלושים וארבע סנטים", "he"),
-            "12.34"
-        );
+        assert_eq!(amount("שתים עשרה דולריםו שלושים וארבע סנטים", "he"), "12.34");
+        assert_eq!(amount("שתים עשרה דולרים ושלושים וארבע סנטים", "he"), "12.34");
         // No currency word: the plain cardinal.
         assert_eq!(amount("forty two", "en"), "int 42");
         // A currency word that is not an amount raises.

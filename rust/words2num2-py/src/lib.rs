@@ -239,9 +239,7 @@ fn words2num(
     let (text, lang, to) = (text.to_owned(), lang.to_owned(), to.to_owned());
     // Pure Rust from here: other Python threads run meanwhile (#186).
     match py.detach(move || {
-        words2num2_core::with_numerical_symbols(convert_numerical_symbols, || {
-            words2num2_core::words2num(&text, &lang, &to)
-        })
+        words2num2_core::with_numerical_symbols(convert_numerical_symbols, || words2num2_core::words2num(&text, &lang, &to))
     }) {
         Ok(v) => en_value_to_py(py, v),
         Err(e) => Err(w2n_error_to_pyerr(py, e)),
@@ -286,7 +284,7 @@ fn words2num_sentence(
             )
         })
     })
-    .map_err(|e| w2n_error_to_pyerr(py, e))
+        .map_err(|e| w2n_error_to_pyerr(py, e))
 }
 
 /// `_rust.pluralize(long_form, value)`.
@@ -311,10 +309,7 @@ fn auto_parse(
 ) -> PyResult<Py<PyAny>> {
     let prefer = prefer.unwrap_or_default();
     let (text, lang) = (text.to_owned(), lang.to_owned());
-    let (ts, ds) = (
-        thousands_sep.map(str::to_owned),
-        decimal_sep.map(str::to_owned),
-    );
+    let (ts, ds) = (thousands_sep.map(str::to_owned), decimal_sep.map(str::to_owned));
     let parsed = py.detach(move || {
         words2num2_core::with_numerical_symbols(convert_numerical_symbols, || {
             w2n_sentence::auto_parse(&text, &lang, &prefer, ts.as_deref(), ds.as_deref())
@@ -343,20 +338,10 @@ fn auto_parse_sentence(
 ) -> PyResult<String> {
     let prefer = prefer.unwrap_or_default();
     let (text, lang) = (text.to_owned(), lang.to_owned());
-    let (ts, ds) = (
-        thousands_sep.map(str::to_owned),
-        decimal_sep.map(str::to_owned),
-    );
+    let (ts, ds) = (thousands_sep.map(str::to_owned), decimal_sep.map(str::to_owned));
     py.detach(move || {
         words2num2_core::with_numerical_symbols(convert_numerical_symbols, || {
-            w2n_sentence::auto_parse_sentence(
-                &text,
-                &lang,
-                &prefer,
-                ts.as_deref(),
-                ds.as_deref(),
-                expand,
-            )
+            w2n_sentence::auto_parse_sentence(&text, &lang, &prefer, ts.as_deref(), ds.as_deref(), expand)
         })
     })
     .map_err(|e| w2n_error_to_pyerr(py, e))

@@ -269,11 +269,7 @@ impl PyDec {
     fn from_bigint(v: &BigInt) -> PyDec {
         PyDec {
             neg: v.sign() == Sign::Minus,
-            coeff: if v.sign() == Sign::Minus {
-                -v
-            } else {
-                v.clone()
-            },
+            coeff: if v.sign() == Sign::Minus { -v } else { v.clone() },
             exp: 0,
         }
     }
@@ -459,11 +455,7 @@ impl PyDec {
     /// `Decimal('-0.0')` arrives as `0.0`. Use `to_string()` when that
     /// distinction matters.
     pub fn to_bigdecimal(&self) -> BigDecimal {
-        let signed = if self.neg {
-            -&self.coeff
-        } else {
-            self.coeff.clone()
-        };
+        let signed = if self.neg { -&self.coeff } else { self.coeff.clone() };
         // BigDecimal's scale is the negated exponent.
         BigDecimal::new(signed, -self.exp)
     }
@@ -673,10 +665,7 @@ pub(crate) fn ordinal_cardinal(word: &str) -> Option<&'static str> {
         return Some(c);
     }
     let stem = word.strip_suffix("th")?;
-    scale_table()
-        .iter()
-        .find(|(w, _)| *w == stem)
-        .map(|&(w, _)| w)
+    scale_table().iter().find(|(w, _)| *w == stem).map(|&(w, _)| w)
 }
 
 /// `_SCALES` as Python lists it, as (word, power-of-ten). "hundred" is 100 =
@@ -724,13 +713,9 @@ fn scale_table() -> &'static [(&'static str, u32)] {
         let mut out: Vec<(&'static str, u32)> = SCALES.to_vec();
         if let Some(r) = num2words2_core::get_lang_by_key("en") {
             for p in (6u32..=303).step_by(3) {
-                let Ok(words) = r.to_cardinal(&BigInt::from(10).pow(p)) else {
-                    continue;
-                };
+                let Ok(words) = r.to_cardinal(&BigInt::from(10).pow(p)) else { continue };
                 // "one unvigintillion": the scale is the last word.
-                let Some(w) = words.split_whitespace().last() else {
-                    continue;
-                };
+                let Some(w) = words.split_whitespace().last() else { continue };
                 if w.ends_with("illion") && !out.iter().any(|(o, _)| *o == w) {
                     // Built once per process; the leak is bounded (~90 short words).
                     out.push((Box::leak(w.to_string().into_boxed_str()), p));
@@ -895,10 +880,7 @@ impl W2nLangEn {
         if year_mode {
             if let Some((s, rest)) = split_era(&toks) {
                 if self.negative_words.contains(rest[0]) {
-                    return Err(W2nError::new(format!(
-                        "conflicting signs in {}",
-                        py_repr(&norm)
-                    )));
+                    return Err(W2nError::new(format!("conflicting signs in {}", py_repr(&norm))));
                 }
                 // "1776 AD", "44 BC": a figure with an era word.
                 if rest.len() == 1 && is_digits(rest[0]) {
@@ -1087,8 +1069,7 @@ impl W2nLangEn {
                     // a larger one ("million thousand"), and the product must
                     // stay below the group before it.
                     Some(prev) if current.sign() == Sign::NoSign => {
-                        let effective =
-                            last_scale.clone().unwrap_or_else(|| BigInt::from(1)) * scale;
+                        let effective = last_scale.clone().unwrap_or_else(|| BigInt::from(1)) * scale;
                         if *scale < prev || outer_scale.as_ref().is_some_and(|o| effective >= *o) {
                             return Err(cannot_follow(tok));
                         }
@@ -1189,7 +1170,9 @@ impl W2nLangEn {
     /// but the code only bounds the token count and rejects the two scale
     /// words. Ported as written.
     fn looks_like_year(&self, toks: &[&str]) -> bool {
-        (2..=5).contains(&toks.len()) && !toks.contains(&"hundred") && !toks.contains(&"thousand")
+        (2..=5).contains(&toks.len())
+            && !toks.contains(&"hundred")
+            && !toks.contains(&"thousand")
     }
 
     /// Port of `Words2Num_EN._year_value` — "nineteen ninety nine" is
@@ -1292,18 +1275,10 @@ mod tests {
     fn year_tens_plus_unit_is_not_a_pair() {
         // #56: "twenty-two" is the year 22, not 2002.
         let g = W2nLangEn::new();
-        for (text, y) in [
-            ("twenty-two", 22),
-            ("forty-two", 42),
-            ("ninety-nine", 99),
-            ("twenty first", 21),
-        ] {
+        for (text, y) in [("twenty-two", 22), ("forty-two", 42), ("ninety-nine", 99), ("twenty first", 21)] {
             assert_eq!(int(g.to_year(text)), Some(BigInt::from(y)), "{text}");
         }
-        assert_eq!(
-            int(g.to_year("nineteen ninety nine")),
-            Some(BigInt::from(1999))
-        );
+        assert_eq!(int(g.to_year("nineteen ninety nine")), Some(BigInt::from(1999)));
         assert_eq!(int(g.to_year("twenty twenty")), Some(BigInt::from(2020)));
     }
 
@@ -1326,10 +1301,7 @@ mod tests {
         }
         assert!(g.to_year("nineteen five").is_err());
         // "o" is a zero in a fraction too.
-        assert_eq!(
-            g.to_cardinal("three point o five").unwrap(),
-            g.to_cardinal("three point oh five").unwrap()
-        );
+        assert_eq!(g.to_cardinal("three point o five").unwrap(), g.to_cardinal("three point oh five").unwrap());
     }
 
     #[test]
@@ -1357,14 +1329,8 @@ mod tests {
         assert_eq!(int(g.to_cardinal("one million million")), Some(pow10(12)));
         assert_eq!(int(g.to_cardinal("one thousand billion")), Some(pow10(12)));
         assert_eq!(int(g.to_cardinal("thousand thousand")), Some(pow10(6)));
-        assert_eq!(
-            int(g.to_cardinal("two hundred thousand million")),
-            Some(BigInt::from(200_000_000_000i64))
-        );
-        assert_eq!(
-            int(g.to_cardinal("two million three thousand four")),
-            Some(BigInt::from(2_003_004))
-        );
+        assert_eq!(int(g.to_cardinal("two hundred thousand million")), Some(BigInt::from(200_000_000_000i64)));
+        assert_eq!(int(g.to_cardinal("two million three thousand four")), Some(BigInt::from(2_003_004)));
     }
 
     #[test]
@@ -1383,10 +1349,7 @@ mod tests {
         ] {
             assert!(g.to_cardinal(text).is_err(), "{text}");
         }
-        assert_eq!(
-            int(g.to_cardinal("two thousand 24")),
-            Some(BigInt::from(2024))
-        );
+        assert_eq!(int(g.to_cardinal("two thousand 24")), Some(BigInt::from(2024)));
         assert_eq!(int(g.to_cardinal("twenty 5")), Some(BigInt::from(25)));
     }
 
@@ -1396,10 +1359,7 @@ mod tests {
         // the ordinal of every scale word.
         let g = W2nLangEn::new();
         assert_eq!(int(g.to_cardinal("one unvigintillion")), Some(pow10(66)));
-        assert_eq!(
-            int(g.to_cardinal("one novenonagintillion")),
-            Some(pow10(300))
-        );
+        assert_eq!(int(g.to_cardinal("one novenonagintillion")), Some(pow10(300)));
         assert_eq!(int(g.to_ordinal("one undecillionth")), Some(pow10(36)));
         assert_eq!(int(g.to_ordinal("one vigintillionth")), Some(pow10(63)));
         assert_eq!(int(g.to_ordinal("one centillionth")), Some(pow10(303)));

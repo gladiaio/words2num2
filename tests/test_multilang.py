@@ -875,6 +875,17 @@ def test_es_con_not_decimal_in_sentence(text, expected):
         ("en", "two or thirty thousand", "2 or 30000"),
         # #1229: comma list led by a digit item.
         ("en", "5, six or seven thousand", "5, 6 or 7000"),
+        # A clause comma before A does not make a list (#1216 audit M1).
+        (
+            "en",
+            "Yesterday, five or six thousand people marched.",
+            "Yesterday, 5000 or 6000 people marched.",
+        ),
+        (
+            "es",
+            "cinco o seis mil personas, siete u ocho mil euros",
+            "5000 o 6000 personas, 7000 u 8000 euros",
+        ),
         # fr feminine article counts as one.
         ("fr", "une ou deux mille personnes", "1000 ou 2000 personnes"),
         # A clause conjunction before A does not join a number.

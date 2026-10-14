@@ -138,10 +138,7 @@ fn scale_morphemes(lang: &str) -> Arc<Vec<String>> {
     v
 }
 
-fn derive_scale_morphemes(
-    lang: &str,
-    renderer: &(dyn num2words2_core::Lang + Sync),
-) -> Vec<String> {
+fn derive_scale_morphemes(lang: &str, renderer: &(dyn num2words2_core::Lang + Sync)) -> Vec<String> {
     let mut out: Vec<String> = crate::scale_words(lang)
         .into_iter()
         .map(|(w, _)| w)

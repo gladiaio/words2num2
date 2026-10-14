@@ -56,9 +56,7 @@ fn roundtrip(lang: &str, values: impl IntoIterator<Item = i64>) -> (Outcome, Vec
     let mut out = Outcome::default();
     let mut detail = Vec::new();
     for v in values {
-        let Ok(words) = renderer.to_cardinal(&BigInt::from(v)) else {
-            continue;
-        };
+        let Ok(words) = renderer.to_cardinal(&BigInt::from(v)) else { continue };
         match words2num2_core::words2num(&words, lang, "cardinal") {
             Ok(W2nValue::Int(n)) if n == BigInt::from(v) => {}
             Ok(got) => {
@@ -72,9 +70,7 @@ fn roundtrip(lang: &str, values: impl IntoIterator<Item = i64>) -> (Outcome, Vec
 }
 
 fn known(list: &[(&str, &[i64])]) -> BTreeMap<String, Vec<i64>> {
-    list.iter()
-        .map(|(l, v)| (l.to_string(), v.to_vec()))
-        .collect()
+    list.iter().map(|(l, v)| (l.to_string(), v.to_vec())).collect()
 }
 
 #[test]
@@ -100,9 +96,7 @@ fn every_language_round_trips_except_the_known_gaps() {
     }
     for lang in fails.keys().chain(wrong.keys()) {
         if !langs.contains(&lang.as_str()) {
-            problems.push(format!(
-                "{lang}: listed as a known gap but no longer advertised"
-            ));
+            problems.push(format!("{lang}: listed as a known gap but no longer advertised"));
         }
     }
     assert!(
@@ -125,10 +119,7 @@ fn table_range_never_parses_to_another_number() {
         let want = allowed.get(lang).copied().unwrap_or(0);
         if got.wrong.len() != want {
             let shown: Vec<_> = detail.iter().take(3).collect();
-            problems.push(format!(
-                "{lang}: {} wrong (known {want}) {shown:?}",
-                got.wrong.len()
-            ));
+            problems.push(format!("{lang}: {} wrong (known {want}) {shown:?}", got.wrong.len()));
         }
     }
     assert!(problems.is_empty(), "{}", problems.join("\n"));

@@ -19,19 +19,8 @@ fn sample_values() -> Vec<i64> {
         v.extend([10 * p, 100 * p]);
     }
     v.extend([
-        1234,
-        2001,
-        2345,
-        5555,
-        12_345,
-        21_000,
-        99_999,
-        100_001,
-        123_456,
-        300_500,
-        1_000_001,
-        1_234_567,
-        1_234_567_891,
+        1234, 2001, 2345, 5555, 12_345, 21_000, 99_999, 100_001, 123_456, 300_500, 1_000_001,
+        1_234_567, 1_234_567_891,
     ]);
     v
 }
@@ -66,17 +55,11 @@ fn compute_connectors(lang: &str) -> Vec<String> {
     let mut interior: Vec<String> = Vec::new();
     let mut edge: Vec<String> = Vec::new();
     for v in sample_values() {
-        let Ok(text) = renderer.to_cardinal(&BigInt::from(v)) else {
-            continue;
-        };
+        let Ok(text) = renderer.to_cardinal(&BigInt::from(v)) else { continue };
         let norm = crate::normalize(&text);
         let toks: Vec<&str> = norm.split_whitespace().collect();
         for (k, t) in toks.iter().enumerate() {
-            let list = if k == 0 || k + 1 == toks.len() {
-                &mut edge
-            } else {
-                &mut interior
-            };
+            let list = if k == 0 || k + 1 == toks.len() { &mut edge } else { &mut interior };
             if !list.iter().any(|w| w == t) {
                 list.push(t.to_string());
             }
@@ -92,8 +75,7 @@ fn compute_connectors(lang: &str) -> Vec<String> {
 }
 
 fn is_number_fragment(lang: &str, t: &str) -> bool {
-    matches!(crate::lookup(lang, t, false, &[]), Ok(Some(_)))
-        || crate::parse_scaled_norm(lang, t).is_some()
+    matches!(crate::lookup(lang, t, false, &[]), Ok(Some(_))) || crate::parse_scaled_norm(lang, t).is_some()
 }
 
 /// A number word with a short particle glued on — ar "وتسعماية" (and nine
@@ -119,13 +101,7 @@ pub(super) fn renders_as(lang: &str, value: &BigInt, text: &str) -> bool {
     let Ok(rendered) = renderer.to_cardinal(value) else {
         return false;
     };
-    let canon = |s: &str| {
-        crate::normalize(s)
-            .replace('-', " ")
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ")
-    };
+    let canon = |s: &str| crate::normalize(s).replace('-', " ").split_whitespace().collect::<Vec<_>>().join(" ");
     canon(&rendered) == canon(text)
 }
 
@@ -137,26 +113,11 @@ mod tests {
     /// rendering (fr "cents", cs "stě") is not one.
     #[test]
     fn connectors_are_derived_from_the_renderer() {
-        for (lang, conn) in [
-            ("is", "og"),
-            ("no", "og"),
-            ("fa", "و"),
-            ("sq", "e"),
-            ("bg", "и"),
-            ("ha", "da"),
-            ("lus", "leh"),
-            ("ro", "de"),
-            ("sw", "na"),
-            ("vi", "le"),
-        ] {
-            assert!(
-                derived_connectors(lang).iter().any(|c| c == conn),
-                "{lang} {conn}"
-            );
+        for (lang, conn) in [("is", "og"), ("no", "og"), ("fa", "و"), ("sq", "e"), ("bg", "и"),
+                             ("ha", "da"), ("lus", "leh"), ("ro", "de"), ("sw", "na"), ("vi", "le")] {
+            assert!(derived_connectors(lang).iter().any(|c| c == conn), "{lang} {conn}");
         }
-        assert!(!derived_connectors("fr")
-            .iter()
-            .any(|c| c == "cents" || c == "vingts"));
+        assert!(!derived_connectors("fr").iter().any(|c| c == "cents" || c == "vingts"));
         assert!(!derived_connectors("cs").iter().any(|c| c == "ste"));
     }
 }
@@ -206,32 +167,17 @@ const RU_CASES: &[(i64, &str)] = &[
     (100, "ста"),
     (200, "двухсот двумстам двумястами двухстах"),
     (300, "трёхсот трехсот тремстам тремястами трёхстах трехстах"),
-    (
-        400,
-        "четырёхсот четырехсот четырёмстам четыремстам четырьмястами четырёхстах четырехстах",
-    ),
+    (400, "четырёхсот четырехсот четырёмстам четыремстам четырьмястами четырёхстах четырехстах"),
     (500, "пятисот пятистам пятьюстами пятистах"),
     (600, "шестисот шестистам шестьюстами шестистах"),
     (700, "семисот семистам семьюстами семистах"),
-    (
-        800,
-        "восьмисот восьмистам восьмьюстами восемьюстами восьмистах",
-    ),
+    (800, "восьмисот восьмистам восьмьюстами восемьюстами восьмистах"),
     (900, "девятисот девятистам девятьюстами девятистах"),
 ];
 const RU_SCALES: &[(&str, &str)] = &[
-    (
-        "тысяч",
-        "тысячам тысячами тысячах тысячу тысячей тысячею тысяче",
-    ),
-    (
-        "миллионов",
-        "миллиону миллионам миллионом миллионами миллионе миллионах",
-    ),
-    (
-        "миллиардов",
-        "миллиарду миллиардам миллиардом миллиардами миллиарде миллиардах",
-    ),
+    ("тысяч", "тысячам тысячами тысячах тысячу тысячей тысячею тысяче"),
+    ("миллионов", "миллиону миллионам миллионом миллионами миллионе миллионах"),
+    ("миллиардов", "миллиарду миллиардам миллиардом миллиардами миллиарде миллиардах"),
 ];
 
 /// Ukrainian; the apostrophe of "п'яти" is dropped from the keys (the
@@ -276,10 +222,7 @@ const UK_CASES: &[(i64, &str)] = &[
 ];
 const UK_SCALES: &[(&str, &str)] = &[
     ("тисяч", "тисячам тисячами тисячах тисячу тисячею тисячі"),
-    (
-        "мільйонів",
-        "мільйону мільйонам мільйоном мільйонами мільйоні мільйонах",
-    ),
+    ("мільйонів", "мільйону мільйонам мільйоном мільйонами мільйоні мільйонах"),
 ];
 
 const PL_CASES: &[(i64, &str)] = &[
@@ -321,14 +264,8 @@ const PL_CASES: &[(i64, &str)] = &[
     (900, "dziewięciuset"),
 ];
 const PL_SCALES: &[(&str, &str)] = &[
-    (
-        "tysięcy",
-        "tysiąca tysiącom tysiącami tysiącach tysiącu tysiącem",
-    ),
-    (
-        "milionów",
-        "miliona milionom milionami milionach milionie milionem",
-    ),
+    ("tysięcy", "tysiąca tysiącom tysiącami tysiącach tysiącu tysiącem"),
+    ("milionów", "miliona milionom milionami milionach milionie milionem"),
 ];
 
 /// Arabic genitive/accusative (#74): the tens in -ين and the duals in -ين are
@@ -466,23 +403,10 @@ fn is_table_word(lang: &str, w: &str) -> bool {
 /// cs "pětadvacet" = 25: the unit, "a", the tens, glued (#179). The renderer
 /// writes "dvacet pět". Normalised (diacritics stripped).
 fn cs_inverted(tok: &str) -> Option<String> {
-    const UNITS: [&str; 10] = [
-        "jedna", "jeden", "dva", "tri", "ctyri", "pet", "sest", "sedm", "osm", "devet",
-    ];
-    const TENS: [&str; 8] = [
-        "dvacet",
-        "tricet",
-        "ctyricet",
-        "padesat",
-        "sedesat",
-        "sedmdesat",
-        "osmdesat",
-        "devadesat",
-    ];
+    const UNITS: [&str; 10] = ["jedna", "jeden", "dva", "tri", "ctyri", "pet", "sest", "sedm", "osm", "devet"];
+    const TENS: [&str; 8] = ["dvacet", "tricet", "ctyricet", "padesat", "sedesat", "sedmdesat", "osmdesat", "devadesat"];
     for u in UNITS {
-        let Some(rest) = tok.strip_prefix(u) else {
-            continue;
-        };
+        let Some(rest) = tok.strip_prefix(u) else { continue };
         // "pět-a-dvacet"; "jedna" ends in the "a" itself ("jednadvacet").
         let rest = match rest.strip_prefix('a') {
             Some(r) if TENS.contains(&r) => r,
@@ -560,11 +484,7 @@ pub(super) fn is_alias_word(lang: &str, tok: &str) -> bool {
     if tok.is_empty() || tok.contains(' ') {
         return false;
     }
-    let prev = if base_lang(lang) == "vi" {
-        Some("muoi")
-    } else {
-        None
-    };
+    let prev = if base_lang(lang) == "vi" { Some("muoi") } else { None };
     word_alias(lang, tok, prev).is_some()
 }
 
@@ -628,40 +548,18 @@ pub(super) fn alias_rewrite(lang: &str, norm: &str) -> Option<String> {
 /// Sino-Korean series, but objects, hours and ages are counted natively.
 pub(super) fn ko_native(tok: &str) -> Option<(i64, bool)> {
     const TENS: [(&str, i64); 9] = [
-        ("열", 10),
-        ("스물", 20),
-        ("서른", 30),
-        ("마흔", 40),
-        ("쉰", 50),
-        ("예순", 60),
-        ("일흔", 70),
-        ("여든", 80),
-        ("아흔", 90),
+        ("열", 10), ("스물", 20), ("서른", 30), ("마흔", 40), ("쉰", 50), ("예순", 60), ("일흔", 70),
+        ("여든", 80), ("아흔", 90),
     ];
     const UNITS: [(&str, i64, bool); 13] = [
-        ("하나", 1, false),
-        ("한", 1, true),
-        ("둘", 2, false),
-        ("두", 2, true),
-        ("셋", 3, false),
-        ("세", 3, true),
-        ("넷", 4, false),
-        ("네", 4, true),
-        ("다섯", 5, false),
-        ("여섯", 6, false),
-        ("일곱", 7, false),
-        ("여덟", 8, false),
-        ("아홉", 9, false),
+        ("하나", 1, false), ("한", 1, true), ("둘", 2, false), ("두", 2, true), ("셋", 3, false),
+        ("세", 3, true), ("넷", 4, false), ("네", 4, true), ("다섯", 5, false), ("여섯", 6, false),
+        ("일곱", 7, false), ("여덟", 8, false), ("아홉", 9, false),
     ];
     if tok == "스무" {
         return Some((20, true));
     }
-    let unit = |w: &str| {
-        UNITS
-            .iter()
-            .find(|(u, _, _)| *u == w)
-            .map(|&(_, v, a)| (v, a))
-    };
+    let unit = |w: &str| UNITS.iter().find(|(u, _, _)| *u == w).map(|&(_, v, a)| (v, a));
     for (t, tv) in TENS {
         if let Some(rest) = tok.strip_prefix(t) {
             if rest.is_empty() {
@@ -679,9 +577,8 @@ pub(super) fn ko_native(tok: &str) -> Option<(i64, bool)> {
 /// years of age, 명 people ...). Compared on the start of the next word, so
 /// "개를", "시에", "살이에요" count.
 const KO_NATIVE_COUNTERS: &[&str] = &[
-    "개월", "개", "시간", "시", "살", "명", "마리", "번", "사람", "권", "잔", "병", "장", "대",
-    "달", "그루", "켤레", "벌", "송이", "가지", "군데", "곳", "분", "주", "해", "바퀴", "줄", "통",
-    "채",
+    "개월", "개", "시간", "시", "살", "명", "마리", "번", "사람", "권", "잔", "병", "장", "대", "달",
+    "그루", "켤레", "벌", "송이", "가지", "군데", "곳", "분", "주", "해", "바퀴", "줄", "통", "채",
 ];
 
 /// Is a native numeral at this position a count? The attributive forms (한
