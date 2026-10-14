@@ -4371,6 +4371,52 @@ pub(crate) fn share_scale_words(text: &str, lang: &str) -> Option<String> {
     Some(out.join(" "))
 }
 
+/// it "vent'anni", "trent’anni", "cent'anni" -> "venti anni", "trenta
+/// anni", "cento anni": standard Italian drops the last vowel of the tens and
+/// of "cento" before a vowel, which the walk never reads (#918). None when the
+/// text holds none.
+pub(crate) fn it_elided_tens(text: &str, lang: &str) -> Option<String> {
+    if lang.split(['_', '-']).next() != Some("it") || !text.contains(['\'', '\u{2019}']) {
+        return None;
+    }
+    const STEMS: [(&str, &str); 9] = [
+        ("vent", "venti"),
+        ("trent", "trenta"),
+        ("quarant", "quaranta"),
+        ("cinquant", "cinquanta"),
+        ("sessant", "sessanta"),
+        ("settant", "settanta"),
+        ("ottant", "ottanta"),
+        ("novant", "novanta"),
+        ("cent", "cento"),
+    ];
+    let mut changed = false;
+    let out: Vec<String> = text
+        .split(' ')
+        .map(|tok| {
+            let Some(q) = tok.find(['\'', '\u{2019}']) else { return tok.to_string() };
+            let (head, rest) = (&tok[..q], &tok[q + tok[q..].chars().next().map_or(1, char::len_utf8)..]);
+            let word = head.trim_start_matches(is_opener);
+            let opener = &head[..head.len() - word.len()];
+            let lower = word.to_lowercase();
+            let starts_vowel = rest.chars().next().is_some_and(|c| "aeiouàèéìòùhAEIOUÀÈÉÌÒÙH".contains(c));
+            match STEMS.iter().find(|(stem, _)| lower == *stem) {
+                // Not before a number word: "novant'otto" is no "90 8".
+                Some((_, full))
+                    if starts_vowel
+                        && rest.trim_end_matches(|c: char| !c.is_alphanumeric()).chars().all(char::is_alphabetic)
+                        && !matches!(crate::lookup_norm(lang, &crate::normalize(rstrip_punct(rest)), false, &[]), Ok(Some(_))) =>
+                {
+                    changed = true;
+                    format!("{opener}{full} {rest}")
+                }
+                _ => tok.to_string(),
+            }
+        })
+        .collect();
+    changed.then(|| out.join(" "))
+}
+
 /// es "diez y seis" -> "dieciséis" (16..19, #866), or None when the text
 /// holds none. Not in a list after "<number>," ("cinco, diez y seis" is two
 /// numbers), not before "minutos" (a clock time), and only with a mark after
@@ -4477,6 +4523,16 @@ fn words2num_sentence_folded(
         Some(t) => {
             teens = t;
             teens.as_str()
+        }
+        None => sentence,
+    };
+    // it "vent'anni" -> "venti anni": the tens and "cento" elided before a
+    // vowel (#918).
+    let elided;
+    let sentence = match it_elided_tens(sentence, &resolved_lang).filter(|_| matches!(to, "cardinal" | "year" | "currency")) {
+        Some(t) => {
+            elided = t;
+            elided.as_str()
         }
         None => sentence,
     };

@@ -944,3 +944,22 @@ def test_es_many_con_fails_fast():
 )
 def test_percent_phrase_gl_es(lang, text, expected):
     assert words2num_sentence(text, lang=lang) == expected
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        # it tens and "cento" elided before a vowel (#918).
+        ("Ho compiuto vent'anni ieri", "Ho compiuto 20 anni ieri"),
+        ("trent'anni fa", "30 anni fa"),
+        ("cent'anni di solitudine", "100 anni di solitudine"),
+        ("ho vent’anni", "ho 20 anni"),
+        ("cinquant'anni.", "50 anni."),
+        ("(trent'anni)", "(30 anni)"),
+        # Not elision: a clitic before a number, a number word after.
+        ("dell'otto", "dell'8"),
+        ("l'anno", "l'anno"),
+    ],
+)
+def test_it_elided_tens(text, expected):
+    assert words2num_sentence(text, lang="it") == expected
