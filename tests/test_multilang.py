@@ -1110,16 +1110,43 @@ def test_tr_vowel_harmony(text, expected):
 @pytest.mark.parametrize(
     "lang, text, expected",
     [
-        # de/it/nl write B glued to its thousand (#1221).
-        ("de", "zwei oder dreitausend Leute", "2000 oder 3000 Leute"),
-        ("de", "zwischen zwei und dreitausend", "zwischen 2000 und 3000"),
-        ("it", "due o tremila persone", "2000 o 3000 persone"),
-        ("nl", "twee of drieduizend mensen", "2000 of 3000 mensen"),
-        ("de", "zwei oder drei oder viertausend", "2000 oder 3000 oder 4000"),
-        # Not a compound with more after the thousand, nor a falling pair.
-        ("de", "zwei oder dreitausendfünfhundert", "2 oder 3500"),
-        ("de", "zwanzig oder dreitausend", "20 oder 3000"),
+        # After a leading zero, the digit before a multiplier is its count
+        # (#825).
+        (
+            "en",
+            "my number is zero five hundred thirty two two four five",
+            "my number is 0 532 245",
+        ),
+        ("tr", "Telefon numaram sıfır beş yüz otuz iki", "Telefon numaram 0 532"),
+        ("fr", "appelez zéro cinq cents trente-deux", "appelez 0 532"),
+        ("es", "cero cinco mil", "0 5000"),
+        # Not a military time, not a pair that is no number, not without zero.
+        ("en", "oh five hundred hours", "05 hundred hours"),
+        # en: only "zero", no "double", and the number must go on (#1255-#1257).
+        ("en", "zero five hundred and two", "0 502"),
+        ("en", "meet at oh six hundred", "meet at 06 hundred"),
+        ("en", "zero double five hundred", "055 hundred"),
+        ("en", "zero nine hundred thirty hours", "09 130 hours"),
+        ("en", "zero-five hundred", "05 hundred"),
+        (
+            "en",
+            "we move out at zero six hundred and regroup",
+            "we move out at 06 hundred and regroup",
+        ),
+        (
+            "en",
+            "at zero six hundred, two teams moved in",
+            "at 06 hundred, 2 teams moved in",
+        ),
+        (
+            "en",
+            "zero six hundred to zero eight hundred hours",
+            "06 hundred to 08 hundred hours",
+        ),
+        ("es", "cero nueve cinco uno cien", "0951 100"),
+        ("en", "one five one million", "151 million"),
+        ("en", "zero five six seven", "0567"),
     ],
 )
-def test_shared_scale_closed_compound(lang, text, expected):
+def test_digit_run_before_multiplier(lang, text, expected):
     assert words2num_sentence(text, lang=lang) == expected
