@@ -913,6 +913,8 @@ def test_shared_scale_keeps_input_private_use_chars():
         # gl writes "por cento"; es also says "cien por cien" (#863).
         ("gl", "o paro subiu trinta por cento", "o paro subiu 30 por cento"),
         ("gl", "baixou cinco por cento", "baixou 5 por cento"),
+        ("gl", "cinco por cento vinte", "5 por 120"),
+        ("gl", "dous por cento e medio", "2 por cento e medio"),
         ("es_MX", "cien por cien", "100 por cien"),
         ("es", "el diez por ciento", "el 10 por ciento"),
         ("es", "cien por cien de los votos", "100 por cien de los votos"),

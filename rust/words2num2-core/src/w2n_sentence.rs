@@ -2882,8 +2882,18 @@ fn percent_phrase(resolved: &str) -> Option<(&'static str, &'static [&'static st
 /// por cien" (100 %), and only where it ends: at the end, before a mark or
 /// before "de". Elsewhere "por cien" is "by a hundred" ("multiplica cinco por
 /// cien", "lo vendió por cien", #863, #1238, #1239).
-fn percent_word_at(parts: &[String], j: usize) -> bool {
+fn percent_word_at(parts: &[String], j: usize, resolved: &str) -> bool {
     let word = |t: &String| crate::normalize(rstrip_punct(t).to_lowercase().as_str());
+    // gl "cento vinte" is 120: a number word after "cento" (with or without
+    // "e") continues the number ("cinco por cento vinte", #1237 audit).
+    if word(&parts[j]) == "cento" && resolved.split(['_', '-']).next() == Some("gl") && !ends_run_mark(&parts[j]) {
+        let mut next = parts[j + 1..].iter().filter(|t| !py_str_isspace(t));
+        let mut n = next.next();
+        if n.is_some_and(|t| word(t) == "e" && !ends_run_mark(t)) {
+            n = next.next();
+        }
+        return !n.is_some_and(|t| matches!(crate::lookup_norm(resolved, &word(t), false, &[]), Ok(Some(_))));
+    }
     if word(&parts[j]) != "cien" {
         return true;
     }
@@ -3795,7 +3805,7 @@ fn article_is_count(resolved: &str, parts: &[String], i: usize, next_is_number: 
                 .enumerate()
                 .filter(|(_, t)| !py_str_isspace(t))
                 .nth(1)
-                .is_some_and(|(k, _)| percent_word_at(parts, i + 1 + k))
+                .is_some_and(|(k, _)| percent_word_at(parts, i + 1 + k, resolved))
         {
             return true;
         }
@@ -4708,7 +4718,7 @@ fn words2num_sentence_walk(
                 && next.as_deref().is_some_and(|t| is_scale_word(&converter, t, 100)));
         // "vingt pour cent": "cent" after "pour" is the percent sign, not 100.
         let percent_tail = head_is_percent
-            && percent_word_at(&parts, i)
+            && percent_word_at(&parts, i, &resolved)
             && percent.is_some_and(|(prep, _)| {
                 prev_word(&parts, i).is_some_and(|p| crate::normalize(&p) == prep)
             });
