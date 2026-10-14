@@ -4312,15 +4312,17 @@ thread_local! {
 pub(crate) fn share_scale_words(text: &str, lang: &str) -> Option<String> {
     let base = lang.split(['_', '-']).next().unwrap_or(lang).to_lowercase();
     let (or_words, and_words, range_cues): (&[&str], &[&str], &[&str]) = match base.as_str() {
-        "en" => (&["or"], &["and"], &["between"]),
-        "es" => (&["o", "u"], &["y", "e"], &["entre"]),
-        "gl" => (&["ou", "o"], &["e"], &["entre"]),
-        "pt" => (&["ou"], &["e"], &["entre"]),
-        "fr" => (&["ou"], &["et"], &["entre"]),
-        "it" => (&["o", "oppure"], &["e"], &["tra", "fra"]),
-        "ca" => (&["o"], &["i"], &["entre"]),
+        // The range word joins the alternatives: en "to", es/pt/gl/it/ca
+        // "a", fr "à", de "bis", nl "tot" (#1263).
+        "en" => (&["or", "to"], &["and"], &["between"]),
+        "es" => (&["o", "u", "a"], &["y", "e"], &["entre"]),
+        "gl" => (&["ou", "o", "a"], &["e"], &["entre"]),
+        "pt" => (&["ou", "a"], &["e"], &["entre"]),
+        "fr" => (&["ou", "a"], &["et"], &["entre"]),
+        "it" => (&["o", "oppure", "a"], &["e"], &["tra", "fra"]),
+        "ca" => (&["o", "a"], &["i"], &["entre"]),
         "de" => (&["oder", "bis"], &["und"], &["zwischen"]),
-        "nl" => (&["of"], &["en"], &["tussen"]),
+        "nl" => (&["of", "tot"], &["en"], &["tussen"]),
         _ => return None,
     };
     let core = |t: &str| crate::normalize(t);
@@ -4418,6 +4420,36 @@ pub(crate) fn share_scale_words(text: &str, lang: &str) -> Option<String> {
         if !(is_or || is_and) || !toks[k].chars().all(char::is_alphabetic) {
             continue;
         }
+        // The range words ("to", "a", "à", "tot", "bis"), as opposed to the
+        // alternatives.
+        let range_word = matches!(
+            (base.as_str(), conn.as_str()),
+            ("en", "to") | ("es" | "pt" | "gl" | "it" | "ca" | "fr", "a") | ("nl", "tot") | ("de", "bis")
+        );
+        if range_word {
+            let raw = toks[k].to_lowercase();
+            let prev = (p >= 2).then(|| core(&bare(toks[nb[p - 2]])));
+            // fr "a" without its accent is the verb "has" ("la saison trois a
+            // quatre millions de vues", #1271 audit).
+            if base == "fr" && raw != "à" {
+                continue;
+            }
+            // "add five to six thousand", "suma cinco a seis mil": arithmetic.
+            if prev.as_deref().is_some_and(|w| {
+                matches!(
+                    w,
+                    "add" | "adds" | "added" | "adding" | "plus" | "suma" | "sumar" | "sumo" | "anade" | "anadir" | "ajoute"
+                        | "ajouter" | "aggiungi" | "aggiungere" | "somma" | "sommare" | "soma" | "somar" | "adiciona"
+                        | "adicionar" | "tel" | "optellen" | "addiere" | "addieren"
+                )
+            }) {
+                continue;
+            }
+            // it "sei a settemila metri": "you are at", not six.
+            if base == "it" && core(&bare(toks[ka])) == "sei" {
+                continue;
+            }
+        }
         let a_tok = toks[ka].trim_start_matches(is_opener);
         let a_tok = if suspended { a_tok.trim_end_matches(['-', '\u{2010}', '\u{2011}']) } else { a_tok };
         // de "dreitausend", it "tremila", nl "drieduizend": B glued to its
@@ -4436,6 +4468,13 @@ pub(crate) fn share_scale_words(text: &str, lang: &str) -> Option<String> {
         // Rising, and of one order ("cinco o seis mil", not "veinte o dos
         // mil" nor "cinco o seiscientos mil").
         if a >= b || b >= 10 * a {
+            continue;
+        }
+        // "from one to five thousand", "a scale of one to five thousand":
+        // a range from one counts from one (#1271 audit).
+        // de "ein bis zwei Millionen" is the usual "one to two million" and
+        // keeps sharing, as since #1221 (#1271 audit N1).
+        if range_word && a == 1 && base != "de" {
             continue;
         }
         let lead_clean = a_tok.len() + if suspended { toks[ka].chars().last().map_or(0, char::len_utf8) } else { 0 } == toks[ka].len();
