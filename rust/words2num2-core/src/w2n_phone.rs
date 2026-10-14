@@ -90,7 +90,11 @@ fn run_at(toks: &[&str], i: usize, commas: bool, base: &str) -> Option<Run> {
     };
     // ... only before a group the size of a country code: "mas 612345678"
     // is "but" before a local number (#1274).
+    // A mark on the word ("más, treinta …") or a figure before it ("dos más
+    // treinta …", a sum) is no "+" (#1273 audit).
     let native = native
+        && split_trail(toks[i]).1.is_empty()
+        && !(i > 0 && split_trail(toks[i - 1]).0.bytes().all(|b| b.is_ascii_digit()) && !split_trail(toks[i - 1]).0.is_empty())
         && toks
             .get(i + 1)
             .is_some_and(|t| (1..=3).contains(&split_trail(t).0.len()) && split_trail(t).0.bytes().all(|b| b.is_ascii_digit()));

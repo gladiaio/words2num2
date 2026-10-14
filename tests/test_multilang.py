@@ -1337,6 +1337,17 @@ def test_shared_scale_to_range(lang, text, expected):
             "no es más 912 34 56 78",
         ),
         ("es", "tengo más 5 años", "tengo más 5 años"),
+        # Not with a mark on the word, nor after a figure (a sum) (#1273 audit).
+        (
+            "es",
+            "más, treinta y cuatro seis uno dos tres cuatro cinco seis siete ocho",
+            "más, 34 612345678",
+        ),
+        (
+            "es",
+            "dos más treinta y cuatro seis uno dos tres cuatro cinco seis siete ocho",
+            "2 más 34 612345678",
+        ),
         # Only before a country-code group: "mas" (but) before a local number
         # (#1274).
         (
