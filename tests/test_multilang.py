@@ -1105,3 +1105,48 @@ def test_fi_sataa_homograph(text, expected):
 )
 def test_tr_vowel_harmony(text, expected):
     assert words2num_sentence(text, lang="tr") == expected
+
+
+@pytest.mark.parametrize(
+    "lang, text, expected",
+    [
+        # After a leading zero, the digit before a multiplier is its count
+        # (#825).
+        (
+            "en",
+            "my number is zero five hundred thirty two two four five",
+            "my number is 0 532 245",
+        ),
+        ("tr", "Telefon numaram sıfır beş yüz otuz iki", "Telefon numaram 0 532"),
+        ("fr", "appelez zéro cinq cents trente-deux", "appelez 0 532"),
+        ("es", "cero cinco mil", "0 5000"),
+        # Not a military time, not a pair that is no number, not without zero.
+        ("en", "oh five hundred hours", "05 hundred hours"),
+        # en: only "zero", no "double", and the number must go on (#1255-#1257).
+        ("en", "zero five hundred and two", "0 502"),
+        ("en", "meet at oh six hundred", "meet at 06 hundred"),
+        ("en", "zero double five hundred", "055 hundred"),
+        ("en", "zero nine hundred thirty hours", "09 130 hours"),
+        ("en", "zero-five hundred", "05 hundred"),
+        (
+            "en",
+            "we move out at zero six hundred and regroup",
+            "we move out at 06 hundred and regroup",
+        ),
+        (
+            "en",
+            "at zero six hundred, two teams moved in",
+            "at 06 hundred, 2 teams moved in",
+        ),
+        (
+            "en",
+            "zero six hundred to zero eight hundred hours",
+            "06 hundred to 08 hundred hours",
+        ),
+        ("es", "cero nueve cinco uno cien", "0951 100"),
+        ("en", "one five one million", "151 million"),
+        ("en", "zero five six seven", "0567"),
+    ],
+)
+def test_digit_run_before_multiplier(lang, text, expected):
+    assert words2num_sentence(text, lang=lang) == expected

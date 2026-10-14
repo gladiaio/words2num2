@@ -2472,8 +2472,15 @@ fn en_digit_run(parts: &[String], i: usize) -> Option<(String, usize)> {
     use crate::w2n_lang_en::unit_value;
     let mut digits = String::new();
     let mut end: Option<(usize, usize)> = None;
+    let mut prev_end: Option<(usize, usize)> = None;
     let mut repeat = 1usize;
+    // Opened on "zero" (not "oh"), with no "double"/"triple" (#1255, #1256).
+    let mut zero_head = false;
+    let mut repeated = false;
     for (k, w) in en_number_words(parts, i).iter().enumerate() {
+        if k == 0 {
+            zero_head = w.word == "zero";
+        }
         let d = match w.word.as_str() {
             "oh" | "o" => 0,
             "nought" | "naught" if k == 0 => break,
@@ -2482,6 +2489,7 @@ fn en_digit_run(parts: &[String], i: usize) -> Option<(String, usize)> {
                     break;
                 }
                 repeat = if w.word == "double" { 2 } else { 3 };
+                repeated = true;
                 continue;
             }
             other => match unit_value(other) {
@@ -2494,7 +2502,50 @@ fn en_digit_run(parts: &[String], i: usize) -> Option<(String, usize)> {
         }
         repeat = 1;
         if w.last {
+            prev_end = end;
             end = Some((digits.len(), w.part));
+        }
+    }
+    // After a leading "zero" (a dialling prefix), the last digit before a
+    // multiplier is its count when the number goes on: "zero five hundred
+    // thirty two" is 0, then 532 (#825). Zero itself is no count; "zero six
+    // hundred (hours)" and "oh five hundred" are military times, read as
+    // written (#1255, #1257).
+    if let Some((len, part)) = end {
+        let number_word = |n: &str| {
+            !matches!(n, "zero" | "oh" | "o" | "nought" | "naught")
+                && (crate::w2n_lang_en::unit_value(n).is_some()
+                    || crate::w2n_lang_en::tens_value(n).is_some()
+                    || n.split('-').next().is_some_and(|h| crate::w2n_lang_en::tens_value(h).is_some()))
+        };
+        // The words after the multiplier, as written: the number goes on
+        // only with no mark on the multiplier, and "and" only before another
+        // number word ("zero six hundred and regroup" is a time, #1254 audit).
+        let after: Vec<&String> = parts[part + 1..].iter().filter(|t| !py_str_isspace(t)).take(3).collect();
+        let goes_on = after.first().is_some_and(|m| !ends_run_mark(m) && !m.ends_with([',', ';', ':', '"', '\u{201d}']))
+            && match after.get(1).map(|t| rstrip_punct(t).to_lowercase()) {
+                Some(n) if n == "and" => {
+                    !ends_run_mark(after[1]) && after.get(2).is_some_and(|t| number_word(&rstrip_punct(t).to_lowercase()))
+                }
+                Some(n) => number_word(&n),
+                None => false,
+            };
+        if zero_head
+            && !repeated
+            && digits.as_bytes()[len - 1] != b'0'
+            && !ends_run_mark(&parts[part])
+            && next_word(parts, part).is_some_and(|n| is_scale_word(&Converter::En, &n, 100))
+            && goes_on
+            // One digit word in its own part ("zero-five hundred" stays).
+            && !parts[part].contains('-')
+            // "zero nine hundred thirty hours": a military time.
+            && !parts[part + 1..]
+                .iter()
+                .filter(|t| !py_str_isspace(t))
+                .take(4)
+                .any(|t| matches!(rstrip_punct(t).to_lowercase().as_str(), "hours" | "hrs" | "hr"))
+        {
+            end = prev_end;
         }
     }
     let (len, part) = end?;
@@ -2547,6 +2598,7 @@ fn table_digit_run(
 ) -> Option<(String, usize)> {
     let mut digits = String::new();
     let mut end: Option<(usize, usize)> = None;
+    let mut prev_end: Option<(usize, usize)> = None;
     let mut j = i;
     let mut article_head = false;
     // my: years and another count is no dictation; the walker reads it, nor
@@ -2590,11 +2642,30 @@ fn table_digit_run(
             article_head = article;
         }
         digits.push_str(&d);
+        prev_end = end;
         end = Some((digits.len(), j));
         if ends_with_terminal_punct(tok) || ends_with_close_quote(tok) {
             break;
         }
         j += 1;
+    }
+    // After a leading zero, the last digit before a multiplier is its count
+    // (#825).
+    if let Some((len, part)) = end {
+        // A scale, or a hundred word the table reads (tr "yüz", fr "cents").
+        let multiplier = |n: &str| {
+            is_scale_word(converter, n, 100)
+                || matches!(converter.to_cardinal(n), Ok(W2nValue::Int(v)) if v == BigInt::from(100) || v == BigInt::from(1000))
+        };
+        // ... when the two read as one number (es "cinco mil", not "uno cien").
+        let joins = |n: &str| crate::words2num(&format!("{} {n}", rstrip_punct(&parts[part])), resolved, "cardinal").is_ok();
+        if digits.starts_with('0')
+            && digits.as_bytes()[len - 1] != b'0'
+            && !ends_run_mark(&parts[part])
+            && next_word(parts, part).is_some_and(|n| multiplier(&n) && joins(&n))
+        {
+            end = prev_end;
+        }
     }
     let (len, part) = end?;
     digits.truncate(len);

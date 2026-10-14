@@ -8,6 +8,7 @@ follows [Semantic Versioning](https://semver.org/) and uses
 
 ### Fixed
 
+- Sentence mode: a digit dictation opening on zero leaves its last digit to a multiplier after it ("zero five hundred thirty two" is "0 532", was "05 132"; tr "sıfır beş yüz otuz iki", fr "zéro cinq cents trente-deux", es "cero cinco mil" "0 5000"). In en only after "zero" with the number going on, so military times ("oh five hundred", "zero six hundred hours") and "double"/"triple" dictations read as before; not when the two do not read as one number (#825, #1255, #1256, #1257).
 - tr: a case ending is cut from a number word only when it follows the stem's vowel harmony ("bina", building, was "1000'a"; "bine" is still "1000'e"). The numeral decides the backness, so text without Turkish letters is judged alike ("BINA" stays, "SAAT IKIDE" is "SAAT 2'DE", "saat ucte" "saat 3'te") (#826).
 
 ## [0.4.3] — 2026-10-14
