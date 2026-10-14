@@ -905,3 +905,15 @@ def test_shared_scale_keeps_input_private_use_chars():
     out = words2num_sentence("icon \ue000 between five and six thousand", lang="en")
     assert out.count("\ue000") == 1
     assert "6000" in out
+
+
+def test_es_many_con_fails_fast():
+    # #1232: one "con" is the decimal comma; more raise without a retry each.
+    import time
+
+    start = time.perf_counter()
+    with pytest.raises(Words2NumError):
+        words2num("tres " + "con " * 4000 + "cinco", lang="es")
+    assert time.perf_counter() - start < 2
+    with pytest.raises(Words2NumError):
+        words2num("tres con cinco con dos", lang="es")

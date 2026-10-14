@@ -91,7 +91,10 @@ pub fn words2num(
         let resolved = w2n_sentence::resolve_lang(lang).unwrap_or_default();
         if resolved.split(['_', '-']).next() == Some("es") {
             let words: Vec<&str> = text.split_whitespace().collect();
-            if let Some(k) = words.iter().position(|w| w.eq_ignore_ascii_case("con")).filter(|&k| k > 0 && k + 1 < words.len()) {
+            // A decimal has one separator: with more "con" the text is no
+            // number, and retrying each would be quadratic (#1232).
+            let cons = words.iter().filter(|w| w.eq_ignore_ascii_case("con")).count();
+            if let Some(k) = words.iter().position(|w| w.eq_ignore_ascii_case("con")).filter(|&k| cons == 1 && k > 0 && k + 1 < words.len()) {
                 let mut joined = words.clone();
                 joined[k] = "coma";
                 // The whole chain, so "diez y seis con cinco" reads too.
