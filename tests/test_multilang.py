@@ -1084,6 +1084,30 @@ def test_fi_sataa_homograph(text, expected):
 
 
 @pytest.mark.parametrize(
+    "text, expected",
+    [
+        # tr endings follow the stem's vowel harmony: "bina" is a building (#826).
+        ("Ankara'da on iki katlı bina çöktü", "Ankara'da 12 katlı bina çöktü"),
+        ("yeni bina yapıldı", "yeni bina yapıldı"),
+        ("Bine yakın kişi", "1000'e yakın kişi"),
+        ("dokuza", "9'a"),
+        ("otuzda", "30'da"),
+        # An ASCII capital I may be i or ı.
+        ("SAAT IKIDE", "SAAT 2'DE"),
+        ("YENI BINA YAPILDI", "YENI BINA YAPILDI"),
+        ("KIRKTA", "40'TA"),
+        # Typed without Turkish letters: the numeral decides (#1259 audit).
+        ("saat ucte bulusalim", "saat 3'te bulusalim"),
+        ("iki yuzden fazla", "200'den fazla"),
+        ("ALTMISA", "60'A"),
+        ("sifirnin", "0'nin"),
+    ],
+)
+def test_tr_vowel_harmony(text, expected):
+    assert words2num_sentence(text, lang="tr") == expected
+
+
+@pytest.mark.parametrize(
     "lang, text, expected",
     [
         # After a leading zero, the digit before a multiplier is its count
