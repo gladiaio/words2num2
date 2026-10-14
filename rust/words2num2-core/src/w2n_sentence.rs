@@ -4337,10 +4337,23 @@ pub(crate) fn share_scale_words(text: &str, lang: &str) -> Option<String> {
         }
         let lead_clean = a_tok.len() == toks[ka].len();
         if p >= 2 && !is_and && lead_clean {
-            let prev = toks[nb[p - 2]];
+            // A mark standing alone ("cinq\u{202f}; six") goes with the word
+            // before it (#1242 audit L7).
+            let pi = if p >= 3 && !toks[nb[p - 2]].chars().any(char::is_alphanumeric) { p - 3 } else { p - 2 };
+            let prev_own: String = toks[nb[pi]..=nb[p - 2]].concat();
+            let prev = prev_own.as_str();
             // A figure, not an ordinal ("the 2nd five or six thousand", #1248).
             let figure = |t: &str| t.chars().any(|c| c.is_ascii_digit()) && !t.chars().any(char::is_alphabetic);
             let prev_bare = bare(prev);
+            // A number word, also one the walk leaves alone ("one", "un",
+            // "neuf", "sei", "hundred"), but no ordinal (de "zweite" walks to
+            // "2.", #1242 audit M2, L6).
+            let number_word = {
+                let w = walk(&prev_bare);
+                (figure(&w) && !(w.ends_with('.') && !prev_bare.ends_with('.')))
+                    || value(&prev_bare).is_some()
+                    || core(&prev_bare) == "hundred"
+            };
             // The words before A back to a sentence mark, at most six: enough
             // for "tres coma uno cuatro" or "one thousand two hundred and".
             let mut first = p - 1;
@@ -4359,8 +4372,8 @@ pub(crate) fn share_scale_words(text: &str, lang: &str) -> Option<String> {
             // "five or six thousand, seven or eight million", #1236).
             if prev.ends_with(',')
                 && !scale(&prev_bare)
-                && from <= nb[p - 2]
-                && last_word(&walk(&toks[from..=nb[p - 2]].join(" "))).chars().any(|c| c.is_ascii_digit())
+                && (number_word
+                    || from <= nb[pi] && last_word(&walk(&toks[from..=nb[pi]].join(" "))).chars().any(|c| c.is_ascii_digit()))
             {
                 continue;
             }
@@ -4369,8 +4382,8 @@ pub(crate) fn share_scale_words(text: &str, lang: &str) -> Option<String> {
             // bound ("cinco seis o siete mil", "zéro six douze ou treize
             // mille", #1243). A sentence mark, or a scale with a comma, ends
             // the previous number; ";" and ":" may separate list items.
-            let marked = prev.ends_with(['.', '!', '?', ',', '…']);
-            if !marked && figure(&walk(prev)) {
+            let marked = prev.ends_with(['.', '!', '?', ',', '…', '—']);
+            if !marked && number_word {
                 continue;
             }
             // A is the tail of a longer number when the walk joins it to the

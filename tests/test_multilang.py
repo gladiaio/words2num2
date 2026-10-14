@@ -936,6 +936,13 @@ def test_es_con_not_decimal_in_sentence(text, expected):
         ("en", "five,\n six or seven thousand", "5,\n 6 or 7000"),
         ("en", "five or\tsix thousand people", "5000 or\t6000 people"),
         ("es", "entre dos y\u00a0tres millones", "entre 2000000 y\u00a03000000"),
+        # Number words the walk leaves alone still mark a list (#1242 audit M2).
+        ("fr", "neuf, six ou sept mille", "9, 6 ou 7000"),
+        ("en", "one hundred; six or seven thousand", "100; 6 or 7000"),
+        ("en", "page one five or six thousand", "page 1 5 or 6000"),
+        # A detached mark goes with the word before it (L7); de ordinal (L6).
+        ("fr", "cinq\u202f; six ou sept mille", "5\u202f; 6 ou 7000"),
+        ("de", "der zweite fünf oder sechs tausend", "der 2. 5000 oder 6000"),
         # An ordinal before A is no figure of a list (#1248).
         ("fr", "les premiers cinq ou six mille", "les 1ers 5000 ou 6000"),
         ("en", "the 2nd five or six thousand", "the 2nd 5000 or 6000"),
