@@ -8,6 +8,7 @@ follows [Semantic Versioning](https://semver.org/) and uses
 
 ### Fixed
 
+- it: the tens and "cento" elided before a vowel read ("vent'anni" is "20 anni", "trent’anni fa" "30 anni fa", "cent'anni" "100 anni", also in a compound: "duecent'anni" "200 anni", "centovent'anni" "120 anni"; were left as words) (#918, #1250).
 - gl and es percent phrase: gl "trinta por cento" keeps "cento" as the percent word ("30 por cento", was "30 por 100"), and the es set phrase "cien por cien" (100 %) is "100 por cien" (was "100 por 100") where it ends or before "de"; elsewhere "por cien" stays "by a hundred" ("multiplica cinco por cien" is "multiplica 5 por 100", "cien por cien metros" "100 por 100 metros") (#863).
 - es: `words2num` with more than one "con" raises at once instead of retrying each "con" through the whole chain (4,000 "con" took 37 s) (#1232).
 - Sentence mode (en, es, pt, fr, it, ca, gl, de, nl): a spelled-out alternative or range whose last bound carries the scale words shares them ("cinco o seis mil personas" is "5000 o 6000 personas", was "5 o 6000"; "entre dos y tres millones" "entre 2000000 y 3000000"; "dos o tres mil millones", "five or six or seven thousand", "one or two thousand"); a figure as written, a bare "and", a comma list, a falling pair, a scale word the language does not read (gl "millóns"), a bound ten or more times the first ("cinco o seiscientos mil") and the tail of a longer number ("treinta y cinco o seis mil", "one point two or three million") stay (#865, #1227, #1228, #1229, #1230, #1231).
