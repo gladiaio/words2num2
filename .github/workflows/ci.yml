@@ -81,6 +81,26 @@ jobs:
     - name: Test words2num2-core
       run: cargo test --release -p words2num2-core -- --include-ignored
 
+  msrv:
+    # The declared rust-version (rust/Cargo.toml) and the dependency floors of
+    # words2num2-core must build together (#919, #921).
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: rust
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      with:
+        persist-credentials: false
+    - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+      with:
+        toolchain: "1.82"
+    - name: Check at the dependency floors on the MSRV
+      run: |
+        cargo update -p bigdecimal --precise 0.4.7
+        cargo update -p unicode-normalization --precise 0.1.2
+        cargo check -p words2num2-core
+
   coveralls:
     name: Indicate completion to coveralls.io
     needs: build
