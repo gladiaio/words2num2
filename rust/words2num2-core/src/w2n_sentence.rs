@@ -4438,7 +4438,7 @@ pub(crate) fn it_elided_tens(text: &str, lang: &str) -> Option<String> {
             }
             None => out.push_str(tok),
         }
-        prev = rstrip_punct(tok.trim_start_matches(is_opener)).to_lowercase();
+        prev = rstrip_punct(tok.trim_start_matches(is_opener)).trim_end_matches(QUOTES).to_lowercase();
     }
     changed.then_some(out)
 }

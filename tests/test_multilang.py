@@ -964,6 +964,7 @@ def test_percent_phrase_gl_es(lang, text, expected):
         # "per cento" is the percent phrase; elided it is a hundred.
         ("per cent'anni", "per 100 anni"),
         ("(per cent'anni)", "(per 100 anni)"),
+        ("per\u02bc cent'anni", "per\u02bc 100 anni"),
         # Other apostrophes and blanks (#1249 audit).
         ("ho vent\u02bcanni", "ho 20 anni"),
         ("trent'anni\tfa", "30 anni\tfa"),
