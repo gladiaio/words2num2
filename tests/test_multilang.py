@@ -886,6 +886,35 @@ def test_es_con_not_decimal_in_sentence(text, expected):
             "cinco o seis mil personas, siete u ocho mil euros",
             "5000 o 6000 personas, 7000 u 8000 euros",
         ),
+        # The walk decides whether A ends a longer number (#1233).
+        ("es", "ciento cinco o seis mil", "105 o 6000"),
+        ("gl", "cento dous ou tres mil", "102 ou 3000"),
+        ("de", "hundert fünf oder sechs Millionen", "105 oder 6000000"),
+        ("en", "triple five or six thousand", "555 or 6000"),
+        ("en", "two dot five or six million", "2.5 or 6000000"),
+        # Blanks between the words (#1234).
+        ("en", "one hundred  five or six thousand", "105 or 6000"),
+        ("en", "one hundred \t five or six thousand", "105 or 6000"),
+        ("en", "5,  six or seven thousand", "5,  6 or 7000"),
+        # A scale word the walk does not read stays (#1235).
+        ("en", "five or six thousand\u2122", "5 or 6 thousand\u2122"),
+        ("es", "cinco o seis mil*", "5 o 6 mil*"),
+        # A mark or a scale before A ends the previous number (#1236).
+        (
+            "es",
+            "cinco o seis mil. Siete o ocho millones",
+            "5000 o 6000. 7000000 o 8000000",
+        ),
+        (
+            "en",
+            "We were twenty. Five or six thousand came.",
+            "We were 20. 5000 or 6000 came.",
+        ),
+        (
+            "en",
+            "five or six thousand, seven or eight million",
+            "5000 or 6000, 7000000 or 8000000",
+        ),
         # fr feminine article counts as one.
         ("fr", "une ou deux mille personnes", "1000 ou 2000 personnes"),
         # A clause conjunction before A does not join a number.
