@@ -917,3 +917,30 @@ def test_es_many_con_fails_fast():
     assert time.perf_counter() - start < 2
     with pytest.raises(Words2NumError):
         words2num("tres con cinco con dos", lang="es")
+
+
+@pytest.mark.parametrize(
+    "lang, text, expected",
+    [
+        # gl writes "por cento"; es also says "cien por cien" (#863).
+        ("gl", "o paro subiu trinta por cento", "o paro subiu 30 por cento"),
+        ("gl", "baixou cinco por cento", "baixou 5 por cento"),
+        ("gl", "cinco por cento vinte", "5 por 120"),
+        ("gl", "dous por cento e medio", "2 por cento e medio"),
+        ("gl", "tres por cento e catro por cento", "3 por cento e 4 por cento"),
+        ("es_MX", "cien por cien", "100 por cien"),
+        ("es", "el diez por ciento", "el 10 por ciento"),
+        ("es", "cien por cien de los votos", "100 por cien de los votos"),
+        # Outside "cien por cien", "por cien" is "by a hundred" (#1238, #1239).
+        ("es", "cinco por cien metros", "5 por 100 metros"),
+        ("es", "cien por cien metros", "100 por 100 metros"),
+        ("es", "lo vendió por cien", "lo vendió por 100"),
+        ("es", "multiplica cinco por cien", "multiplica 5 por 100"),
+        ("es", "cinco por cien de ancho", "5 por 100 de ancho"),
+        # Only "cien" as the whole number (#1241).
+        ("es", "dos mil cien por cien", "2100 por 100"),
+        ("es", "un millón cien por cien.", "1000100 por 100."),
+    ],
+)
+def test_percent_phrase_gl_es(lang, text, expected):
+    assert words2num_sentence(text, lang=lang) == expected
