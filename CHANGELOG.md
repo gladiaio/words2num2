@@ -6,6 +6,10 @@ follows [Semantic Versioning](https://semver.org/) and uses
 
 ## [Unreleased]
 
+### Fixed
+
+- tr: a case ending is cut from a number word only when it follows the stem's vowel harmony ("bina", building, was "1000'a"; "bine" is still "1000'e"). The numeral decides the backness, so text without Turkish letters is judged alike ("BINA" stays, "SAAT IKIDE" is "SAAT 2'DE", "saat ucte" "saat 3'te") (#826).
+
 ## [0.4.3] — 2026-10-14
 
 ### Fixed

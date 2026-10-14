@@ -541,6 +541,40 @@ fn suffixes(lang: &str) -> &'static [&'static str] {
     }
 }
 
+/// Does the tr ending `suf` (as typed) agree in vowel backness with the
+/// number word that ends `stem`? The backness comes from the numeral itself,
+/// read through `normalize`, so ASCII spellings ("sifir", "uc", "ALTMIS",
+/// "BINA") are judged like the Turkish ones (#826, #1260, #1259 audit). An
+/// ending with no vowel agrees; an ASCII capital "I" in the ending may be i
+/// or ı and agrees with both.
+fn tr_harmony(stem: &str, suf: &str) -> bool {
+    // The numerals by their normalized form, and whether their last vowel is
+    // front.
+    const NUMERALS: [(&str, bool); 25] = [
+        ("sifir", false), ("bir", true), ("iki", true), ("uc", true), ("dort", true),
+        ("bes", true), ("alti", false), ("yedi", true), ("sekiz", true), ("dokuz", false),
+        ("on", false), ("yirmi", true), ("otuz", false), ("kirk", false), ("elli", true),
+        ("altmis", false), ("yetmis", true), ("seksen", true), ("doksan", false), ("yuz", true),
+        ("bin", true), ("milyon", false), ("milyar", false), ("trilyon", false), ("katrilyon", false),
+    ];
+    let norm = crate::normalize(stem.trim_end_matches(['\'', '\u{2019}']));
+    let stem_front = NUMERALS
+        .iter()
+        .filter(|(w, _)| norm.ends_with(w))
+        .max_by_key(|(w, _)| w.len())
+        .map(|&(_, front)| front);
+    let vowel = |c: &char| "eiöüEİÖÜaıouAIOU".contains(*c);
+    let front = |c: char| "eiöüEİÖÜ".contains(c);
+    // Typed without Turkish letters, an ending's i/u/o may stand for ı/ü/ö
+    // ("sifirnin" is "sıfırnın"); only e and a are sure.
+    let ascii = !stem.chars().chain(suf.chars()).any(|c| "ıİüÜöÖşŞçÇğĞ".contains(c));
+    match (stem_front, suf.chars().find(vowel)) {
+        (_, Some('I')) | (_, None) | (None, _) => true,
+        (_, Some('i' | 'u' | 'o' | 'U' | 'O')) if ascii => true,
+        (Some(s), Some(e)) => s == front(e),
+    }
+}
+
 /// The separator a language writes between figures and a case ending.
 fn suffix_sep(lang: &str) -> &'static str {
     match lang {
@@ -587,6 +621,11 @@ fn suffix_cut(
             continue;
         };
         if stem.chars().count() < 2 {
+            continue;
+        }
+        // tr endings follow the stem's vowel harmony: "bine" is the dative of
+        // "bin" (1000), "bina" is "building" (#826).
+        if lang == "tr" && !tr_harmony(stem, &core[stem.len()..]) {
             continue;
         }
         let norm = crate::normalize(stem);
