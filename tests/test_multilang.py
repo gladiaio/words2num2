@@ -1303,3 +1303,21 @@ def test_date_comma_before_year(lang, text, kwargs, expected):
 )
 def test_shared_scale_to_range(lang, text, expected):
     assert words2num_sentence(text, lang=lang) == expected
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        # A lone "one" after a figure in a list is the digit (#1272).
+        ("4, 8, 2, one.", "4, 8, 2, 1."),
+        ("5, one, 7", "5, 1, 7"),
+        ("4 8 2 one", "4 8 2 1"),
+        ("4, 8, 2 and one.", "4, 8, 2 and 1."),
+        # The pronoun stays.
+        ("pick one.", "pick one."),
+        ("I have 2 and one is broken", "I have 2 and one is broken"),
+        ("page 2, one more thing", "page 2, one more thing"),
+    ],
+)
+def test_one_after_figure(text, expected):
+    assert words2num_sentence(text, lang="en") == expected

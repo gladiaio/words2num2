@@ -3677,6 +3677,22 @@ fn is_homograph(resolved: &str, parts: &[String], i: usize, piece: &str) -> bool
     homograph_words(resolved).split_whitespace().any(|w| w == norm)
 }
 
+/// Is the word before part `i` a number, a word or a figure ("three, two,
+/// one", "4, 8, 2, one"), or "and" right after one ("4, 8, 2 and one")?
+fn prev_index_number(resolved: &str, parts: &[String], i: usize) -> bool {
+    let number = |k: usize| {
+        let p = crate::normalize(rstrip_punct(&parts[k])).replace(' ', "");
+        !p.is_empty()
+            && (p.chars().all(|c| c.is_ascii_digit()) || matches!(crate::lookup_norm(resolved, &p, false, &[]), Ok(Some(_))))
+    };
+    let Some(k) = prev_word_index(parts, i) else { return false };
+    if number(k) {
+        return true;
+    }
+    let and = matches!(crate::normalize(rstrip_punct(&parts[k])).trim(), "and" | "et" | "y" | "e" | "und" | "en");
+    and && !has_trailing_mark(&parts[k]) && prev_word_index(parts, k).is_some_and(|k2| number(k2) && !ends_run_mark(&parts[k2]))
+}
+
 /// Units, currencies and time words a lone article-number counts: "one
 /// dollar", "un euro", "one percent", "one o'clock", "une heure". Compared
 /// after `normalize` (no diacritics). "second" is left out on purpose ("one
@@ -3843,7 +3859,9 @@ fn article_is_count(resolved: &str, parts: &[String], i: usize, next_is_number: 
     let item = !punct.is_empty() || next.is_none() || next_raw.is_some_and(|t| !t.chars().any(char::is_alphanumeric));
     let after_number = item
         && prev_raw.is_some_and(|r| matches!(trailing_mark(r).as_str(), "" | ","))
-        && prev.as_deref().is_some_and(|p| !p.is_empty() && matches!(crate::lookup_norm(resolved, p, false, &[]), Ok(Some(_))))
+        // A figure counts too: "4, 8, 2, one." (#1272); and "2 and one" closing
+        // a list.
+        && prev_index_number(resolved, parts, i)
         && !(base == "en" && next.as_deref() == Some("of"))
         // de "ein" is also a verb particle ("er schläft um zwei ein"), and
         // counts as "eins"; ro "o" is the article (#1174 audit).
