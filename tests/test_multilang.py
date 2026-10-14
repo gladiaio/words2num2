@@ -915,9 +915,13 @@ def test_shared_scale_keeps_input_private_use_chars():
         ("gl", "baixou cinco por cento", "baixou 5 por cento"),
         ("es_MX", "cien por cien", "100 por cien"),
         ("es", "el diez por ciento", "el 10 por ciento"),
-        ("es", "el cinco por cien de los votos", "el 5 por cien de los votos"),
-        # Before a noun "por cien" is "by a hundred".
+        ("es", "cien por cien de los votos", "100 por cien de los votos"),
+        # Outside "cien por cien", "por cien" is "by a hundred" (#1238, #1239).
         ("es", "cinco por cien metros", "5 por 100 metros"),
+        ("es", "cien por cien metros", "100 por 100 metros"),
+        ("es", "lo vendió por cien", "lo vendió por 100"),
+        ("es", "multiplica cinco por cien", "multiplica 5 por 100"),
+        ("es", "cinco por cien de ancho", "5 por 100 de ancho"),
     ],
 )
 def test_percent_phrase_gl_es(lang, text, expected):

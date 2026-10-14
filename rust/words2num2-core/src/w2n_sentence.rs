@@ -2878,17 +2878,25 @@ fn percent_phrase(resolved: &str) -> Option<(&'static str, &'static [&'static st
     }
 }
 
-/// es "cien" after "por" is the percent word only where the phrase ends: at
-/// the end, before a mark, or before "de" ("el cinco por cien de los votos");
-/// "cinco por cien metros" is five by a hundred (#863).
+/// es "cien" after "por" is the percent word only in the set phrase "cien
+/// por cien" (100 %), and only where it ends: at the end, before a mark or
+/// before "de". Elsewhere "por cien" is "by a hundred" ("multiplica cinco por
+/// cien", "lo vendió por cien", #863, #1238, #1239).
 fn percent_word_at(parts: &[String], j: usize) -> bool {
-    if crate::normalize(rstrip_punct(&parts[j]).to_lowercase().as_str()) != "cien" || ends_run_mark(&parts[j]) {
+    let word = |t: &String| crate::normalize(rstrip_punct(t).to_lowercase().as_str());
+    if word(&parts[j]) != "cien" {
         return true;
     }
-    parts[j + 1..]
-        .iter()
-        .find(|t| !py_str_isspace(t))
-        .is_none_or(|t| !t.chars().any(char::is_alphanumeric) || matches!(rstrip_punct(t).to_lowercase().as_str(), "de" | "del"))
+    let mut before = parts[..j].iter().rev().filter(|t| !py_str_isspace(t));
+    let (Some(prep), Some(num)) = (before.next(), before.next()) else { return false };
+    if word(prep) != "por" || ends_run_mark(prep) || !matches!(word(num).as_str(), "cien" | "ciento" | "100") || ends_run_mark(num) {
+        return false;
+    }
+    ends_run_mark(&parts[j])
+        || parts[j + 1..]
+            .iter()
+            .find(|t| !py_str_isspace(t))
+            .is_none_or(|t| !t.chars().any(char::is_alphanumeric) || matches!(rstrip_punct(t).to_lowercase().as_str(), "de" | "del"))
 }
 
 /// The previous non-blank part before `i`, lowercased and without trailing
