@@ -1698,6 +1698,12 @@ fn base_convert_as_written(lang: &str, norm: &str, ordinal: bool) -> Result<W2nV
                             return Ok(W2nValue::Int(BigInt::from(v)));
                         }
                     }
+                    // A scale form the renderer does not write ("dudek unu
+                    // miliono", "trideset pet tisuće"): read as the glued text
+                    // reads (#1280 audit).
+                    if let Ok(v) = base_convert_as_written(lang, &g, false) {
+                        return Ok(v);
+                    }
                 }
                 // Beyond the table: tr writes "üç yüz bin" spaced where
                 // num2words2 glues "üçyüzbin" (300000). Kept only when the
