@@ -1046,3 +1046,19 @@ def test_percent_phrase_gl_es(lang, text, expected):
 )
 def test_it_elided_tens(text, expected):
     assert words2num_sentence(text, lang="it") == expected
+
+
+@pytest.mark.parametrize(
+    "lang, text, expected",
+    [
+        # A char that lowercases to another byte length in a case ending
+        # (U+212A KELVIN SIGN is "k") used to abort the interpreter (#851).
+        ("hu", "ötKor", "5-Kor"),
+        ("fi", "kolmeKSI", "3:KSI"),
+        ("hu", "a HÁROM\u212aOR b", "a 3-\u212aOR b"),
+        # Only the ending is lowercased now: Turkish capitals with İ peel.
+        ("tr", "saat İKİDE", "saat 2'DE"),
+    ],
+)
+def test_suffix_cut_char_boundary(lang, text, expected):
+    assert words2num_sentence(text, lang=lang) == expected
