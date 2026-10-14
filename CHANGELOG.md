@@ -6,11 +6,14 @@ follows [Semantic Versioning](https://semver.org/) and uses
 
 ## [Unreleased]
 
+### Fixed
+
+- tr: a case ending is cut from a number word only when it follows the stem's vowel harmony ("bina", building, was "1000'a"; "bine" is still "1000'e"). The numeral decides the backness, so text without Turkish letters is judged alike ("BINA" stays, "SAAT IKIDE" is "SAAT 2'DE", "saat ucte" "saat 3'te") (#826).
+
 ## [0.4.3] — 2026-10-14
 
 ### Fixed
 
-- tr: a case ending is cut from a number word only when it follows the stem's vowel harmony ("bina", building, was "1000'a"; "bine" is still "1000'e"). An ASCII capital "I" in the stem is resolved by the numeral ("SAAT IKIDE" is "SAAT 2'DE", "BINA" stays) (#826).
 - Sentence mode, shared scale of a range (#865): whether the first bound ends a longer number is now decided by the walk itself ("ciento cinco o seis mil" is "105 o 6000", was "105000 o 6000"; also pt/gl "cento", de "hundert", en "triple five", "two dot five"), across runs of blanks ("one hundred  five or six thousand"), and a sentence mark or a scale word before it is a boundary ("cinco o seis mil. Siete o ocho millones" is "5000 o 6000. 7000000 o 8000000"). A number word right before the first bound keeps it unshared, as before ("cinco seis o siete mil" is "5 6 o 7000"). A scale word the walk does not read is not shared ("five or six thousand™" stays "5 or 6 thousand™"). The pass is skipped outside cardinal and currency modes. A decimal before the first bound stays whole in every language ("tres coma uno cuatro o cinco millones" is "3,14 o 5000000"), a scale word followed by "…" or "—" is still shared, and ";" or ":" after a number word keeps a list ("cinco; seis o siete mil" is "5; 6 o 7000"). Any blank (tab, newline, NBSP) separates the words and is kept, and an ordinal or a token mixing digits and letters ("5km", "10am") before the first bound does not block it ("les premiers cinq ou six mille" is "les 1ers 5000 ou 6000") (#1230, #1233, #1234, #1235, #1236, #1243, #1244, #1245, #1246, #1247, #1248).
 - fi sentence mode: "sataa" (it rains) is 100 only as the continuation of a number ("viisi sataa"), never at its start ("huomenna sataa vettä" was "huomenna 100 vettä", "sataa kolme päivää" "103 päivää", now "sataa 3 päivää"; "viisi sataa" is still 500) (#835).
 - hu/fi case endings: a char that lowercases to another byte length (U+212A KELVIN SIGN) in the ending no longer panics and aborts the interpreter; "öt\u212aor" is "5-\u212aor" (#851). Only the ending is lowercased now, so a stem holding such a char also peels: tr "İKİDE" is "2'DE", hu "KETTŐKOR" "2-KOR" (were left as words).
