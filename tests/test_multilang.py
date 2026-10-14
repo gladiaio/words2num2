@@ -1062,3 +1062,21 @@ def test_it_elided_tens(text, expected):
 )
 def test_suffix_cut_char_boundary(lang, text, expected):
     assert words2num_sentence(text, lang=lang) == expected
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        # fi "sataa" is 100 only continuing a number; else "it rains" (#835).
+        ("huomenna sataa vettä", "huomenna sataa vettä"),
+        ("alkoi sataa rakeita", "alkoi sataa rakeita"),
+        ("viisi sataa", "500"),
+        ("kaksisataa euroa", "200 euroa"),
+        # Never at the head of a number: "it rains for three days" (#1252 audit).
+        ("sataa kolme päivää", "sataa 3 päivää"),
+        ("huomenna sataa kaksi senttiä", "huomenna sataa 2 senttiä"),
+        ("Huomenna sataa. Kolme päivää", "Huomenna sataa. 3 päivää"),
+    ],
+)
+def test_fi_sataa_homograph(text, expected):
+    assert words2num_sentence(text, lang="fi") == expected
