@@ -1701,8 +1701,22 @@ fn base_convert_as_written(lang: &str, norm: &str, ordinal: bool) -> Result<W2nV
                     // A scale form the renderer does not write ("dudek unu
                     // miliono", "trideset pet tisuće"): read as the glued text
                     // reads (#1280 audit).
-                    if let Ok(v) = base_convert_as_written(lang, &g, false) {
-                        return Ok(v);
+                    // Once only: the glued text must not glue again.
+                    thread_local! {
+                        static GLUING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+                    }
+                    if g != norm && !GLUING.with(|f| f.get()) {
+                        struct Reset;
+                        impl Drop for Reset {
+                            fn drop(&mut self) {
+                                GLUING.with(|f| f.set(false));
+                            }
+                        }
+                        GLUING.with(|f| f.set(true));
+                        let _reset = Reset;
+                        if let Ok(v) = base_convert_as_written(lang, &g, false) {
+                            return Ok(v);
+                        }
                     }
                 }
                 // Beyond the table: tr writes "üç yüz bin" spaced where
