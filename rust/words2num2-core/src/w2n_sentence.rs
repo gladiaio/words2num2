@@ -2878,6 +2878,19 @@ fn percent_phrase(resolved: &str) -> Option<(&'static str, &'static [&'static st
     }
 }
 
+/// es "cien" after "por" is the percent word only where the phrase ends: at
+/// the end, before a mark, or before "de" ("el cinco por cien de los votos");
+/// "cinco por cien metros" is five by a hundred (#863).
+fn percent_word_at(parts: &[String], j: usize) -> bool {
+    if crate::normalize(rstrip_punct(&parts[j]).to_lowercase().as_str()) != "cien" || ends_run_mark(&parts[j]) {
+        return true;
+    }
+    parts[j + 1..]
+        .iter()
+        .find(|t| !py_str_isspace(t))
+        .is_none_or(|t| !t.chars().any(char::is_alphanumeric) || matches!(rstrip_punct(t).to_lowercase().as_str(), "de" | "del"))
+}
+
 /// The previous non-blank part before `i`, lowercased and without trailing
 /// punctuation.
 fn prev_word(parts: &[String], i: usize) -> Option<String> {
@@ -3759,6 +3772,12 @@ fn article_is_count(resolved: &str, parts: &[String], i: usize, next_is_number: 
         }
         if percent_phrase(resolved)
             .is_some_and(|(prep, words)| n == prep && next2.as_deref().is_some_and(|w| words.contains(&w)))
+            && parts[i + 1..]
+                .iter()
+                .enumerate()
+                .filter(|(_, t)| !py_str_isspace(t))
+                .nth(1)
+                .is_some_and(|(k, _)| percent_word_at(parts, i + 1 + k))
         {
             return true;
         }
@@ -4505,6 +4524,7 @@ fn words2num_sentence_walk(
                 && next.as_deref().is_some_and(|t| is_scale_word(&converter, t, 100)));
         // "vingt pour cent": "cent" after "pour" is the percent sign, not 100.
         let percent_tail = head_is_percent
+            && percent_word_at(&parts, i)
             && percent.is_some_and(|(prep, _)| {
                 prev_word(&parts, i).is_some_and(|p| crate::normalize(&p) == prep)
             });

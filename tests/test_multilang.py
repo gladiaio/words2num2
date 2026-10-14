@@ -830,6 +830,9 @@ def test_es_con_not_decimal_in_sentence(text, expected):
         ("gl", "baixou cinco por cento", "baixou 5 por cento"),
         ("es_MX", "cien por cien", "100 por cien"),
         ("es", "el diez por ciento", "el 10 por ciento"),
+        ("es", "el cinco por cien de los votos", "el 5 por cien de los votos"),
+        # Before a noun "por cien" is "by a hundred".
+        ("es", "cinco por cien metros", "5 por 100 metros"),
     ],
 )
 def test_percent_phrase_gl_es(lang, text, expected):
