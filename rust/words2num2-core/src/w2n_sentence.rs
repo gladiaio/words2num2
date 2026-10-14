@@ -1598,9 +1598,17 @@ const MY_COUNTERS: &[&str] = &[
 
 /// Is `next` (the word after a my "နှစ်") a counter, currency or unit?
 fn my_counter(next: Option<&str>) -> bool {
+    // A particle glued after the counter ("ကျပ်ပါ", "ယောက်တွေ") leaves the
+    // counter; only these, as "လ" also opens "လာတယ်" (#1016).
+    const PARTICLES: &[&str] = &["ပါ", "တွေ", "ကို", "နဲ့", "လည်း", "စီ", "လောက်", "ခန့်", "တည်း", "မှာ", "က"];
     next.is_some_and(|w| {
         let w = crate::normalize(w);
-        MY_COUNTERS.iter().any(|c| crate::normalize(c) == w)
+        let is = |x: &str| MY_COUNTERS.iter().any(|c| crate::normalize(c) == x);
+        is(&w)
+            || PARTICLES.iter().any(|p| {
+                let p = crate::normalize(p);
+                w.strip_suffix(p.as_str()).is_some_and(|head| !head.is_empty() && is(head))
+            })
     })
 }
 
