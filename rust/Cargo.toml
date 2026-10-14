@@ -5,6 +5,8 @@ resolver = "2"
 [workspace.package]
 version = "0.2.3"
 edition = "2021"
+# The oldest rustc the crates build with (Option::is_none_or, 1.82; #919).
+rust-version = "1.82"
 license = "LGPL-2.1-only"
 repository = "https://github.com/gladiaio/words2num2"
 

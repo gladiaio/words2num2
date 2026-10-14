@@ -2,6 +2,7 @@
 name = "words2num2-py"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 
 [lib]
 name = "_rust"
