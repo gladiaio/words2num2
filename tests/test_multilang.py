@@ -1106,6 +1106,16 @@ def test_fi_sataa_homograph(text, expected):
         ("en", "zero-five hundred", "05 hundred"),
         (
             "en",
+            "we move out at zero six hundred and regroup",
+            "we move out at 06 hundred and regroup",
+        ),
+        (
+            "en",
+            "at zero six hundred, two teams moved in",
+            "at 06 hundred, 2 teams moved in",
+        ),
+        (
+            "en",
             "zero six hundred to zero eight hundred hours",
             "06 hundred to 08 hundred hours",
         ),

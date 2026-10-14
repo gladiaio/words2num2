@@ -2512,18 +2512,30 @@ fn en_digit_run(parts: &[String], i: usize) -> Option<(String, usize)> {
     // hundred (hours)" and "oh five hundred" are military times, read as
     // written (#1255, #1257).
     if let Some((len, part)) = end {
-        let goes_on = |n: &str| {
-            n == "and"
-                || crate::w2n_lang_en::unit_value(n).is_some()
-                || crate::w2n_lang_en::tens_value(n).is_some()
-                || n.split('-').next().is_some_and(|h| crate::w2n_lang_en::tens_value(h).is_some())
+        let number_word = |n: &str| {
+            n != "zero"
+                && (crate::w2n_lang_en::unit_value(n).is_some()
+                    || crate::w2n_lang_en::tens_value(n).is_some()
+                    || n.split('-').next().is_some_and(|h| crate::w2n_lang_en::tens_value(h).is_some()))
         };
+        // The words after the multiplier, as written: the number goes on
+        // only with no mark on the multiplier, and "and" only before another
+        // number word ("zero six hundred and regroup" is a time, #1254 audit).
+        let after: Vec<&String> = parts[part + 1..].iter().filter(|t| !py_str_isspace(t)).take(3).collect();
+        let goes_on = after.first().is_some_and(|m| !ends_run_mark(m) && !m.ends_with([',', ';', ':', '"', '\u{201d}']))
+            && match after.get(1).map(|t| rstrip_punct(t).to_lowercase()) {
+                Some(n) if n == "and" => {
+                    !ends_run_mark(after[1]) && after.get(2).is_some_and(|t| number_word(&rstrip_punct(t).to_lowercase()))
+                }
+                Some(n) => number_word(&n),
+                None => false,
+            };
         if zero_head
             && !repeated
             && digits.as_bytes()[len - 1] != b'0'
             && !ends_run_mark(&parts[part])
             && next_word(parts, part).is_some_and(|n| is_scale_word(&Converter::En, &n, 100))
-            && next_word2(parts, part).is_some_and(|n| goes_on(&n))
+            && goes_on
             // One digit word in its own part ("zero-five hundred" stays).
             && !parts[part].contains('-')
             // "zero nine hundred thirty hours": a military time.
