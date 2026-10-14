@@ -4280,10 +4280,25 @@ pub(crate) fn share_scale_words(text: &str, lang: &str) -> Option<String> {
             _ => None,
         }
     };
-    let toks: Vec<&str> = text.split(' ').collect();
-    // The words, without the blanks a run of spaces, a tab or a newline
-    // leaves between them (#1234).
-    let nb: Vec<usize> = (0..toks.len()).filter(|&i| !toks[i].trim().is_empty()).collect();
+    // The words and where they sit: any run of blanks (spaces, a tab, a
+    // newline, NBSP) separates them and is kept as written (#1234, #1247).
+    let mut spans: Vec<(usize, usize)> = Vec::new();
+    let mut start = None;
+    for (i, c) in text.char_indices() {
+        match (c.is_whitespace(), start) {
+            (true, Some(s0)) => {
+                spans.push((s0, i));
+                start = None;
+            }
+            (false, None) => start = Some(i),
+            _ => {}
+        }
+    }
+    if let Some(s0) = start {
+        spans.push((s0, text.len()));
+    }
+    let toks: Vec<&str> = spans.iter().map(|&(a, b)| &text[a..b]).collect();
+    let nb: Vec<usize> = (0..toks.len()).collect();
     // The scale words appended after each token, built right to left so a
     // chain shares them ("five or six or seven thousand", #1219); the text
     // is rebuilt once at the end (#1230).
@@ -4323,6 +4338,8 @@ pub(crate) fn share_scale_words(text: &str, lang: &str) -> Option<String> {
         let lead_clean = a_tok.len() == toks[ka].len();
         if p >= 2 && !is_and && lead_clean {
             let prev = toks[nb[p - 2]];
+            // A figure, not an ordinal ("the 2nd five or six thousand", #1248).
+            let figure = |t: &str| t.chars().any(|c| c.is_ascii_digit()) && !t.chars().any(char::is_alphabetic);
             let prev_bare = bare(prev);
             // The words before A back to a sentence mark, at most six: enough
             // for "tres coma uno cuatro" or "one thousand two hundred and".
@@ -4333,7 +4350,7 @@ pub(crate) fn share_scale_words(text: &str, lang: &str) -> Option<String> {
             let from = nb[first];
             // A figure before A: a list or a longer number ("5, six or seven
             // thousand", "In 2020 five or six thousand", #1229).
-            if prev.chars().any(|c| c.is_ascii_digit()) {
+            if figure(prev) {
                 continue;
             }
             // A comma ends a list item after a number word of the same order;
@@ -4353,7 +4370,7 @@ pub(crate) fn share_scale_words(text: &str, lang: &str) -> Option<String> {
             // mille", #1243). A sentence mark, or a scale with a comma, ends
             // the previous number; ";" and ":" may separate list items.
             let marked = prev.ends_with(['.', '!', '?', ',', '…']);
-            if !marked && walk(prev).chars().any(|c| c.is_ascii_digit()) {
+            if !marked && figure(&walk(prev)) {
                 continue;
             }
             // A is the tail of a longer number when the walk joins it to the
@@ -4408,12 +4425,22 @@ pub(crate) fn share_scale_words(text: &str, lang: &str) -> Option<String> {
     if !changed {
         return None;
     }
-    let mut out: Vec<String> = Vec::with_capacity(toks.len() + 8);
-    for (i, t) in toks.iter().enumerate() {
-        out.push(if mark[i] { format!("{SHARE_MARK}{t}") } else { t.to_string() });
-        out.extend(after[i].iter().cloned());
+    let mut out = String::with_capacity(text.len() + 32);
+    let mut end = 0;
+    for (i, &(a, b)) in spans.iter().enumerate() {
+        out.push_str(&text[end..a]);
+        if mark[i] {
+            out.push(SHARE_MARK);
+        }
+        out.push_str(&text[a..b]);
+        for w in &after[i] {
+            out.push(' ');
+            out.push_str(w);
+        }
+        end = b;
     }
-    Some(out.join(" "))
+    out.push_str(&text[end..]);
+    Some(out)
 }
 
 /// es "diez y seis" -> "dieciséis" (16..19, #866), or None when the text

@@ -932,6 +932,13 @@ def test_es_con_not_decimal_in_sentence(text, expected):
         ("en", "five or six thousand\u2014", "5000 or 6000\u2014"),
         ("en", "one hundred, six or seven thousand people", "100, 6 or 7000 people"),
         ("es", "cinco; seis o siete mil", "5; 6 o 7000"),
+        # Any blank separates words, kept as written (#1245, #1247).
+        ("en", "five,\n six or seven thousand", "5,\n 6 or 7000"),
+        ("en", "five or\tsix thousand people", "5000 or\t6000 people"),
+        ("es", "entre dos y\u00a0tres millones", "entre 2000000 y\u00a03000000"),
+        # An ordinal before A is no figure of a list (#1248).
+        ("fr", "les premiers cinq ou six mille", "les 1ers 5000 ou 6000"),
+        ("en", "the 2nd five or six thousand", "the 2nd 5000 or 6000"),
         (
             "it",
             "cinque o sei mila. Sei o sette milioni",
