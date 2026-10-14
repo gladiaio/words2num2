@@ -486,18 +486,29 @@ fn derive(lang: &str, tab: &HashMap<String, i64>) -> Derived {
         }
     }
     d.parts = parts;
-    let units: Vec<(i64, &str)> = tab.iter().filter(|(k, v)| (1..=10).contains(*v) && !k.contains(' ')).map(|(k, v)| (*v, k.as_str())).collect();
+    let units: Vec<(i64, &str)> = tab
+        .iter()
+        .filter(|(k, v)| (1..=10).contains(*v) && !k.contains(' '))
+        .map(|(k, v)| (*v, k.as_str()))
+        .collect();
     let mut morphemes: HashMap<String, bool> = HashMap::new();
     // Morphemes that are everyday words too: hy "անասուն" (70 = "յոթ|անասուն")
     // is "livestock" (#987).
     let words = ["անասուն"].map(crate::normalize);
     let mut keep = |m: &str, follows: bool| {
         // Four letters at least: hu "van" (60 = "hat|van") is also "is".
-        if m.chars().count() >= 4 && !tab.contains_key(m) && !conns.contains(&m) && !words.iter().any(|w| w == m) {
+        if m.chars().count() >= 4
+            && !tab.contains_key(m)
+            && !conns.contains(&m)
+            && !words.iter().any(|w| w == m)
+        {
             morphemes.entry(m.to_string()).or_insert(follows);
         }
     };
-    for (k, v) in tab.iter().filter(|(k, v)| (20..=99).contains(*v) && !k.contains(' ')) {
+    for (k, v) in tab
+        .iter()
+        .filter(|(k, v)| (20..=99).contains(*v) && !k.contains(' '))
+    {
         for (u, uw) in &units {
             if v % 10 == 0 && (2..=9).contains(u) && *v == u * 10 {
                 if let Some(rest) = k.strip_prefix(uw) {
@@ -653,7 +664,8 @@ pub fn morpheme_follows_unit(lang: &str, norm: &str) -> Option<bool> {
     if norm.contains(' ') {
         return None;
     }
-    crate::with_cardinal_table(lang, |tab| derived(lang, tab).morphemes.get(norm).copied()).flatten()
+    crate::with_cardinal_table(lang, |tab| derived(lang, tab).morphemes.get(norm).copied())
+        .flatten()
 }
 
 /// Does the renderer spell another value exactly like `norm` too? Where the

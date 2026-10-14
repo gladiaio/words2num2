@@ -304,7 +304,11 @@ pub fn locale_format(lang: &str) -> Option<NumberFormat> {
     let mut parts = normalized.split('_');
     let base = parts.next().unwrap_or("").to_ascii_lowercase();
     if let Some(region) = parts.next() {
-        let region = if region.len() == 2 { region.to_ascii_uppercase() } else { region.to_string() };
+        let region = if region.len() == 2 {
+            region.to_ascii_uppercase()
+        } else {
+            region.to_string()
+        };
         if let Some(f) = lookup_format(&format!("{base}_{region}")) {
             return Some(f);
         }
@@ -335,7 +339,8 @@ pub fn format_key(requested: &str, resolved: &str) -> String {
 /// auto-detects instead (see [`parse_number_string`]). This stays the public
 /// "which separators would a document in this locale use" answer.
 pub fn get_format(lang: &str) -> NumberFormat {
-    locale_format(lang).unwrap_or_else(|| lookup_format("_default").expect("_default is always present"))
+    locale_format(lang)
+        .unwrap_or_else(|| lookup_format("_default").expect("_default is always present"))
 }
 
 // ---------------------------------------------------------------------------
@@ -430,7 +435,10 @@ pub fn parse_number_string(
     if thousands_sep.is_some() || decimal_sep.is_some() {
         let t = thousands_sep.map(ascii_apostrophes);
         let d = decimal_sep.map(ascii_apostrophes);
-        return Ok(apply_sign(sign, parse_with_explicit(&s, t.as_deref(), d.as_deref())?));
+        return Ok(apply_sign(
+            sign,
+            parse_with_explicit(&s, t.as_deref(), d.as_deref())?,
+        ));
     }
 
     let fmt = lang.and_then(locale_format);
@@ -447,7 +455,10 @@ pub fn parse_number_string(
 /// A minus sign before a figure: the ASCII hyphen-minus and the dashes and
 /// minus signs typography puts there ("−1.234", "–42"; #443).
 pub fn is_minus(c: char) -> bool {
-    matches!(c, '-' | '\u{2010}'..='\u{2015}' | '\u{2212}' | '\u{FE58}' | '\u{FE63}' | '\u{FF0D}')
+    matches!(
+        c,
+        '-' | '\u{2010}'..='\u{2015}' | '\u{2212}' | '\u{FE58}' | '\u{FE63}' | '\u{FF0D}'
+    )
 }
 
 /// Python's `sign * value`, where `sign` is the int `1` or `-1`.
@@ -503,7 +514,9 @@ fn parse_with_explicit(
     // (#425).
     let t = thousands_sep.filter(|t| !t.is_empty());
     // Without a decimal_sep the decimal is the dot — unless the dot groups.
-    let d = decimal_sep.filter(|d| !d.is_empty()).or((t != Some(".")).then_some("."));
+    let d = decimal_sep
+        .filter(|d| !d.is_empty())
+        .or((t != Some(".")).then_some("."));
     let int_part = d.and_then(|d| s.split_once(d)).map_or(s, |(i, _)| i);
     let mut marks: Vec<&str> = Vec::new();
     if let Some(t) = t.filter(|t| !is_space_like_sep(t)) {
@@ -555,9 +568,14 @@ fn valid_grouping(groups: &[&str]) -> bool {
 /// The Indian lakh grouping CLDR writes for hi, bn, ta, ... and en_IN:
 /// "12,34,567" — a head of 1-2 digits, groups of 2, a last group of 3.
 fn lakh_grouping(groups: &[&str]) -> bool {
-    let digits = |g: &str, n: usize| g.chars().count() == n && g.chars().all(|c| decimal_digit(c).is_some());
-    let Some((last, rest)) = groups.split_last() else { return false };
-    let Some((head, mid)) = rest.split_first() else { return false };
+    let digits =
+        |g: &str, n: usize| g.chars().count() == n && g.chars().all(|c| decimal_digit(c).is_some());
+    let Some((last, rest)) = groups.split_last() else {
+        return false;
+    };
+    let Some((head, mid)) = rest.split_first() else {
+        return false;
+    };
     groups.len() >= 3
         && digits(last, 3)
         && (digits(head, 1) || digits(head, 2))
@@ -569,7 +587,11 @@ fn lakh_grouping(groups: &[&str]) -> bool {
 fn groups_in_lakhs(lang: &str) -> bool {
     let norm = lang.replace('-', "_");
     let base = norm.split('_').next().unwrap_or("");
-    norm.eq_ignore_ascii_case("en_IN") || matches!(base, "hi" | "bn" | "ta" | "te" | "ml" | "gu" | "pa" | "or" | "ne" | "as" | "mr")
+    norm.eq_ignore_ascii_case("en_IN")
+        || matches!(
+            base,
+            "hi" | "bn" | "ta" | "te" | "ml" | "gu" | "pa" | "or" | "ne" | "as" | "mr"
+        )
 }
 
 /// [`valid_grouping`]; `zero_head_ok` where the caller named the thousands
@@ -661,7 +683,11 @@ fn auto_detect_parse(s: &str, hint: Option<char>) -> Result<W2nValue> {
         // Both present — the rightmost is decimal.
         let last_comma = last_char_index(&s2, ',').expect("has_comma");
         let last_dot = last_char_index(&s2, '.').expect("has_dot");
-        let (dec, grp) = if last_comma > last_dot { (',', '.') } else { ('.', ',') };
+        let (dec, grp) = if last_comma > last_dot {
+            (',', '.')
+        } else {
+            ('.', ',')
+        };
         let (int_part, frac) = s2.rsplit_once(dec).expect("has dec");
         if int_part.contains(dec) {
             return Err(not_a_number());
@@ -738,7 +764,9 @@ fn to_number(s: &str) -> Result<W2nValue> {
     if ascii.contains('.') {
         // The scale is the number of digits written: "12.50" keeps its two.
         Ok(W2nValue::Dec(
-            ascii.parse::<BigDecimal>().expect("gated by fullmatch_number"),
+            ascii
+                .parse::<BigDecimal>()
+                .expect("gated by fullmatch_number"),
         ))
     } else {
         // int() is arbitrary precision — BigInt, never a fixed-width cast.
@@ -1071,7 +1099,7 @@ mod tests {
         assert_eq!(p("1 234 567").unwrap(), int(1234567));
         assert_eq!(p("1'234.5").unwrap(), dec("1234.5")); // apostrophe stripped
         assert_eq!(p("1_000").unwrap(), int(1000)); // underscore stripped
-        // Several separators group thousands only in groups of three (#55).
+                                                    // Several separators group thousands only in groups of three (#55).
         assert_eq!(p("1,234,567").unwrap(), int(1234567));
         assert_eq!(err("1,,234"), "not a parseable number: '1,,234'");
         assert_eq!(err("1.5.2026"), "not a parseable number: '1.5.2026'");
@@ -1107,7 +1135,7 @@ mod tests {
         assert_eq!(p("-0").unwrap(), int(0)); // ints have no -0
         assert_eq!(p("\u{a0}\u{a0}42\u{a0}").unwrap(), int(42));
         assert_eq!(p("\u{1c}42").unwrap(), int(42)); // \s covers U+001C
-        // A decimal zero is exact; BigDecimal carries no sign on zero.
+                                                     // A decimal zero is exact; BigDecimal carries no sign on zero.
         assert_eq!(p("-0.0").unwrap(), dec("0.0"));
         // Only ONE sign char is consumed.
         assert_eq!(err("+-42"), "not a parseable number: '-42'");
@@ -1151,7 +1179,9 @@ mod tests {
     /// #423, #424, #464: regional and alias rows.
     #[test]
     fn regional_and_alias_rows() {
-        for lang in ["es_GT", "es_NI", "es_HN", "es-MX", "es_US", "hi", "bn", "ms", "tl", "my"] {
+        for lang in [
+            "es_GT", "es_NI", "es_HN", "es-MX", "es_US", "hi", "bn", "ms", "tl", "my",
+        ] {
             assert_eq!(pl("1,234", lang).unwrap(), int(1234), "{lang}");
         }
         assert_eq!(pl("1,234.5", "hi").unwrap(), dec("1234.5"));
@@ -1204,7 +1234,10 @@ mod tests {
         // The lakh shape with a stated comma, and a zero head the caller
         // grouped, read as before.
         assert_eq!(ex("12,34,567", Some(","), Some(".")).unwrap(), int(1234567));
-        assert_eq!(ex("12,34,567.5", Some(","), Some(".")).unwrap(), dec("1234567.5"));
+        assert_eq!(
+            ex("12,34,567.5", Some(","), Some(".")).unwrap(),
+            dec("1234567.5")
+        );
         assert_eq!(ex("0,234", Some(","), Some(".")).unwrap(), int(234));
     }
 
@@ -1229,7 +1262,10 @@ mod tests {
         assert_eq!(ps("1,234", None, Some(",")).unwrap(), dec("1.234"));
         assert_eq!(ps("1x234y5", Some("x"), Some("y")).unwrap(), dec("1234.5"));
         assert_eq!(ps("1.234", None, Some(".")).unwrap(), dec("1.234"));
-        assert_eq!(ps("12'345.67", Some("'"), Some(".")).unwrap(), dec("12345.67"));
+        assert_eq!(
+            ps("12'345.67", Some("'"), Some(".")).unwrap(),
+            dec("12345.67")
+        );
         assert_eq!(ps("1_234.56", Some("_"), None).unwrap(), dec("1234.56"));
         // Some("") is Python's "" — falsy, so no rewrite happens at all.
         assert_eq!(ps("1.234", Some(""), None).unwrap(), dec("1.234"));
@@ -1237,8 +1273,14 @@ mod tests {
         // A configured space-like strips ALL space-likes...
         assert_eq!(ps("1 234", Some(" "), None).unwrap(), int(1234));
         assert_eq!(ps("1\u{a0}234", Some(" "), None).unwrap(), int(1234));
-        assert_eq!(ps("1\u{202f}234", Some("\u{202f}"), None).unwrap(), int(1234));
-        assert_eq!(ps("1\u{2009}234", Some("\u{2009}"), None).unwrap(), int(1234));
+        assert_eq!(
+            ps("1\u{202f}234", Some("\u{202f}"), None).unwrap(),
+            int(1234)
+        );
+        assert_eq!(
+            ps("1\u{2009}234", Some("\u{2009}"), None).unwrap(),
+            int(1234)
+        );
         // ...but "\t" is NOT in (" ", NBSP, NNBSP, THIN_SPACE), so it only
         // does a literal replace and the NBSP survives into the error.
         assert_eq!(
@@ -1257,8 +1299,14 @@ mod tests {
     fn traced_to_number_bigint_and_float() {
         assert_eq!(p("0.1").unwrap(), dec("0.1"));
         // Exact: no binary rounding (#71).
-        assert_eq!(p("1.0000000000000000001").unwrap(), dec("1.0000000000000000001"));
-        assert_eq!(p("12345678901234567.89").unwrap(), dec("12345678901234567.89"));
+        assert_eq!(
+            p("1.0000000000000000001").unwrap(),
+            dec("1.0000000000000000001")
+        );
+        assert_eq!(
+            p("12345678901234567.89").unwrap(),
+            dec("12345678901234567.89")
+        );
         match p("12.50").unwrap() {
             W2nValue::Dec(d) => assert_eq!(d.to_string(), "12.50"), // scale kept
             v => panic!("expected Decimal, got {v:?}"),
@@ -1323,11 +1371,17 @@ mod tests {
     fn swiss_typographic_apostrophe() {
         assert_eq!(pl("1\u{2019}234.5", "de_CH").unwrap(), dec("1234.5"));
         assert_eq!(pl("1\u{2019}234,5", "fr_CH").unwrap(), dec("1234.5"));
-        assert_eq!(pl("1\u{2019}234\u{2019}567", "fr_CH").unwrap(), int(1234567));
+        assert_eq!(
+            pl("1\u{2019}234\u{2019}567", "fr_CH").unwrap(),
+            int(1234567)
+        );
         assert_eq!(p("1\u{2019}234.5").unwrap(), dec("1234.5"));
         assert_eq!(p("1\u{02bc}234").unwrap(), int(1234));
         let ps = |s, t, d| parse_number_string(s, t, d, None);
-        assert_eq!(ps("1\u{2019}234.5", Some("'"), Some(".")).unwrap(), dec("1234.5"));
+        assert_eq!(
+            ps("1\u{2019}234.5", Some("'"), Some(".")).unwrap(),
+            dec("1234.5")
+        );
     }
 
     /// Identical or digit separators are refused, not silently applied (#188).

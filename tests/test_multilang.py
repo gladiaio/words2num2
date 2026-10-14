@@ -841,12 +841,15 @@ def test_lo_billion_sentence():
         # fr feminine article counts as one.
         ("fr", "une ou deux mille personnes", "1000 ou 2000 personnes"),
         # A clause conjunction before A does not join a number.
-        ("es", "Tenía 2 o 3000 pesos y cinco o seis mil", "Tenía 2 o 3000 pesos y 5000 o 6000"),
+        (
+            "es",
+            "Tenía 2 o 3000 pesos y cinco o seis mil",
+            "Tenía 2 o 3000 pesos y 5000 o 6000",
+        ),
     ],
 )
 def test_shared_scale_range(lang, text, expected):
     assert words2num_sentence(text, lang=lang) == expected
-
 
 
 def test_shared_scale_keeps_input_private_use_chars():

@@ -88,23 +88,40 @@ fn mark_forms(lang: &str) -> &'static MarkForms {
         return t;
     }
     let mut forms = MarkForms::default();
-    if let (Some(r), Some(mark)) = (num2words2_core::get_lang_by_key(lang), hundredths_mark(lang)) {
+    if let (Some(r), Some(mark)) = (
+        num2words2_core::get_lang_by_key(lang),
+        hundredths_mark(lang),
+    ) {
         let render = |s: &str| {
             let value = BigDecimal::from_str(s).expect("literal");
-            r.to_cardinal_float(&FloatValue::Decimal { value, precision: 2 }, None).ok()
+            r.to_cardinal_float(
+                &FloatValue::Decimal {
+                    value,
+                    precision: 2,
+                },
+                None,
+            )
+            .ok()
         };
         for n in 1..100u32 {
-            let Some(text) = render(&format!("0.{:02}", n)) else { continue };
+            let Some(text) = render(&format!("0.{:02}", n)) else {
+                continue;
+            };
             if let Some(words) = text.trim().strip_prefix(mark) {
                 forms.hundredths.entry(crate::normalize(words)).or_insert(n);
             }
         }
         let mut clashes = std::collections::HashSet::new();
         let scales = (0..=18).map(|e| 10i64.pow(e));
-        let ints = (1..1000).chain(scales.flat_map(|p| (1..=10).filter_map(move |k| p.checked_mul(k))));
+        let ints =
+            (1..1000).chain(scales.flat_map(|p| (1..=10).filter_map(move |k| p.checked_mul(k))));
         for v in ints {
-            let Some(text) = render(&format!("{v}.5")) else { continue };
-            let Some((before, _)) = text.split_once(mark) else { continue };
+            let Some(text) = render(&format!("{v}.5")) else {
+                continue;
+            };
+            let Some((before, _)) = text.split_once(mark) else {
+                continue;
+            };
             // Every form, not only those that differ from the cardinal: the
             // cardinal reader does not read "كوينتليونا" (2·10^18) at all.
             let before = crate::normalize(before);
@@ -138,10 +155,15 @@ pub fn has_hundredths_mark(lang: &str) -> bool {
 }
 
 pub fn has_written_mark(lang: &str, text: &str) -> bool {
-    let Some(m) = hundredths_mark(lang) else { return false };
+    let Some(m) = hundredths_mark(lang) else {
+        return false;
+    };
     // Every comma must be the conjunction kind for the text to be no decimal:
     // "ألف، وخمسمائة ، خمسون" still holds a mark (#862).
-    let commas: Vec<usize> = text.match_indices([',', m.chars().next().unwrap_or(',')]).map(|(k, _)| k).collect();
+    let commas: Vec<usize> = text
+        .match_indices([',', m.chars().next().unwrap_or(',')])
+        .map(|(k, _)| k)
+        .collect();
     if !commas.is_empty() && commas.iter().all(|&at| conjunction_comma(lang, text, at)) {
         return false;
     }
@@ -165,12 +187,16 @@ fn conjunction_comma(lang: &str, text: &str, at: usize) -> bool {
         return false;
     }
     let next = after.split_whitespace().next().unwrap_or("");
-    let Some(rest) = next.strip_prefix(waw) else { return false };
+    let Some(rest) = next.strip_prefix(waw) else {
+        return false;
+    };
     let norm = crate::normalize(next);
     if norm.starts_with(wahid.as_str()) {
         return false;
     }
-    let Some(r) = crate::lookup_plain(lang, &crate::normalize(rest)) else { return false };
+    let Some(r) = crate::lookup_plain(lang, &crate::normalize(rest)) else {
+        return false;
+    };
     // Only after a hundred or a scale, with a smaller remainder: "ألف،
     // وخمسمائة" is 1500, but "ثلاثة، وخمسون" is a list, no 53 (#954).
     let head = before.replace([',', '\u{060C}'], " ");
@@ -178,7 +204,11 @@ fn conjunction_comma(lang: &str, text: &str, at: usize) -> bool {
         return false;
     };
     // The size of the number: "سالب ألف، وخمسمائة" is -1500 (#975).
-    let p = if p < num_bigint::BigInt::from(0) { -p } else { p };
+    let p = if p < num_bigint::BigInt::from(0) {
+        -p
+    } else {
+        p
+    };
     let Ok(p) = i64::try_from(p) else { return true }; // past i64: a scale, no list
     let mut place = 1i64;
     while p % (place * 10) == 0 && place < i64::MAX / 10 {
@@ -257,7 +287,11 @@ fn derive(lang: &str) -> DecimalForms {
     let mut forms = derive_with(lang, &|s: &str| crate::normalize(s));
     // The same derivation on the text as the walker's tokens read it.
     let raw = derive_with(lang, &|s: &str| {
-        s.to_lowercase().replace(',', " ").split_whitespace().collect::<Vec<_>>().join(" ")
+        s.to_lowercase()
+            .replace(',', " ")
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
     });
     let wholes = raw.fractions.into_iter().flat_map(|(whole, _, _)| whole);
     forms.run_words = raw.pointwords.into_iter().chain(wholes).collect();
@@ -278,7 +312,9 @@ fn derive_with(lang: &str, nz: &dyn Fn(&str) -> String) -> DecimalForms {
     // word found there could turn an integer into a decimal.
     let mut int_words: std::collections::HashSet<String> = Default::default();
     let mut int_texts: Vec<String> = Vec::new();
-    let samples = (0..=1000).chain([1001, 1100, 1234, 2000, 9999, 10000, 12345, 100_000, 1_000_000, 2_000_000]);
+    let samples = (0..=1000).chain([
+        1001, 1100, 1234, 2000, 9999, 10000, 12345, 100_000, 1_000_000, 2_000_000,
+    ]);
     for n in samples {
         if let Some(t) = card(n) {
             int_words.extend(t.split_whitespace().map(str::to_string));
@@ -293,7 +329,10 @@ fn derive_with(lang: &str, nz: &dyn Fn(&str) -> String) -> DecimalForms {
     let mut templates: Vec<(String, String, u32, bool)> = Vec::new(); // (mid, post, k, glued)
     for (k, frac) in [(1u32, 5i64), (2, 14), (3, 125)] {
         let value = BigDecimal::from_str(&format!("3.{}", frac)).expect("literal");
-        let fv = FloatValue::Decimal { value, precision: k };
+        let fv = FloatValue::Decimal {
+            value,
+            precision: k,
+        };
         let Some(rendered) = r.to_cardinal_float(&fv, None).ok().map(|s| nz(&s)) else {
             continue;
         };
@@ -311,7 +350,10 @@ fn derive_with(lang: &str, nz: &dyn Fn(&str) -> String) -> DecimalForms {
         let glued = !rest.is_empty() && !rest.starts_with(' ');
         let rest = rest.trim();
         let mut found = None;
-        for f in [Some(cf.clone()), digits.map(|d| d.join(" "))].into_iter().flatten() {
+        for f in [Some(cf.clone()), digits.map(|d| d.join(" "))]
+            .into_iter()
+            .flatten()
+        {
             if glued {
                 // Glued: the fraction is the end of the same word.
                 if let Some(mid) = rest.strip_suffix(f.as_str()) {
@@ -326,7 +368,10 @@ fn derive_with(lang: &str, nz: &dyn Fn(&str) -> String) -> DecimalForms {
             if ft.is_empty() || ft.len() > rt.len() {
                 continue;
             }
-            if let Some(i) = (0..=rt.len() - ft.len()).rev().find(|&i| rt[i..i + ft.len()] == ft[..]) {
+            if let Some(i) = (0..=rt.len() - ft.len())
+                .rev()
+                .find(|&i| rt[i..i + ft.len()] == ft[..])
+            {
                 found = Some((rt[..i].join(" "), rt[i + ft.len()..].join(" ")));
                 break;
             }
@@ -352,7 +397,8 @@ fn derive_with(lang: &str, nz: &dyn Fn(&str) -> String) -> DecimalForms {
         }
         if post.is_empty() && one_separator {
             let single = !mid.contains(' ');
-            if single && !is_number(&mid) && !in_integers(&mid) && !forms.pointwords.contains(&mid) {
+            if single && !is_number(&mid) && !in_integers(&mid) && !forms.pointwords.contains(&mid)
+            {
                 forms.pointwords.push(mid);
             }
             continue;
@@ -406,7 +452,12 @@ pub fn read(
 /// ja "マイナス零点五"; #703). `None` without a sign.
 fn split_sign(lang: &str, text: &str) -> Option<String> {
     let t = text.trim_start();
-    let dash = |c: char| matches!(c, '-' | '\u{2010}'..='\u{2015}' | '\u{2212}' | '\u{FE58}' | '\u{FE63}' | '\u{FF0D}');
+    let dash = |c: char| {
+        matches!(
+            c,
+            '-' | '\u{2010}'..='\u{2015}' | '\u{2212}' | '\u{FE58}' | '\u{FE63}' | '\u{FF0D}'
+        )
+    };
     if let Some(rest) = t.strip_prefix(dash) {
         return Some(rest.trim_start().to_string());
     }
@@ -417,11 +468,15 @@ fn split_sign(lang: &str, text: &str) -> Option<String> {
     let first = norm.first()?;
     for p in crate::sign_prefixes(lang).iter() {
         let words: Vec<&str> = p.text.split_whitespace().collect();
-        if words.len() <= norm.len() && norm[..words.len()].iter().zip(&words).all(|(a, b)| a == b) {
+        if words.len() <= norm.len() && norm[..words.len()].iter().zip(&words).all(|(a, b)| a == b)
+        {
             return Some(raw[words.len()..].join(" "));
         }
         if p.glued && words.len() == 1 {
-            if let Some(tail) = first.strip_prefix(words[0]).filter(|r| r.chars().next().is_some_and(char::is_alphabetic)) {
+            if let Some(tail) = first
+                .strip_prefix(words[0])
+                .filter(|r| r.chars().next().is_some_and(char::is_alphabetic))
+            {
                 let mut rest = vec![tail.to_string()];
                 rest.extend(raw[1..].iter().map(|w| w.to_string()));
                 return Some(rest.join(" "));
@@ -450,7 +505,14 @@ fn read_unsigned(
         if let Some((a, b)) = body.split_once(mark) {
             let digits = |s: &str| -> Option<String> {
                 (!s.is_empty())
-                    .then(|| s.chars().map(|c| crate::w2n_sentence::digit_value(c).map(|d| char::from(b'0' + d as u8))).collect())
+                    .then(|| {
+                        s.chars()
+                            .map(|c| {
+                                crate::w2n_sentence::digit_value(c)
+                                    .map(|d| char::from(b'0' + d as u8))
+                            })
+                            .collect()
+                    })
                     .flatten()
             };
             if let (Some(a), Some(b)) = (digits(a), digits(b)) {
@@ -490,9 +552,13 @@ fn read_unsigned(
         // A two-digit figure is hundredths: "ثلاثة ، 50" is 3.50. One digit is
         // a list item ("ثلاثة ، 5"), never 0.05 (#806).
         let figure = || {
-            let digits: Option<String> =
-                rest.chars().map(|c| crate::w2n_sentence::digit_value(c).map(|d| char::from(b'0' + d as u8))).collect();
-            digits.filter(|d| d.len() == 2).and_then(|d| d.parse::<u32>().ok())
+            let digits: Option<String> = rest
+                .chars()
+                .map(|c| crate::w2n_sentence::digit_value(c).map(|d| char::from(b'0' + d as u8)))
+                .collect();
+            digits
+                .filter(|d| d.len() == 2)
+                .and_then(|d| d.parse::<u32>().ok())
         };
         // The oblique forms of the renderer's hundredths ("خمسين", "خمس
         // وخمسين", "اثنتين"); a masculine unit (the #617 list) is not one of
@@ -500,9 +566,15 @@ fn read_unsigned(
         // "عشرون ، ثلاثون" already did.
         let norm_rest = crate::normalize(&rest);
         let oblique = || {
-            crate::w2n_sentence::alias_rewrite(lang, &norm_rest).and_then(|r| forms.hundredths.get(&r).copied())
+            crate::w2n_sentence::alias_rewrite(lang, &norm_rest)
+                .and_then(|r| forms.hundredths.get(&r).copied())
         };
-        let n = forms.hundredths.get(&norm_rest).copied().or_else(oblique).or_else(figure)?;
+        let n = forms
+            .hundredths
+            .get(&norm_rest)
+            .copied()
+            .or_else(oblique)
+            .or_else(figure)?;
         return Some((int.to_string(), default_sep, format!("{:0>2}", n)));
     }
     // Each written word normalized on its own: a hyphenated compound stays
@@ -520,7 +592,11 @@ fn read_unsigned(
     // 1. A separator word, then fraction digits.
     if let Some(pos) = units.iter().position(|t| sep_of(t).is_some()) {
         let sep = sep_of(&units[pos])?;
-        let int = if pos == 0 { BigInt::from(0) } else { cardinal(&units[..pos].join(" "))? };
+        let int = if pos == 0 {
+            BigInt::from(0)
+        } else {
+            cardinal(&units[..pos].join(" "))?
+        };
         let rest: Vec<&str> = units[pos + 1..].iter().map(String::as_str).collect();
         let frac = fraction_digits(&rest, cardinal)?;
         return Some((int.to_string(), sep, frac));
@@ -546,12 +622,18 @@ fn read_unsigned(
         if num < BigInt::from(0) || num >= limit {
             return None;
         }
-        return Some((int.to_string(), default_sep, format!("{:0>w$}", num, w = *k as usize)));
+        return Some((
+            int.to_string(),
+            default_sep,
+            format!("{:0>w$}", num, w = *k as usize),
+        ));
     }
     // 3. A separator glued inside the word.
     if toks.len() == 1 {
         for g in &f.glued {
-            let Some(at) = norm.find(g.as_str()) else { continue };
+            let Some(at) = norm.find(g.as_str()) else {
+                continue;
+            };
             let (left, right) = (&norm[..at], &norm[at + g.len()..]);
             if left.is_empty() || right.is_empty() {
                 continue;
@@ -582,7 +664,10 @@ fn fraction_digits(toks: &[&str], cardinal: &dyn Fn(&str) -> Option<BigInt>) -> 
         return None;
     }
     let digit = |t: &str| cardinal(t).filter(|d| *d >= BigInt::from(0) && *d <= BigInt::from(9));
-    let zeros = toks.iter().take_while(|t| digit(t).is_some_and(|d| d == BigInt::from(0))).count();
+    let zeros = toks
+        .iter()
+        .take_while(|t| digit(t).is_some_and(|d| d == BigInt::from(0)))
+        .count();
     let rest = &toks[zeros..];
     let mut out = "0".repeat(zeros);
     if rest.is_empty() {
@@ -662,7 +747,10 @@ mod tests {
         assert_eq!(card("drei Komma eins vier", "de"), "3.14");
         assert_eq!(card("tre komma ett fyra", "sv"), "3.14");
         // A hyphenated compound is one fraction digit (wo 9 = 5 + 4).
-        assert_eq!(card("juróom-ñeent point juróom-ñeent juróom-ñeent", "wo"), "9.99");
+        assert_eq!(
+            card("juróom-ñeent point juróom-ñeent juróom-ñeent", "wo"),
+            "9.99"
+        );
     }
 
     /// #267: the standard separator where the renderer writes "point".
@@ -694,7 +782,10 @@ mod tests {
         assert_eq!(card("\u{2010}zéro virgule cinq", "fr"), "-0.5");
         assert_eq!(card("\u{2013}zéro virgule cinq", "fr"), "-0.5");
         // The rest stays as written: one hyphenated fraction digit.
-        assert_eq!(card("minus fukk ñaar point juróom-ñaar juróom", "wo"), "-12.75");
+        assert_eq!(
+            card("minus fukk ñaar point juróom-ñaar juróom", "wo"),
+            "-12.75"
+        );
         // ar: one sign rule for the "،" decimals too.
         assert_eq!(card("سالب ٣،٥", "ar"), "-3.5");
         assert!(crate::words2num("سالب سالب صفر ، خمسون", "ar", "cardinal").is_err());
@@ -726,23 +817,66 @@ mod tests {
         assert_eq!(card("كوينتليونا ، خمسون", "ar"), "2000000000000000000.50");
         assert_eq!(card("مئتا ، خمسون", "ar"), "200.50");
         // A trailing mark is punctuation.
-        assert_eq!(crate::words2num("ثلاثة ،", "ar", "cardinal").unwrap(), W2nValue::Int(3.into()));
-        assert_eq!(crate::words2num("مائة ،", "ar", "cardinal").unwrap(), W2nValue::Int(100.into()));
-        assert_eq!(crate::words2num("ثلاثة ، ،", "ar", "cardinal").unwrap(), W2nValue::Int(3.into()));
+        assert_eq!(
+            crate::words2num("ثلاثة ،", "ar", "cardinal").unwrap(),
+            W2nValue::Int(3.into())
+        );
+        assert_eq!(
+            crate::words2num("مائة ،", "ar", "cardinal").unwrap(),
+            W2nValue::Int(100.into())
+        );
+        assert_eq!(
+            crate::words2num("ثلاثة ، ،", "ar", "cardinal").unwrap(),
+            W2nValue::Int(3.into())
+        );
         // #954: the conjunction comma only after a hundred or a scale.
         // "مائة وثلاثة، وعشرون" too: 20 is no smaller than the units place of 103.
-        for t in ["ثلاثة، وخمسون", "خمسة، وعشرون", "خمسة, وعشرون", "عشرون، وخمسة", "مائة وثلاثة، وعشرون"] {
+        for t in [
+            "ثلاثة، وخمسون",
+            "خمسة، وعشرون",
+            "خمسة, وعشرون",
+            "عشرون، وخمسة",
+            "مائة وثلاثة، وعشرون",
+        ] {
             assert!(crate::words2num(t, "ar", "cardinal").is_err(), "{t}");
         }
-        for (t, v) in [("ألف، وخمسمائة", 1500), ("ثلاثة آلاف، وخمسمائة", 3500), ("مائة، وخمسون", 150), ("ألف، وخمسمائة، وخمسون", 1550), ("سالب ألف، وخمسمائة", -1500), ("-ألف، وخمسمائة", -1500), ("سالب مليونان، وثمانية عشر", -2000018)] {
-            assert_eq!(crate::words2num(t, "ar", "cardinal").unwrap(), W2nValue::Int(v.into()), "{t}");
+        for (t, v) in [
+            ("ألف، وخمسمائة", 1500),
+            ("ثلاثة آلاف، وخمسمائة", 3500),
+            ("مائة، وخمسون", 150),
+            ("ألف، وخمسمائة، وخمسون", 1550),
+            ("سالب ألف، وخمسمائة", -1500),
+            ("-ألف، وخمسمائة", -1500),
+            ("سالب مليونان، وثمانية عشر", -2000018),
+        ] {
+            assert_eq!(
+                crate::words2num(t, "ar", "cardinal").unwrap(),
+                W2nValue::Int(v.into()),
+                "{t}"
+            );
         }
         // #959: a dash before an ASCII comma leaves it the mark, as a sign word does.
-        for t in ["-, خمسون", "- , خمسون", "\u{2212}, خمسون", "-,خمسون", "سالب , خمسون", "\u{2013}, خمسون", "\u{FF0D}, خمسون"] {
-            assert_eq!(format!("{:?}", crate::words2num(t, "ar", "cardinal").unwrap()), format!("{:?}", crate::words2num("-، خمسون", "ar", "cardinal").unwrap()), "{t}");
+        for t in [
+            "-, خمسون",
+            "- , خمسون",
+            "\u{2212}, خمسون",
+            "-,خمسون",
+            "سالب , خمسون",
+            "\u{2013}, خمسون",
+            "\u{FF0D}, خمسون",
+        ] {
+            assert_eq!(
+                format!("{:?}", crate::words2num(t, "ar", "cardinal").unwrap()),
+                format!(
+                    "{:?}",
+                    crate::words2num("-، خمسون", "ar", "cardinal").unwrap()
+                ),
+                "{t}"
+            );
         }
         // #617: only the renderer's hundredths follow the mark; a list stays one.
-        for list in ["ثلاثة ، أربعة", "، ثلاثة", "ثلاثة ، ثلاثة", "ثلاثة ، خمسة"] {
+        for list in ["ثلاثة ، أربعة", "، ثلاثة", "ثلاثة ، ثلاثة", "ثلاثة ، خمسة"]
+        {
             assert!(crate::words2num(list, "ar", "cardinal").is_err(), "{list}");
         }
         // #616: a glued mark; a doubled one is no decimal.
@@ -768,10 +902,19 @@ mod tests {
         assert_eq!(card("٣،٥٠", "ar"), "3.50");
         assert_eq!(card("3،05", "ar"), "3.05");
         // #881: the oblique tens read like the renderer's.
-        for (t, v) in [("ثلاثة ، خمسين", "3.50"), ("مائة ، خمسين", "100.50"), ("ثلاثة ، عشرين", "3.20"), ("ثلاثة ، تسعين", "3.90")] {
+        for (t, v) in [
+            ("ثلاثة ، خمسين", "3.50"),
+            ("مائة ، خمسين", "100.50"),
+            ("ثلاثة ، عشرين", "3.20"),
+            ("ثلاثة ، تسعين", "3.90"),
+        ] {
             assert_eq!(card(t, "ar"), v, "{t}");
         }
-        for (t, v) in [("ثلاثة ، خمس وخمسين", "3.55"), ("ثلاثة ، اثنتين", "3.02"), ("ثلاثة ، اثنتي عشرة", "3.12")] {
+        for (t, v) in [
+            ("ثلاثة ، خمس وخمسين", "3.55"),
+            ("ثلاثة ، اثنتين", "3.02"),
+            ("ثلاثة ، اثنتي عشرة", "3.12"),
+        ] {
             assert_eq!(card(t, "ar"), v, "{t}");
         }
         assert!(crate::words2num("ثلاثة ، أربعة", "ar", "cardinal").is_err());
@@ -783,20 +926,48 @@ mod tests {
         // #805: a plus sign.
         assert_eq!(card("+3،5", "ar"), "3.5");
         // #806: one digit after a spaced or one-sided mark is a list item.
-        for t in ["ثلاثة،5", "ثلاثة ،5", "٣ ،٥", "٣، ٥", "،5", "ثلاثة ، 5", "3 ، 5"] {
+        for t in [
+            "ثلاثة،5",
+            "ثلاثة ،5",
+            "٣ ،٥",
+            "٣، ٥",
+            "،5",
+            "ثلاثة ، 5",
+            "3 ، 5",
+        ] {
             assert!(crate::words2num(t, "ar", "cardinal").is_err(), "{t}");
         }
         // #807, not for "واحد" (one) nor the renderer's spaced mark.
-        for t in ["مائة ، واحد وعشرون", "مائة ، واحد", "ألف ، واحد", "، واحد", "سالب ، واحد", "، وخمسون", "ثلاثة ، وخمسون", "مائة ، وثلاثة", "ألف ، وخمسمائة"] {
+        for t in [
+            "مائة ، واحد وعشرون",
+            "مائة ، واحد",
+            "ألف ، واحد",
+            "، واحد",
+            "سالب ، واحد",
+            "، وخمسون",
+            "ثلاثة ، وخمسون",
+            "مائة ، وثلاثة",
+            "ألف ، وخمسمائة",
+        ] {
             let r = crate::words2num(t, "ar", "cardinal");
             assert!(r.is_err(), "{t}: {r:?}");
         }
         // A conjunction comma does not hide a later mark (#862).
-        for t in ["ألف، وخمسمائة ، خمسون", "ألف، وخمسمائة ، ثلاثة", "ألف، وخمسمائة ، ، خمسون", "سالب ألف، وخمسمائة ، خمسون", "ألف, وخمسمائة ، خمسون", "ألف، وخمسمائة، خمسون"] {
+        for t in [
+            "ألف، وخمسمائة ، خمسون",
+            "ألف، وخمسمائة ، ثلاثة",
+            "ألف، وخمسمائة ، ، خمسون",
+            "سالب ألف، وخمسمائة ، خمسون",
+            "ألف, وخمسمائة ، خمسون",
+            "ألف، وخمسمائة، خمسون",
+        ] {
             let r = crate::words2num(t, "ar", "cardinal");
             assert!(r.is_err(), "{t}: {r:?}");
         }
-        assert_eq!(crate::words2num("ألفان، وثلاثمائة، وخمسة وأربعون", "ar", "cardinal").unwrap(), W2nValue::Int(2345.into()));
+        assert_eq!(
+            crate::words2num("ألفان، وثلاثمائة، وخمسة وأربعون", "ar", "cardinal").unwrap(),
+            W2nValue::Int(2345.into())
+        );
         assert_eq!(card("سالب ٣،٥", "ar"), "-3.5");
         assert_eq!(card("سالب 3،5", "ar"), "-3.5");
         assert!(crate::words2num("-+3،5", "ar", "cardinal").is_err());
@@ -804,23 +975,41 @@ mod tests {
         // A mark glued to the sign is no bare sign: "-، 50" is -0.50.
         assert_eq!(card("-، 50", "ar"), "-0.50");
         assert!(crate::words2num("سالب، 50", "ar", "cardinal").is_err()); // never -50
-        // #807: a comma before the conjunction is inside the number.
+                                                                          // #807: a comma before the conjunction is inside the number.
         for t in ["ألف، وخمسمائة", "ألف, وخمسمائة"] {
-            assert_eq!(crate::words2num(t, "ar", "cardinal").unwrap(), W2nValue::Int(1500.into()), "{t}");
+            assert_eq!(
+                crate::words2num(t, "ar", "cardinal").unwrap(),
+                W2nValue::Int(1500.into()),
+                "{t}"
+            );
         }
         assert!(crate::words2num("مائة ، , خمسون", "ar", "cardinal").is_err());
         assert!(crate::words2num("مائة , ، خمسون", "ar", "cardinal").is_err());
         assert!(crate::words2num("ثلاثة , أربعة", "ar", "cardinal").is_err());
         // to="digits" keeps the commas of a dictated string.
-        for (t, v) in [("خمسة ، ستة ، سبعة", 567), ("خمسة، ستة، سبعة", 567), ("خمسة , ستة", 56)] {
-            assert_eq!(crate::words2num(t, "ar", "digits").unwrap(), W2nValue::Int(v.into()), "{t}");
+        for (t, v) in [
+            ("خمسة ، ستة ، سبعة", 567),
+            ("خمسة، ستة، سبعة", 567),
+            ("خمسة , ستة", 56),
+        ] {
+            assert_eq!(
+                crate::words2num(t, "ar", "digits").unwrap(),
+                W2nValue::Int(v.into()),
+                "{t}"
+            );
         }
         // #619: a glued minus.
         assert_eq!(card("-ثلاثة ، خمسون", "ar"), "-3.50");
         // #620: other modes never drop the mark.
         assert_eq!(
-            format!("{:?}", crate::words2num("مائة ، خمسون", "ar", "currency").unwrap()),
-            format!("{:?}", crate::words2num("مائة ، خمسون", "ar", "cardinal").unwrap())
+            format!(
+                "{:?}",
+                crate::words2num("مائة ، خمسون", "ar", "currency").unwrap()
+            ),
+            format!(
+                "{:?}",
+                crate::words2num("مائة ، خمسون", "ar", "cardinal").unwrap()
+            )
         );
         assert!(crate::words2num("مائة ، خمسون", "ar", "year").is_err());
         assert!(crate::words2num("مائة ، خمسون", "ar", "ordinal").is_err());

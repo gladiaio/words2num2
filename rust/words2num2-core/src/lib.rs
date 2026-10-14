@@ -76,9 +76,9 @@ pub fn words2num(
         let key = w2n_formats::format_key(lang, &resolved);
         return match w2n_formats::parse_number_string(text, None, None, Some(&key)) {
             Ok(w2n_formats::W2nValue::Int(i)) => Ok(w2n_lang_en::W2nValue::Int(i)),
-            Ok(w2n_formats::W2nValue::Dec(d)) => {
-                Ok(w2n_lang_en::W2nValue::Dec(w2n_lang_en::PyDec::from_bigdecimal(&d)))
-            }
+            Ok(w2n_formats::W2nValue::Dec(d)) => Ok(w2n_lang_en::W2nValue::Dec(
+                w2n_lang_en::PyDec::from_bigdecimal(&d),
+            )),
             Ok(w2n_formats::W2nValue::Float(f)) => Ok(w2n_lang_en::W2nValue::Float(f)),
             Err(e) => Err(w2n_sentence::W2nError::Words2Num(e.0)),
         };
@@ -96,7 +96,8 @@ pub fn words2num(
     if res.is_err() && to == "cardinal" {
         let resolved = w2n_sentence::resolve_lang(lang).unwrap_or_default();
         // "un millón y medio": whole millions and a half (#859).
-        if let Some(v) = scale_and_half(text, lang, resolved.split(['_', '-']).next().unwrap_or("")) {
+        if let Some(v) = scale_and_half(text, lang, resolved.split(['_', '-']).next().unwrap_or(""))
+        {
             return Ok(w2n_lang_en::W2nValue::Int(v.into()));
         }
         match resolved.split(['_', '-']).next().unwrap_or("") {
@@ -114,16 +115,27 @@ pub fn words2num(
                 // glued form reads them ("-တစ်ဆယ့် တစ်", "တစ်ဆယ့် တစ်.").
                 let (lead, core, trail) = edges(text);
                 // A sign word stays a word before the glued number.
-                let (lead, core) = match core.get(..5).filter(|w| w.eq_ignore_ascii_case("minus")).map(|_| &core[5..]) {
-                    Some(rest) if rest.starts_with(char::is_whitespace) => (format!("{lead}minus "), rest.trim_start()),
+                let (lead, core) = match core
+                    .get(..5)
+                    .filter(|w| w.eq_ignore_ascii_case("minus"))
+                    .map(|_| &core[5..])
+                {
+                    Some(rest) if rest.starts_with(char::is_whitespace) => {
+                        (format!("{lead}minus "), rest.trim_start())
+                    }
                     _ => (lead.to_string(), core),
                 };
                 let glued: String = core.split_whitespace().collect();
                 // Number words only: separate figures ("1 2", "၁ ၂", "2 3.5")
                 // stay separate (#1199).
-                let words_only = core.split_whitespace().all(|p| p.chars().all(|c| !c.is_numeric() && !c.is_ascii_punctuation()));
+                let words_only = core.split_whitespace().all(|p| {
+                    p.chars()
+                        .all(|c| !c.is_numeric() && !c.is_ascii_punctuation())
+                });
                 if glued != core && words_only {
-                    if let Ok(v) = w2n_sentence::words2num(&format!("{lead}{glued}{trail}"), lang, to) {
+                    if let Ok(v) =
+                        w2n_sentence::words2num(&format!("{lead}{glued}{trail}"), lang, to)
+                    {
                         return Ok(v);
                     }
                 }
@@ -137,7 +149,16 @@ pub fn words2num(
 /// A minus sign: ASCII, the minus and the hyphens and dashes the table
 /// path reads as one ("–21").
 fn is_minus(c: char) -> bool {
-    matches!(c, '-' | '\u{2212}' | '\u{2010}' | '\u{2011}' | '\u{2012}' | '\u{2013}' | '\u{2014}' | '\u{2015}')
+    matches!(
+        c,
+        '-' | '\u{2212}'
+            | '\u{2010}'
+            | '\u{2011}'
+            | '\u{2012}'
+            | '\u{2013}'
+            | '\u{2014}'
+            | '\u{2015}'
+    )
 }
 
 /// `text` cut into its leading punctuation or sign, its core and its
@@ -196,11 +217,38 @@ fn scale_and_half(text: &str, lang: &str, base: &str) -> Option<i64> {
 /// 79, also spaced "ოცდა ათი"), hundreds ("ას", "ორასი") and "ათასი".
 fn ka_cardinal(text: &str) -> Option<i64> {
     const UNITS: [&str; 19] = [
-        "ერთი", "ორი", "სამი", "ოთხი", "ხუთი", "ექვსი", "შვიდი", "რვა", "ცხრა", "ათი", "თერთმეტი", "თორმეტი",
-        "ცამეტი", "თოთხმეტი", "თხუთმეტი", "თექვსმეტი", "ჩვიდმეტი", "თვრამეტი", "ცხრამეტი",
+        "ერთი",
+        "ორი",
+        "სამი",
+        "ოთხი",
+        "ხუთი",
+        "ექვსი",
+        "შვიდი",
+        "რვა",
+        "ცხრა",
+        "ათი",
+        "თერთმეტი",
+        "თორმეტი",
+        "ცამეტი",
+        "თოთხმეტი",
+        "თხუთმეტი",
+        "თექვსმეტი",
+        "ჩვიდმეტი",
+        "თვრამეტი",
+        "ცხრამეტი",
     ];
     const TENS: [(&str, i64); 4] = [("ოც", 20), ("ორმოც", 40), ("სამოც", 60), ("ოთხმოც", 80)];
-    const HUNDREDS: [&str; 9] = ["ას", "ორას", "სამას", "ოთხას", "ხუთას", "ექვსას", "შვიდას", "რვაას", "ცხრაას"];
+    const HUNDREDS: [&str; 9] = [
+        "ას",
+        "ორას",
+        "სამას",
+        "ოთხას",
+        "ხუთას",
+        "ექვსას",
+        "შვიდას",
+        "რვაას",
+        "ცხრაას",
+    ];
     let unit = |w: &str| UNITS.iter().position(|&u| u == w).map(|k| k as i64 + 1);
     // A sign word and trailing punctuation, as the table path reads them
     // ("მინუს ოცდაერთი", "ოცდაერთი.", #1198 audit).
@@ -215,7 +263,10 @@ fn ka_cardinal(text: &str) -> Option<i64> {
     }
     let mut sign = if minuses == 1 { -1 } else { 1 };
     let lower = text.to_lowercase();
-    let word_len = ["მინუს", "minus"].iter().find(|w| lower.starts_with(*w)).map(|w| w.len());
+    let word_len = ["მინუს", "minus"]
+        .iter()
+        .find(|w| lower.starts_with(*w))
+        .map(|w| w.len());
     let text = match word_len.map(|n| &text[n..]) {
         Some(rest) if rest.starts_with(char::is_whitespace) && sign == 1 => {
             sign = -1;
@@ -245,15 +296,24 @@ fn ka_cardinal(text: &str) -> Option<i64> {
             }
             total = if group == 0 { 1000 } else { group * 1000 };
             group = 0;
-        } else if let Some(k) = HUNDREDS.iter().position(|&h| w == h || w.strip_suffix('ი') == Some(h)) {
+        } else if let Some(k) = HUNDREDS
+            .iter()
+            .position(|&h| w == h || w.strip_suffix('ი') == Some(h))
+        {
             if group != 0 {
                 return None;
             }
             group = (k as i64 + 1) * 100;
-        } else if let Some(&(_, t)) = TENS.iter().find(|(stem, _)| w.strip_suffix('ი') == Some(*stem)) {
+        } else if let Some(&(_, t)) = TENS
+            .iter()
+            .find(|(stem, _)| w.strip_suffix('ი') == Some(*stem))
+        {
             group = small(t, group)?;
         } else if let Some(v) = TENS.iter().find_map(|&(stem, t)| {
-            w.strip_prefix(stem).and_then(|r| r.strip_prefix("და")).and_then(unit).map(|u| t + u)
+            w.strip_prefix(stem)
+                .and_then(|r| r.strip_prefix("და"))
+                .and_then(unit)
+                .map(|u| t + u)
         }) {
             group = small(v, group)?;
         } else if let Some(v) = unit(w) {
@@ -309,13 +369,19 @@ pub(crate) fn numerical_symbols() -> bool {
 /// would fold "10²" into 102. A power after a unit's letters ("m²", "km³") is
 /// the unit's.
 pub(crate) fn holds_compat_digit(text: &str) -> bool {
-    let unit_power = |prev: Option<char>, c: char| matches!(c, '\u{00B2}' | '\u{00B3}') && prev.is_some_and(|p| p.is_alphabetic());
+    let unit_power = |prev: Option<char>, c: char| {
+        matches!(c, '\u{00B2}' | '\u{00B3}') && prev.is_some_and(|p| p.is_alphabetic())
+    };
     let chars: Vec<char> = text.chars().collect();
-    let symbol = |k: usize| is_compat_digit(chars[k]) && !unit_power(k.checked_sub(1).map(|j| chars[j]), chars[k]);
+    let symbol = |k: usize| {
+        is_compat_digit(chars[k]) && !unit_power(k.checked_sub(1).map(|j| chars[j]), chars[k])
+    };
     if !numerical_symbols() {
         return (0..chars.len()).any(symbol);
     }
-    let figure = |k: usize| (chars[k].is_numeric() && !is_compat_digit(chars[k])) || matches!(chars[k], '.' | ',');
+    let figure = |k: usize| {
+        (chars[k].is_numeric() && !is_compat_digit(chars[k])) || matches!(chars[k], '.' | ',')
+    };
     (1..chars.len()).any(|k| (symbol(k) && figure(k - 1)) || (symbol(k - 1) && figure(k)))
 }
 
@@ -331,7 +397,10 @@ pub(crate) fn signed_figure_in(text: &str, lang: &str) -> Option<String> {
     // The figure starts at the first digit; the sign is everything before it,
     // one word or several, spaced or glued: zh "负1234", ja "マイナス2.75", zu
     // "ngaphansi kwe 1.5" (#950).
-    let at = t.char_indices().find(|(_, c)| w2n_sentence::is_unicode_digit(*c)).map(|(i, _)| i)?;
+    let at = t
+        .char_indices()
+        .find(|(_, c)| w2n_sentence::is_unicode_digit(*c))
+        .map(|(i, _)| i)?;
     let (h, figure) = (t[..at].trim_end(), &t[at..]);
     let comma = |c: char| c == ',' || (c == '\u{060C}' && !mark_is_decimal);
     let head = h.strip_suffix(comma).map(str::trim_end).unwrap_or(h);
@@ -343,7 +412,9 @@ pub(crate) fn signed_figure_in(text: &str, lang: &str) -> Option<String> {
     // "-5" itself is a plain figure, and so is "-,5": a bare dash needs a
     // space before the figure (#984).
     let spaced = t[..at].ends_with(|c: char| c.is_whitespace() || comma(c));
-    if !t[..at].contains(char::is_whitespace) && head.chars().all(|c| c == '+' || w2n_formats::is_minus(c)) {
+    if !t[..at].contains(char::is_whitespace)
+        && head.chars().all(|c| c == '+' || w2n_formats::is_minus(c))
+    {
         return None;
     }
     // What touches the figure is a space, a comma, or the sign itself: "-.5"
@@ -354,11 +425,19 @@ pub(crate) fn signed_figure_in(text: &str, lang: &str) -> Option<String> {
     // A closing bracket ends a sign too (kn "(-) 1 234"), and a tsheg a
     // Tibetan word (bo "མེད་ཆ་ 1 234").
     let touches = |c: char| {
-        c.is_alphabetic() || matches!(c, '+' | ')' | '\u{0F0B}') || w2n_formats::is_minus(c) || unicode_mark(c)
+        c.is_alphabetic()
+            || matches!(c, '+' | ')' | '\u{0F0B}')
+            || w2n_formats::is_minus(c)
+            || unicode_mark(c)
     };
     // A space ends the sign, whatever mark the sign word carries ("moins:
     // 1.234" is -1234, #1032).
-    if !t[..at].chars().rev().find(|c| !comma(*c)).is_some_and(|c| c.is_whitespace() || touches(c)) {
+    if !t[..at]
+        .chars()
+        .rev()
+        .find(|c| !comma(*c))
+        .is_some_and(|c| c.is_whitespace() || touches(c))
+    {
         return None;
     }
     let word = normalize(head);
@@ -380,7 +459,10 @@ fn unicode_mark(c: char) -> bool {
 /// numbers side by side — is not one and is left to the word grammar.
 fn is_digit_literal(text: &str) -> bool {
     let t = text.trim();
-    let body = t.strip_prefix(|c| c == '+' || w2n_formats::is_minus(c)).map(str::trim_start).unwrap_or(t);
+    let body = t
+        .strip_prefix(|c| c == '+' || w2n_formats::is_minus(c))
+        .map(str::trim_start)
+        .unwrap_or(t);
     let is_digit = |c: char| c.is_numeric() && w2n_sentence::digit_value(c).is_some();
     let is_sep = |c: char| matches!(c, '.' | ',' | '\'' | '\u{2019}' | '_') || c.is_whitespace();
     let (Some(first), Some(last)) = (body.chars().next(), body.chars().last()) else {
@@ -448,7 +530,8 @@ pub fn normalize_tail(decomposed: &str) -> String {
             // (soft hyphen, ZWNJ/ZWJ after a virama, word joiner, BOM) are
             // invisible and carry no letter.
             '\u{200B}' => chars.push(' '),
-            '\u{00AD}' | '\u{200C}' | '\u{200D}' | '\u{2060}' | '\u{FEFF}' | '\u{200E}' | '\u{200F}' | '\u{061C}' => {}
+            '\u{00AD}' | '\u{200C}' | '\u{200D}' | '\u{2060}' | '\u{FEFF}' | '\u{200E}'
+            | '\u{200F}' | '\u{061C}' => {}
             c if is_apostrophe(c) || is_clause_punctuation(c) => chars.push(' '),
             c => chars.push(c),
         }
@@ -493,7 +576,10 @@ pub fn normalize_tail(decomposed: &str) -> String {
 /// apostrophe / turned comma (uk "пʼять", uz "toʻrt", the haw ʻokina) and the
 /// prime / backtick.
 pub fn is_apostrophe(c: char) -> bool {
-    matches!(c, '\u{2018}' | '\u{2019}' | '\u{201B}' | '\u{02BC}' | '\u{02BB}' | '\u{02B9}' | '`')
+    matches!(
+        c,
+        '\u{2018}' | '\u{2019}' | '\u{201B}' | '\u{02BC}' | '\u{02BB}' | '\u{02B9}' | '`'
+    )
 }
 
 /// Sentence and clause marks, quotes and brackets that sit glued to a word the
@@ -538,11 +624,20 @@ pub fn normalize_public(s: &str, convert_numerical_symbols: bool) -> String {
         return normalize(s);
     };
     let symbols: Vec<char> = s.chars().filter(|&c| is_compat_digit(c)).collect();
-    let masked: String = s.chars().map(|c| if is_compat_digit(c) { mark } else { c }).collect();
+    let masked: String = s
+        .chars()
+        .map(|c| if is_compat_digit(c) { mark } else { c })
+        .collect();
     let mut kept = symbols.into_iter();
     normalize(&masked)
         .chars()
-        .map(|c| if c == mark { kept.next().unwrap_or(c) } else { c })
+        .map(|c| {
+            if c == mark {
+                kept.next().unwrap_or(c)
+            } else {
+                c
+            }
+        })
         .collect()
 }
 
@@ -578,7 +673,11 @@ pub fn normalize(s: &str) -> String {
         return normalize_tail(s); // NFKD and the combining-mark filter are no-ops on ASCII
     }
     let nfkd: String = s.nfkd().collect();
-    let nfkd = if nfkd.contains('\u{200D}') { ml_atomic_chillus(&nfkd) } else { nfkd };
+    let nfkd = if nfkd.contains('\u{200D}') {
+        ml_atomic_chillus(&nfkd)
+    } else {
+        nfkd
+    };
     let mut stripped = String::with_capacity(nfkd.len());
     for c in nfkd.chars() {
         match c {
@@ -591,7 +690,7 @@ pub fn normalize(s: &str) -> String {
                 stripped.push('Å');
             }
             '\u{0901}' => stripped.push('\u{0902}'), // Devanagari chandrabindu -> anusvara
-            '\u{0981}' => {}                          // Bengali chandrabindu: optional
+            '\u{0981}' => {}                         // Bengali chandrabindu: optional
             c if is_optional_diacritic(c) => {}
             c => stripped.push(c),
         }
@@ -617,7 +716,10 @@ fn ml_atomic_chillus(s: &str) -> String {
             _ => None,
         };
         match chillu {
-            Some(ch) if chars.get(i + 1) == Some(&'\u{0D4D}') && chars.get(i + 2) == Some(&'\u{200D}') => {
+            Some(ch)
+                if chars.get(i + 1) == Some(&'\u{0D4D}')
+                    && chars.get(i + 2) == Some(&'\u{200D}') =>
+            {
                 out.push(ch);
                 i += 3;
             }
@@ -675,7 +777,12 @@ fn table(lang: &str, ordinal: bool) -> Result<Arc<ReverseTable>, LookupError> {
         return Ok(t.clone());
     }
     let built = Arc::new(build_table(lang, ordinal)?);
-    Ok(tables().write().unwrap().entry(key).or_insert(built).clone())
+    Ok(tables()
+        .write()
+        .unwrap()
+        .entry(key)
+        .or_insert(built)
+        .clone())
 }
 
 /// Port of `Words2Num_Base._build_table`.
@@ -698,10 +805,18 @@ fn build_table(lang: &str, ordinal: bool) -> Result<HashMap<String, i64>, Lookup
     let mut ringless = Vec::new();
     let lo = if ordinal { 0 } else { LOOKUP_LO };
     let scales = (5..=18).map(|k| 10i64.pow(k));
-    let extra: Vec<i64> = if ordinal { scales.collect() } else { Vec::new() };
+    let extra: Vec<i64> = if ordinal {
+        scales.collect()
+    } else {
+        Vec::new()
+    };
     for n in (lo..LOOKUP_HI).chain(extra) {
         let v = BigInt::from(n);
-        let words = if ordinal { l.to_ordinal(&v) } else { l.to_cardinal(&v) };
+        let words = if ordinal {
+            l.to_ordinal(&v)
+        } else {
+            l.to_cardinal(&v)
+        };
         let key = words.ok().map(|w| normalize(&w)); // Python swallows every raise
         if let Some(key) = &key {
             if key.contains('å') {
@@ -786,7 +901,9 @@ pub fn lookup_norm(
             .strip_suffix(normalize("หนึ่ง").as_str())
             .filter(|h| h.ends_with(normalize("ร้อย").as_str()))
             .map(|h| format!("{h}{}", normalize("เอ็ด"))),
-        Some("my") => normalized.starts_with(normalize("ဆယ").as_str()).then(|| format!("{}{normalized}", normalize("တစ်"))),
+        Some("my") => normalized
+            .starts_with(normalize("ဆယ").as_str())
+            .then(|| format!("{}{normalized}", normalize("တစ်"))),
         _ => None,
     };
     if let Some(v) = written.as_deref().and_then(|w| tab.get(w)) {
@@ -842,13 +959,18 @@ fn derive_sign_prefixes(lang: &str) -> Vec<SignPrefix> {
         }
         match out.iter_mut().find(|p| p.text == text) {
             Some(p) => p.glued |= glued,
-            None => out.push(SignPrefix { text: text.to_string(), glued }),
+            None => out.push(SignPrefix {
+                text: text.to_string(),
+                glued,
+            }),
         }
     };
     if let Some(l) = num2words2_core::get_lang_by_key(lang) {
         let render = |n: i64| l.to_cardinal(&BigInt::from(n)).ok().map(|w| normalize(&w));
         for n in [7i64, 42, 1234] {
-            let (Some(neg), Some(pos)) = (render(-n), render(n)) else { continue };
+            let (Some(neg), Some(pos)) = (render(-n), render(n)) else {
+                continue;
+            };
             if neg.len() > pos.len() && neg.ends_with(&pos) {
                 let prefix = &neg[..neg.len() - pos.len()];
                 add(prefix, !prefix.ends_with(' '));
@@ -869,7 +991,9 @@ fn derive_sign_prefixes(lang: &str) -> Vec<SignPrefix> {
 /// or one followed by a digit when glued ("-17" is a literal), is `None`.
 pub fn strip_sign<'a>(lang: &str, normalized: &'a str) -> Option<(&'a str, bool)> {
     for p in sign_prefixes(lang).iter() {
-        let Some(rest) = normalized.strip_prefix(p.text.as_str()) else { continue };
+        let Some(rest) = normalized.strip_prefix(p.text.as_str()) else {
+            continue;
+        };
         if let Some(rest) = rest.strip_prefix(' ') {
             if !rest.is_empty() {
                 return Some((rest, false));
@@ -916,7 +1040,10 @@ fn spoken_variants(lang: &str, normalized: &str, ordinal: bool) -> Vec<String> {
 /// Does the normalized ordinal `norm` spell `rendered` (a normalized
 /// `to_ordinal` rendering), as is or through one of its spoken variants?
 fn spells_ordinal(lang: &str, norm: &str, rendered: &str) -> bool {
-    norm == rendered || spoken_variants(lang, norm, true).iter().any(|v| v == rendered)
+    norm == rendered
+        || spoken_variants(lang, norm, true)
+            .iter()
+            .any(|v| v == rendered)
 }
 
 /// num2words renders one ordinal form per number (fr "premier", es "primero",
@@ -1235,7 +1362,11 @@ fn derive_scales(lang: &str) -> Scales {
     // "ពាន់"). Longest multiplier first, so the morpheme is the shortest tail:
     // th "หนึ่งพันล้าน" is 1000 × "ล้าน", not 1 × "พันล้าน".
     let glued = |tok: &str, n: i64| -> Option<(String, i64)> {
-        let cuts: Vec<usize> = tok.char_indices().map(|(i, _)| i).filter(|&i| i > 0).collect();
+        let cuts: Vec<usize> = tok
+            .char_indices()
+            .map(|(i, _)| i)
+            .filter(|&i| i > 0)
+            .collect();
         cuts.into_iter().rev().find_map(|i| {
             let (a, b) = tok.split_at(i);
             let m = lookup_plain(lang, a).filter(|m| *m >= 1)?;
@@ -1248,7 +1379,9 @@ fn derive_scales(lang: &str) -> Scales {
     // writes 10^12, 2·10^12 and 5·10^12 all "bilion".
     let mut probes: Vec<(u32, i64, i64, String)> = Vec::new();
     for p in PROBE_POWERS {
-        let Some(base) = 10i64.checked_pow(p) else { continue };
+        let Some(base) = 10i64.checked_pow(p) else {
+            continue;
+        };
         let row: Vec<(i64, i64, String)> = PROBE_MULTIPLIERS
             .iter()
             .filter_map(|&k| {
@@ -1258,7 +1391,11 @@ fn derive_scales(lang: &str) -> Scales {
                 words.then_some((k, n, text))
             })
             .collect();
-        if row.iter().enumerate().any(|(i, (_, _, t))| row[..i].iter().any(|(_, _, u)| u == t)) {
+        if row
+            .iter()
+            .enumerate()
+            .any(|(i, (_, _, t))| row[..i].iter().any(|(_, _, u)| u == t))
+        {
             continue;
         }
         probes.extend(row.into_iter().map(|(k, n, t)| (p, k, n, t)));
@@ -1361,7 +1498,10 @@ fn derive_scales(lang: &str) -> Scales {
             sc.postfix_forms.push((w.clone(), *k));
         }
     }
-    let holds_scale = |left: &str| left.split_whitespace().any(|t| words.iter().any(|(w, _)| w == t));
+    let holds_scale = |left: &str| {
+        left.split_whitespace()
+            .any(|t| words.iter().any(|(w, _)| w == t))
+    };
     unread.retain(|(_, _, _, _, left)| !holds_scale(left));
     // An unread digit multiplier keeps the probed power as the magnitude — but
     // only for 10^3/10^6/10^9/…, where the scale word is that power (he "עשרת
@@ -1387,10 +1527,13 @@ fn derive_scales(lang: &str) -> Scales {
     let words = sc.words.clone();
     let morpheme = |x: &str| glued_words.iter().any(|g| g == x);
     sc.words.retain(|(w, mag)| {
-        let tail = words.iter().any(|(x, m)| {
-            m == mag && morpheme(x) && x.len() > w.len() && x.ends_with(w.as_str())
-        });
-        let pair = w.char_indices().skip(1).any(|(i, _)| morpheme(&w[..i]) && morpheme(&w[i..]));
+        let tail = words
+            .iter()
+            .any(|(x, m)| m == mag && morpheme(x) && x.len() > w.len() && x.ends_with(w.as_str()));
+        let pair = w
+            .char_indices()
+            .skip(1)
+            .any(|(i, _)| morpheme(&w[..i]) && morpheme(&w[i..]));
         !(morpheme(w) && (tail || pair))
     });
     // dv "އެއްހާސް" (1000) is a form of "one" fused to the morpheme "ހާސް" that
@@ -1400,14 +1543,20 @@ fn derive_scales(lang: &str) -> Scales {
     // gives "ބިލިޔަން" = 10^9. A form is a digit or ten, and holds no morpheme
     // (th "หนึ่งแสนหนึ่ง" before "หมื่น" is 100001, not a form of 11).
     for _ in 0..3 {
-        let morphemes: Vec<(String, i64)> =
-            sc.words.iter().filter(|(w, _)| glued_words.contains(w)).cloned().collect();
+        let morphemes: Vec<(String, i64)> = sc
+            .words
+            .iter()
+            .filter(|(w, _)| glued_words.contains(w))
+            .cloned()
+            .collect();
         let mut clashes: Vec<String> = Vec::new();
         for (_, _, n, text) in &probes {
             if text.contains(' ') || glued(text, *n).is_some() {
                 continue;
             }
-            let Some(form) = fused_head(lang, text, *n, &morphemes) else { continue };
+            let Some(form) = fused_head(lang, text, *n, &morphemes) else {
+                continue;
+            };
             match sc.combining.iter().find(|(x, _)| *x == form.0) {
                 Some((_, v)) if *v != form.1 => clashes.push(form.0),
                 Some(_) => {}
@@ -1439,10 +1588,15 @@ fn derive_scales(lang: &str) -> Scales {
             break;
         }
     }
-    let morphemes: Vec<(String, i64)> =
-        sc.words.iter().filter(|(w, _)| glued_words.contains(w)).cloned().collect();
-    sc.words
-        .retain(|(w, mag)| glued_words.contains(w) || fused_head(lang, w, *mag, &morphemes).is_none());
+    let morphemes: Vec<(String, i64)> = sc
+        .words
+        .iter()
+        .filter(|(w, _)| glued_words.contains(w))
+        .cloned()
+        .collect();
+    sc.words.retain(|(w, mag)| {
+        glued_words.contains(w) || fused_head(lang, w, *mag, &morphemes).is_none()
+    });
     for (_, joined, mag) in &sc.compounds {
         add(&mut sc.words, joined, *mag);
     }
@@ -1465,7 +1619,9 @@ fn derive_scales(lang: &str) -> Scales {
     sc.stacks = probes.iter().any(|(_, _, _, text)| {
         let toks: Vec<&str> = text.split_whitespace().collect();
         if let [tok] = toks[..] {
-            sc.glue.iter().any(|(g, _)| tok.matches(g.as_str()).count() >= 2)
+            sc.glue
+                .iter()
+                .any(|(g, _)| tok.matches(g.as_str()).count() >= 2)
         } else {
             let mags: Vec<i64> = toks.iter().filter_map(|t| mag_of(t)).collect();
             mags.iter().enumerate().any(|(i, m)| mags[..i].contains(m))
@@ -1612,17 +1768,43 @@ pub fn is_ambiguous_number(lang: &str, norm: &str) -> bool {
 pub fn elided_place(lang: &str, norm: &str) -> Option<(bool, i64)> {
     let (scales, digits): (&[(&str, i64)], &[&str]) = match lang.split(&['_', '-'][..]).next()? {
         "th" => (
-            &[("พัน", 1_000), ("หมื่น", 10_000), ("แสน", 100_000), ("ล้าน", 1_000_000)],
+            &[
+                ("พัน", 1_000),
+                ("หมื่น", 10_000),
+                ("แสน", 100_000),
+                ("ล้าน", 1_000_000),
+            ],
             &["หนึ่ง", "สอง", "สาม", "สี่", "ห้า", "หก", "เจ็ด", "แปด", "เก้า"],
         ),
         "lo" => (
             // "ຕື້" (10^9) too, now that it reads (#1215 audit).
-            &[("ພັນ", 1_000), ("ໝື່ນ", 10_000), ("ແສນ", 100_000), ("ລ້ານ", 1_000_000), ("ຕື້", 1_000_000_000)],
+            &[
+                ("ພັນ", 1_000),
+                ("ໝື່ນ", 10_000),
+                ("ແສນ", 100_000),
+                ("ລ້ານ", 1_000_000),
+                ("ຕື້", 1_000_000_000),
+            ],
             &["ໜຶ່ງ", "ສອງ", "ສາມ", "ສີ່", "ຫ້າ", "ຫົກ", "ເຈັດ", "ແປດ", "ເກົ້າ"],
         ),
         "km" => (
-            &[("ពាន់", 1_000), ("ម៉ឺន", 10_000), ("សែន", 100_000), ("លាន", 1_000_000)],
-            &["មួយ", "ពីរ", "បី", "បួន", "ប្រាំ", "ប្រាំមួយ", "ប្រាំពីរ", "ប្រាំបី", "ប្រាំបួន"],
+            &[
+                ("ពាន់", 1_000),
+                ("ម៉ឺន", 10_000),
+                ("សែន", 100_000),
+                ("លាន", 1_000_000),
+            ],
+            &[
+                "មួយ",
+                "ពីរ",
+                "បី",
+                "បួន",
+                "ប្រាំ",
+                "ប្រាំមួយ",
+                "ប្រាំពីរ",
+                "ប្រាំបី",
+                "ប្រាំបួន",
+            ],
         ),
         _ => return None,
     };
@@ -1642,7 +1824,8 @@ pub fn elided_place(lang: &str, norm: &str) -> Option<(bool, i64)> {
 pub(crate) fn ordinal_indicator_figure(text: &str) -> Option<&str> {
     let f = text.trim().strip_suffix(['\u{00BA}', '\u{00AA}'])?;
     let f = f.strip_suffix('.').unwrap_or(f);
-    let digit_ends = f.starts_with(|c: char| c.is_ascii_digit()) && f.ends_with(|c: char| c.is_ascii_digit());
+    let digit_ends =
+        f.starts_with(|c: char| c.is_ascii_digit()) && f.ends_with(|c: char| c.is_ascii_digit());
     (digit_ends && f.chars().all(|c| c.is_ascii_digit() || ".,'".contains(c))).then_some(f)
 }
 
@@ -1656,7 +1839,9 @@ pub fn has_postfix_scales(lang: &str) -> bool {
 }
 
 fn scaled_reading(lang: &str, norm: &str) -> Scaled {
-    let Some(v) = scaled_value(lang, norm) else { return Scaled::None };
+    let Some(v) = scaled_value(lang, norm) else {
+        return Scaled::None;
+    };
     let sc = scales_of(lang);
     let v = match postfix_rival(lang, v, norm, &sc) {
         Rival::None => v,
@@ -1672,7 +1857,11 @@ fn scaled_reading(lang: &str, norm: &str) -> Scaled {
     // a raise beats a wrong number.
     if (!sc.postfix.is_empty() || !sc.one_after.is_empty())
         && !renders_as(lang, v, norm)
-        && !renders_as(lang, v, &drop_postfix_connector(norm, &sc, connector_words(lang)))
+        && !renders_as(
+            lang,
+            v,
+            &drop_postfix_connector(norm, &sc, connector_words(lang)),
+        )
     {
         return Scaled::None;
     }
@@ -1741,11 +1930,16 @@ fn postfix_rival(lang: &str, v: i64, norm: &str, sc: &Scales) -> Rival {
         let Some(unit) = sc.words.iter().find(|(w, _)| w == toks[i]).map(|(_, m)| *m) else {
             continue;
         };
-        let Some(m) = lookup_plain(lang, &toks[i + 1..].join(" ")).filter(|m| (2..1000).contains(m)) else {
+        let Some(m) =
+            lookup_plain(lang, &toks[i + 1..].join(" ")).filter(|m| (2..1000).contains(m))
+        else {
             continue;
         };
-        let Some(h) = (if i == 0 { Some(0) } else { parse_scaled_norm_unchecked(lang, &toks[..i].join(" ")) })
-        else {
+        let Some(h) = (if i == 0 {
+            Some(0)
+        } else {
+            parse_scaled_norm_unchecked(lang, &toks[..i].join(" "))
+        }) else {
             continue;
         };
         // The renderer writes "miliyan talatin" for 30·10^6 and for 10^6 + 30
@@ -1757,7 +1951,11 @@ fn postfix_rival(lang: &str, v: i64, norm: &str, sc: &Scales) -> Rival {
         let mult = unit.checked_mul(m).and_then(|x| h.checked_add(x));
         if let Some(mult) = mult.filter(|&x| rendered(x)) {
             if unit >= 1_000_000 {
-                return if mult == v { Rival::None } else { Rival::Prefer(mult) };
+                return if mult == v {
+                    Rival::None
+                } else {
+                    Rival::Prefer(mult)
+                };
             }
             if mult != v {
                 return Rival::Ambiguous;
@@ -1857,7 +2055,8 @@ fn glued_multiplier(lang: &str, pre: &str, sc: &Scales) -> Option<i64> {
             // a table lookup of every prefix made long glued input cubic (#186).
             pre.char_indices().skip(1).find_map(|(i, _)| {
                 let unit = combining(&pre[i..]).filter(|u| (1..10).contains(u))?;
-                let tens = lookup_plain(lang, &pre[..i]).filter(|t| (20..100).contains(t) && t % 10 == 0)?;
+                let tens = lookup_plain(lang, &pre[..i])
+                    .filter(|t| (20..100).contains(t) && t % 10 == 0)?;
                 Some(tens + unit)
             })
         })
@@ -1880,7 +2079,10 @@ fn glued_number(lang: &str, s: &str, sc: &Scales) -> Option<i64> {
         }
         // The official form writes the final one as "หนึ่ง" after the
         // hundreds too: "สองร้อยหนึ่ง" is "สองร้อยเอ็ด", 201 (#879).
-        if let Some(head) = s.strip_suffix(one.as_str()).filter(|h| h.ends_with(normalize("ร้อย").as_str())) {
+        if let Some(head) = s
+            .strip_suffix(one.as_str())
+            .filter(|h| h.ends_with(normalize("ร้อย").as_str()))
+        {
             if let Some(v) = glued_number(lang, &format!("{head}{ed}"), sc) {
                 return Some(v);
             }
@@ -1912,7 +2114,11 @@ fn split_glued_scale(lang: &str, tok: &str, sc: &Scales) -> Option<i64> {
         }
         words.push((t.to_string(), 1_000));
     }
-    let mut mags: Vec<i64> = words.iter().map(|(_, m)| *m).filter(|m| *m >= 1_000).collect();
+    let mut mags: Vec<i64> = words
+        .iter()
+        .map(|(_, m)| *m)
+        .filter(|m| *m >= 1_000)
+        .collect();
     mags.sort_unstable_by(|a, b| b.cmp(a));
     mags.dedup();
     for mag in mags {
@@ -1937,7 +2143,10 @@ fn glued_at(lang: &str, tok: &str, pos: usize, len: usize, mag: i64, sc: &Scales
     // bo: the tsheg ending the syllable before the morpheme, or opening the
     // tail, belongs to neither part ("དགུ་ཁྲི་" + "དུང་ཕྱུར").
     let tsheg = ['\u{0F0B}', '\u{0F0C}'];
-    let (pre, suf) = (tok[..pos].trim_matches(tsheg), tok[pos + len..].trim_matches(tsheg));
+    let (pre, suf) = (
+        tok[..pos].trim_matches(tsheg),
+        tok[pos + len..].trim_matches(tsheg),
+    );
     if pre.is_empty() && suf.is_empty() {
         return None; // the bare morpheme: the table's business
     }
@@ -1959,7 +2168,11 @@ fn glued_at(lang: &str, tok: &str, pos: usize, len: usize, mag: i64, sc: &Scales
     } else {
         // zh "一万零一" = 10001: 零 fills the skipped places, so what follows
         // it is at least two places below the scale.
-        let filled = sc.zero.as_deref().and_then(|z| suf.strip_prefix(z)).filter(|r| !r.is_empty());
+        let filled = sc
+            .zero
+            .as_deref()
+            .and_then(|z| suf.strip_prefix(z))
+            .filter(|r| !r.is_empty());
         // After 零 a ten keeps its "one": "一万零一十" = 10010.
         let tens_one = || {
             let one = lookup_plain(lang, "一").filter(|v| *v == 1).map(|_| "一")?;
@@ -1969,7 +2182,9 @@ fn glued_at(lang: &str, tok: &str, pos: usize, len: usize, mag: i64, sc: &Scales
         // morpheme and "in", and only "milliedin" (1001) is a table word.
         let with_morpheme = || {
             filled.is_none().then_some(())?;
-            lookup_plain(lang, &tok[pos..]).map(|v| v - mag).filter(|v| *v > 0)
+            lookup_plain(lang, &tok[pos..])
+                .map(|v| v - mag)
+                .filter(|v| *v > 0)
         };
         let low = glued_number(lang, filled.unwrap_or(suf), sc)
             .or_else(tens_one)
@@ -1994,7 +2209,11 @@ fn glued_at(lang: &str, tok: &str, pos: usize, len: usize, mag: i64, sc: &Scales
     // a scale of its own only where the renderer spells this very number so.
     let morpheme = &tok[pos..pos + len];
     let compound = || {
-        let inner = |g: &str| sc.glue.iter().any(|(w, m)| *m >= 1000 && *m < mag && g.contains(w.as_str()));
+        let inner = |g: &str| {
+            sc.glue
+                .iter()
+                .any(|(w, m)| *m >= 1000 && *m < mag && g.contains(w.as_str()))
+        };
         inner(morpheme) && inner(pre)
     };
     // A stacked reading only where the renderer spells this very number so.
@@ -2155,9 +2374,10 @@ fn parse_scaled_inner(lang: &str, text: &str, sc: &Scales, conns: &[&str]) -> Op
     // Where the renderer never stacks, the largest scale twice apart is no one
     // number ("deux mille deux mille"): refuse before recursing on every group.
     if let Some((pos, mag)) = split {
-        let repeats = mags[..pos].iter().enumerate().any(|(i, m)| {
-            *m == Some(mag) && mags[i + 1..pos].iter().any(Option::is_none)
-        });
+        let repeats = mags[..pos]
+            .iter()
+            .enumerate()
+            .any(|(i, m)| *m == Some(mag) && mags[i + 1..pos].iter().any(Option::is_none));
         if repeats && !sc.stacks {
             return None;
         }
@@ -2188,7 +2408,12 @@ fn parse_scaled_inner(lang: &str, text: &str, sc: &Scales, conns: &[&str]) -> Op
                 for j in (1..=after.len()).rev() {
                     let m = trim_connectors(&after[..j].join(" "), conns);
                     let ends = j == after.len();
-                    let form = || sc.postfix_forms.iter().find(|(x, _)| *x == m).map(|(_, k)| *k);
+                    let form = || {
+                        sc.postfix_forms
+                            .iter()
+                            .find(|(x, _)| *x == m)
+                            .map(|(_, k)| *k)
+                    };
                     let Some(m) = lookup_plain(lang, &m)
                         .or_else(form)
                         .filter(|&m| (1..1000).contains(&m) || (ends && (1..mag).contains(&m)))
@@ -2230,7 +2455,10 @@ fn parse_scaled_inner(lang: &str, text: &str, sc: &Scales, conns: &[&str]) -> Op
             };
             // zh "一千 七": as in the glued "一千七", a lone digit needs 零.
             let zero_gap = |r: i64| {
-                let filled = sc.zero.as_deref().is_some_and(|z| after.first() == Some(&z));
+                let filled = sc
+                    .zero
+                    .as_deref()
+                    .is_some_and(|z| after.first() == Some(&z));
                 sc.zero.is_none() || filled || r >= 10 || r == 0
             };
             let v = r.filter(|&r| zero_gap(r)).and_then(|r| compose(l, r));
@@ -2239,7 +2467,8 @@ fn parse_scaled_inner(lang: &str, text: &str, sc: &Scales, conns: &[&str]) -> Op
             // no 1 × 10^6 + 901001.
             let postfix_one = left_trim.is_empty() && sc.postfix.iter().any(|w| w == word);
             let rendered = |v: i64| {
-                renders_as(lang, v, text) || renders_as(lang, v, &drop_postfix_connector(text, sc, conns))
+                renders_as(lang, v, text)
+                    || renders_as(lang, v, &drop_postfix_connector(text, sc, conns))
             };
             if let Some(v) = v.filter(|&v| !(postfix_one || stacked) || rendered(v)) {
                 return Some(v);
@@ -2286,7 +2515,9 @@ fn parse_scaled_inner(lang: &str, text: &str, sc: &Scales, conns: &[&str]) -> Op
             } else {
                 parse_scaled_inner(lang, &right, sc, conns).filter(|&r| r < unit)
             };
-            let v = l.zip(r).and_then(|(l, r)| l.checked_mul(unit)?.checked_add(r));
+            let v = l
+                .zip(r)
+                .and_then(|(l, r)| l.checked_mul(unit)?.checked_add(r));
             if let Some(v) = v.filter(|&v| !stacked || renders_as(lang, v, text)) {
                 return Some(v);
             }
@@ -2307,7 +2538,11 @@ fn parse_scaled_inner(lang: &str, text: &str, sc: &Scales, conns: &[&str]) -> Op
     // genuine sub-hundred, both real table words.
     let toks: Vec<&str> = text.split_whitespace().collect();
     // Both halves are table words, a few tokens each: a long run cannot split so.
-    let halves = if toks.len() <= 24 { 1..toks.len() } else { 0..0 };
+    let halves = if toks.len() <= 24 {
+        1..toks.len()
+    } else {
+        0..0
+    };
     for i in halves {
         let left = trim_connectors(&toks[..i].join(" "), conns);
         let right = trim_connectors(&toks[i..].join(" "), conns);
@@ -2402,13 +2637,21 @@ fn hundred_word(lang: &str) -> Option<String> {
             forms.push(s);
         }
         let common = |skip: Option<usize>| -> String {
-            let mut it = forms.iter().enumerate().filter(|(k, _)| Some(*k) != skip).map(|(_, f)| f);
+            let mut it = forms
+                .iter()
+                .enumerate()
+                .filter(|(k, _)| Some(*k) != skip)
+                .map(|(_, f)| f);
             let mut suf = it.next().cloned().unwrap_or_default();
             for f in it {
                 suf = common_suffix(&suf, f);
             }
             // Keep only the trailing alphabetic run (drop any leading unit letters).
-            let mut rev: Vec<char> = suf.chars().rev().take_while(|c| c.is_alphabetic()).collect();
+            let mut rev: Vec<char> = suf
+                .chars()
+                .rev()
+                .take_while(|c| c.is_alphabetic())
+                .collect();
             rev.reverse();
             rev.into_iter().collect()
         };
@@ -2531,8 +2774,16 @@ pub fn parse_year_norm(lang: &str, norm: &str) -> Option<i64> {
         if let Some(pos) = toks.iter().position(|t| *t == h.as_str()) {
             let left = trim_connectors(&toks[..pos].join(" "), &conns);
             let right = trim_connectors(&toks[pos + 1..].join(" "), &conns);
-            let high = if left.is_empty() { Some(1) } else { lookup_plain(lang, &left) };
-            let low = if right.is_empty() { Some(0) } else { lookup_plain(lang, &right) };
+            let high = if left.is_empty() {
+                Some(1)
+            } else {
+                lookup_plain(lang, &left)
+            };
+            let low = if right.is_empty() {
+                Some(0)
+            } else {
+                lookup_plain(lang, &right)
+            };
             if let (Some(h100), Some(l)) = (high, low) {
                 if (1..=99).contains(&h100) && (0..=99).contains(&l) {
                     return Some(h100 * 100 + l);
@@ -2548,8 +2799,16 @@ pub fn parse_year_norm(lang: &str, norm: &str) -> Option<i64> {
                 let pre = &t[..pos];
                 let suf = &t[pos + h.len()..];
                 if !(pre.is_empty() && suf.is_empty()) {
-                    let high = if pre.is_empty() { Some(1) } else { lookup_plain(lang, pre) };
-                    let low = if suf.is_empty() { Some(0) } else { lookup_plain(lang, suf) };
+                    let high = if pre.is_empty() {
+                        Some(1)
+                    } else {
+                        lookup_plain(lang, pre)
+                    };
+                    let low = if suf.is_empty() {
+                        Some(0)
+                    } else {
+                        lookup_plain(lang, suf)
+                    };
                     if let (Some(h100), Some(l)) = (high, low) {
                         if (1..=99).contains(&h100) && (0..=99).contains(&l) {
                             return Some(h100 * 100 + l);
@@ -2564,7 +2823,10 @@ pub fn parse_year_norm(lang: &str, norm: &str) -> Option<i64> {
     // the thousand ("mil novecientos"), and es "catorce treinta" is a time of day.
     // Either group may span several tokens: af spells 21-99 "vier-en-twintig",
     // which normalizes to three tokens ("twintig vier en twintig" = 2024, #133).
-    let pairs = matches!(base, "de" | "nl" | "af" | "da" | "sv" | "no" | "nb" | "nn" | "is");
+    let pairs = matches!(
+        base,
+        "de" | "nl" | "af" | "da" | "sv" | "no" | "nb" | "nn" | "is"
+    );
     if pairs {
         for k in 1..toks.len() {
             let (left, right) = (toks[..k].join(" "), toks[k..].join(" "));
@@ -2617,13 +2879,20 @@ fn year_data(lang: &str) -> Arc<YearData> {
         return d.clone();
     }
     let d = Arc::new(build_year_data(lang));
-    year_cache().write().unwrap().insert(lang.to_string(), d.clone());
+    year_cache()
+        .write()
+        .unwrap()
+        .insert(lang.to_string(), d.clone());
     d
 }
 
 /// Longest common prefix, by `char`.
 fn common_prefix(a: &str, b: &str) -> String {
-    a.chars().zip(b.chars()).take_while(|(x, y)| x == y).map(|(x, _)| x).collect()
+    a.chars()
+        .zip(b.chars())
+        .take_while(|(x, y)| x == y)
+        .map(|(x, _)| x)
+        .collect()
 }
 
 fn build_year_data(lang: &str) -> YearData {
@@ -2633,7 +2902,9 @@ fn build_year_data(lang: &str) -> YearData {
         suffix: String::new(),
         digitwise: false,
     };
-    let Some(l) = num2words2_core::get_lang_by_key(lang) else { return data };
+    let Some(l) = num2words2_core::get_lang_by_key(lang) else {
+        return data;
+    };
     let mut ambiguous: Vec<String> = Vec::new();
     let mut years: Vec<String> = Vec::new();
     let mut cards: Vec<String> = Vec::new();
@@ -2642,7 +2913,11 @@ fn build_year_data(lang: &str) -> YearData {
         // ja has no era before 645 and declines; those years are not in the table.
         let Ok(w) = l.to_year(&b) else { continue };
         let key = normalize(&w);
-        if key.is_empty() || key.chars().all(|c| c.is_ascii_digit() || c == '-' || c == ' ') {
+        if key.is_empty()
+            || key
+                .chars()
+                .all(|c| c.is_ascii_digit() || c == '-' || c == ' ')
+        {
             continue; // the renderer fell back to figures
         }
         match data.table.get(&key) {
@@ -2678,8 +2953,14 @@ fn build_year_data(lang: &str) -> YearData {
     ));
     // In a spaced language the year word is whole tokens: never half a word.
     if years.iter().filter(|y| y.contains(' ')).count() * 2 > years.len() {
-        prefix = prefix.rfind(' ').map(|i| prefix[..=i].to_string()).unwrap_or_default();
-        suffix = suffix.find(' ').map(|i| suffix[i..].to_string()).unwrap_or_default();
+        prefix = prefix
+            .rfind(' ')
+            .map(|i| prefix[..=i].to_string())
+            .unwrap_or_default();
+        suffix = suffix
+            .find(' ')
+            .map(|i| suffix[i..].to_string())
+            .unwrap_or_default();
     }
     // An affix every cardinal shares too is part of the number, not a year word.
     if !cards.is_empty() {
@@ -2775,7 +3056,11 @@ pub fn year_digit_string_norm(lang: &str, norm: &str) -> Option<i64> {
     }
     let mut digits = String::new();
     for c in norm.chars().filter(|c| !c.is_whitespace()) {
-        let d = if c == '〇' { 0 } else { lookup_plain(lang, &c.to_string())? };
+        let d = if c == '〇' {
+            0
+        } else {
+            lookup_plain(lang, &c.to_string())?
+        };
         if !(0..=9).contains(&d) {
             return None;
         }
@@ -2842,7 +3127,7 @@ mod tests {
         assert_eq!(normalize("hello."), "hello");
         assert_eq!(normalize("3.14"), "3.14"); // decimal point survives
         assert_eq!(normalize("-17"), "-17"); // sign hyphen survives
-        // NFKD + combining-mark strip: "trente-deux" family.
+                                             // NFKD + combining-mark strip: "trente-deux" family.
         assert_eq!(normalize("tr\u{e9}nte"), "trente"); // é -> e
         assert_eq!(normalize("f\u{f3}rty"), "forty"); // ó -> o
     }
@@ -2856,7 +3141,7 @@ mod tests {
         assert_ne!(normalize("पचासी"), normalize("पचास")); // hi 85 / 50
         assert_ne!(normalize("དགུ་"), normalize("དྲུག་")); // bo 9 / 6
         assert_ne!(normalize("একাশি"), normalize("একুশ")); // bn 81 / 21
-        // The nukta is optional: hi 67 with and without it.
+                                                         // The nukta is optional: hi 67 with and without it.
         assert_eq!(normalize("सड़सठ"), normalize("सडसठ"));
         assert_eq!(lookup("hi", "सडसठ", false, &[]).ok().flatten(), Some(67));
     }
@@ -2873,7 +3158,11 @@ mod tests {
             ("pa", "ਸੱਤਰ", 70),
             ("dv", "އައްހާސް", 8000),
         ] {
-            assert_eq!(lookup(lang, text, false, &[]).ok().flatten(), Some(n), "{lang} {text}");
+            assert_eq!(
+                lookup(lang, text, false, &[]).ok().flatten(),
+                Some(n),
+                "{lang} {text}"
+            );
         }
     }
 
@@ -2899,8 +3188,14 @@ mod tests {
         // Reverse table only holds -1..10001; these compose via scale words.
         assert_eq!(parse_scaled("fr", "soixante-neuf mille huit"), Some(69008));
         assert_eq!(parse_scaled("fr", "cinquante-neuf mille"), Some(59000));
-        assert_eq!(parse_scaled("fr", "soixante-quinze mille treize"), Some(75013));
-        assert_eq!(parse_scaled("fr", "quatre-vingt-douze mille cent"), Some(92100));
+        assert_eq!(
+            parse_scaled("fr", "soixante-quinze mille treize"),
+            Some(75013)
+        );
+        assert_eq!(
+            parse_scaled("fr", "quatre-vingt-douze mille cent"),
+            Some(92100)
+        );
         assert_eq!(parse_scaled("fr", "mille treize"), Some(1013));
         // Non-number fragment → None (walker keeps its shorter parse).
         assert_eq!(parse_scaled("fr", "mille lyon"), None);
@@ -2910,9 +3205,18 @@ mod tests {
         assert_eq!(parse_scaled("es", "sesenta y nueve mil ocho"), Some(69008));
         assert_eq!(parse_scaled("es", "dos millones"), Some(2_000_000)); // not 2e9
         assert_eq!(parse_scaled("es", "mil millones"), Some(1_000_000_000));
-        assert_eq!(parse_scaled("pt", "sessenta e nove mil e oito"), Some(69008));
-        assert_eq!(parse_scaled("pl", "sześćdziesiąt dziewięć tysięcy osiem"), Some(69008));
-        assert_eq!(parse_scaled("ru", "шестьдесят девять тысяч восемь"), Some(69008));
+        assert_eq!(
+            parse_scaled("pt", "sessenta e nove mil e oito"),
+            Some(69008)
+        );
+        assert_eq!(
+            parse_scaled("pl", "sześćdziesiąt dziewięć tysięcy osiem"),
+            Some(69008)
+        );
+        assert_eq!(
+            parse_scaled("ru", "шестьдесят девять тысяч восемь"),
+            Some(69008)
+        );
         // Sentence walk emits the composed value inline.
         assert_eq!(
             w2n_sentence::words2num_sentence(
@@ -2950,7 +3254,10 @@ mod tests {
         // writes the product.
         assert_eq!(parse_scaled("ha", "miliyan dubu"), Some(1_001_000));
         assert_eq!(parse_scaled("ha", "miliyan dubu biyu"), Some(1_002_000));
-        assert_eq!(parse_scaled("ha", "miliyan dubu uku ɗari huɗu hamsin da shida"), Some(1_003_456));
+        assert_eq!(
+            parse_scaled("ha", "miliyan dubu uku ɗari huɗu hamsin da shida"),
+            Some(1_003_456)
+        );
         assert_eq!(parse_scaled("ha", "biliyan dubu"), Some(1_000_001_000));
         // #882: the renderer writes "<scale> <M>" for the product and for the
         // sum without "da" alike; a reader takes the multiplier.
@@ -2960,11 +3267,17 @@ mod tests {
         assert_eq!(parse_scaled("ha", "miliyan ɗari biyar"), Some(500_000_000));
         // The thousands stay ambiguous, as before (1 001 100 and 1 100 000).
         assert_eq!(parse_scaled("ha", "miliyan dubu ɗari"), None);
-        assert_eq!(parse_scaled("ha", "miliyan biyu dubu ɗari uku sha biyar"), None);
+        assert_eq!(
+            parse_scaled("ha", "miliyan biyu dubu ɗari uku sha biyar"),
+            None
+        );
         // The sum is written with "da".
         assert_eq!(parse_scaled("ha", "miliyan da biyu"), Some(1_000_002));
         assert_eq!(parse_scaled("ha", "miliyan da talatin"), Some(1_000_030));
-        assert_eq!(parse_scaled("ha", "miliyan da ɗari biyar tamanin"), Some(1_000_580));
+        assert_eq!(
+            parse_scaled("ha", "miliyan da ɗari biyar tamanin"),
+            Some(1_000_580)
+        );
         // "da" does not lift the thousands' ambiguity.
         assert_eq!(parse_scaled("ha", "miliyan da dubu goma"), None);
         assert_eq!(parse_scaled("ha", "miliyan da dubu ɗari biyar"), None);
@@ -2973,11 +3286,23 @@ mod tests {
         assert_eq!(parse_scaled("km", "មួយម៉ឺន ពីរពាន់ បីរយ សែសិបប្រាំ"), Some(12_345));
         assert_eq!(parse_scaled("km", "មួយសែន"), Some(100_000));
         // en_AERO reads digits one at a time.
-        assert_eq!(parse_scaled("en_AERO", "wun zero zero zero zero zero"), Some(100_000));
-        assert_eq!(parse_scaled("en_AERO", "wun too tree fower fife"), Some(12_345));
+        assert_eq!(
+            parse_scaled("en_AERO", "wun zero zero zero zero zero"),
+            Some(100_000)
+        );
+        assert_eq!(
+            parse_scaled("en_AERO", "wun too tree fower fife"),
+            Some(12_345)
+        );
         // A postfix multiplier of 1000 or more ends the number.
-        assert_eq!(parse_scaled("tet", "miliaun rihun ida"), Some(1_000_000_000));
-        assert_eq!(parse_scaled("tet", "miliaun ida rihun ida"), Some(1_001_000));
+        assert_eq!(
+            parse_scaled("tet", "miliaun rihun ida"),
+            Some(1_000_000_000)
+        );
+        assert_eq!(
+            parse_scaled("tet", "miliaun ida rihun ida"),
+            Some(1_001_000)
+        );
         // A left part as big as the scale is a group, not a multiplier.
         assert_eq!(parse_scaled("ko", "십만 천"), Some(101_000));
         assert_eq!(parse_scaled("ko", "백만 천"), Some(1_001_000));
@@ -2989,7 +3314,10 @@ mod tests {
         assert_eq!(parse_scaled("dv", "ތިރީސްއެއްހާސް"), Some(31_000));
         assert_eq!(parse_scaled("bm", "ba tan ni fila"), None);
         assert_eq!(parse_scaled("fi", "kymmenentuhatta yksi"), Some(10_001));
-        assert_eq!(parse_scaled("tet", "miliaun rihun atus sia rihun ida"), None);
+        assert_eq!(
+            parse_scaled("tet", "miliaun rihun atus sia rihun ida"),
+            None
+        );
         // A scale glued to its multiplier inside a longer number.
         assert_eq!(parse_scaled("hu", "egymillió-egy"), Some(1_000_001));
         // Prefix languages never take a postfix multiplier or sum bare groups.
@@ -3002,21 +3330,66 @@ mod tests {
     /// at its last occurrence with a remainder below it.
     #[test]
     fn stacked_scales_multiply() {
-        assert_eq!(parse_scaled("bn", "দশ কোটি কোটি"), Some(1_000_000_000_000_000));
-        assert_eq!(parse_scaled("as", "দহ কোটি কোটি"), Some(1_000_000_000_000_000));
-        assert_eq!(parse_scaled("bn", "দশ হাজার কোটি কোটি"), Some(1_000_000_000_000_000_000));
-        assert_eq!(parse_scaled("bn", "দশ কোটি পাঁচ কোটি"), Some(1_000_000_050_000_000));
-        assert_eq!(parse_scaled("bn", "দশ কোটি কোটি পাঁচ"), Some(1_000_000_000_000_005));
-        assert_eq!(parse_scaled("bn", "এক লাখ বিশ হাজার কোটি"), Some(1_200_000_000_000));
-        assert_eq!(parse_scaled("ta", "ஒரு கோடி கோடி"), Some(100_000_000_000_000));
-        assert_eq!(parse_scaled("ta", "பத்து ஆயிரம் கோடி கோடி"), Some(1_000_000_000_000_000_000));
-        assert_eq!(parse_scaled("ba", "бер миллиард миллиард"), Some(1_000_000_000_000_000_000));
-        assert_eq!(parse_scaled("bg", "един милиард милиарда"), Some(1_000_000_000_000_000_000));
-        assert_eq!(parse_scaled("eu", "mila mila milioi"), Some(1_000_000_000_000));
-        assert_eq!(parse_scaled("eu", "bi mila mila milioi"), Some(2_000_000_000_000));
-        assert_eq!(parse_scaled("eu", "bat mila milioi hamar milioi bat"), Some(1_010_000_001));
-        assert_eq!(parse_scaled("th", "หนึ่งล้านสองแสนล้าน"), Some(1_200_000_000_000));
-        assert_eq!(parse_scaled("th", "สองล้านเอ็ดล้านล้าน"), Some(2_000_001_000_000_000_000));
+        assert_eq!(
+            parse_scaled("bn", "দশ কোটি কোটি"),
+            Some(1_000_000_000_000_000)
+        );
+        assert_eq!(
+            parse_scaled("as", "দহ কোটি কোটি"),
+            Some(1_000_000_000_000_000)
+        );
+        assert_eq!(
+            parse_scaled("bn", "দশ হাজার কোটি কোটি"),
+            Some(1_000_000_000_000_000_000)
+        );
+        assert_eq!(
+            parse_scaled("bn", "দশ কোটি পাঁচ কোটি"),
+            Some(1_000_000_050_000_000)
+        );
+        assert_eq!(
+            parse_scaled("bn", "দশ কোটি কোটি পাঁচ"),
+            Some(1_000_000_000_000_005)
+        );
+        assert_eq!(
+            parse_scaled("bn", "এক লাখ বিশ হাজার কোটি"),
+            Some(1_200_000_000_000)
+        );
+        assert_eq!(
+            parse_scaled("ta", "ஒரு கோடி கோடி"),
+            Some(100_000_000_000_000)
+        );
+        assert_eq!(
+            parse_scaled("ta", "பத்து ஆயிரம் கோடி கோடி"),
+            Some(1_000_000_000_000_000_000)
+        );
+        assert_eq!(
+            parse_scaled("ba", "бер миллиард миллиард"),
+            Some(1_000_000_000_000_000_000)
+        );
+        assert_eq!(
+            parse_scaled("bg", "един милиард милиарда"),
+            Some(1_000_000_000_000_000_000)
+        );
+        assert_eq!(
+            parse_scaled("eu", "mila mila milioi"),
+            Some(1_000_000_000_000)
+        );
+        assert_eq!(
+            parse_scaled("eu", "bi mila mila milioi"),
+            Some(2_000_000_000_000)
+        );
+        assert_eq!(
+            parse_scaled("eu", "bat mila milioi hamar milioi bat"),
+            Some(1_010_000_001)
+        );
+        assert_eq!(
+            parse_scaled("th", "หนึ่งล้านสองแสนล้าน"),
+            Some(1_200_000_000_000)
+        );
+        assert_eq!(
+            parse_scaled("th", "สองล้านเอ็ดล้านล้าน"),
+            Some(2_000_001_000_000_000_000)
+        );
         assert_eq!(parse_scaled("hy", "միլիոն միլիոն"), Some(1_000_000_000_000));
         // A language that never stacks reads no stack; the remainder stays below
         // the scale.
@@ -3033,7 +3406,10 @@ mod tests {
         assert_eq!(parse_scaled("de", "eine Billion"), Some(1_000_000_000_000));
         assert_eq!(parse_scaled("fr", "un billion"), Some(1_000_000_000_000));
         assert_eq!(parse_scaled("es", "dos billones"), Some(2_000_000_000_000));
-        assert_eq!(parse_scaled("en_NG", "one trillion"), Some(1_000_000_000_000));
+        assert_eq!(
+            parse_scaled("en_NG", "one trillion"),
+            Some(1_000_000_000_000)
+        );
         assert_eq!(parse_scaled("en_IN", "one kharab"), Some(100_000_000_000));
         assert_eq!(parse_scaled("hi", "बीस खरब"), Some(2_000_000_000_000));
         assert_eq!(parse_scaled("ru", "один триллион"), Some(1_000_000_000_000));
@@ -3049,14 +3425,21 @@ mod tests {
     /// and a hostile length is refused up front.
     #[test]
     fn scaled_arithmetic_is_checked() {
-        let huge = "neuf cent quatre-vingt-dix-neuf millions neuf cent quatre-vingt-dix-neuf mille \
+        let huge =
+            "neuf cent quatre-vingt-dix-neuf millions neuf cent quatre-vingt-dix-neuf mille \
                     neuf cent quatre-vingt-dix-neuf milliards "
-            .repeat(10);
+                .repeat(10);
         assert_eq!(parse_scaled("fr", huge.trim()), None);
         assert_eq!(parse_scaled("bn", "দশ হাজার কোটি কোটি কোটি"), None);
         let nineteen = format!("wun{}", " zero".repeat(18));
-        assert_eq!(parse_scaled("en_AERO", &nineteen), Some(1_000_000_000_000_000_000));
-        assert_eq!(parse_scaled("en_AERO", &format!("niner{}", " zero".repeat(19))), None);
+        assert_eq!(
+            parse_scaled("en_AERO", &nineteen),
+            Some(1_000_000_000_000_000_000)
+        );
+        assert_eq!(
+            parse_scaled("en_AERO", &format!("niner{}", " zero".repeat(19))),
+            None
+        );
         let long = vec!["deux mille"; 30_000].join(" ");
         assert_eq!(parse_scaled("fr", &long), None);
         assert_eq!(parse_scaled("th", &"หนึ่งล้าน".repeat(20_000)), None);
@@ -3069,10 +3452,7 @@ mod tests {
         assert_eq!(parse_scaled("dv", "ބާރަހާސް"), Some(12_000));
         assert_eq!(parse_scaled("dv", "ވިހިހާސް"), Some(20_000));
         assert_eq!(parse_scaled("dv", "ދެމިލިޔަން"), Some(2_000_000));
-        assert_eq!(
-            parse_scaled("dv", "ތިރީސްއެއްހާސް ނުވަސަތޭކަ ތިރީސްހަތަރެއް"),
-            Some(31_934)
-        );
+        assert_eq!(parse_scaled("dv", "ތިރީސްއެއްހާސް ނުވަސަތޭކަ ތިރީސްހަތަރެއް"), Some(31_934));
         // vi "tỷ" (10^9) is two letters.
         assert_eq!(parse_scaled("vi", "một tỷ"), Some(1_000_000_000));
         // bm "ba" stays out: every "ba X ni Y" collides (#226).
@@ -3091,7 +3471,10 @@ mod tests {
         // Plurals heard only after other multipliers.
         assert_eq!(parse_scaled("sl", "tri milijarde"), Some(3_000_000_000));
         assert_eq!(parse_scaled("lt", "dešimt milijardų"), Some(10_000_000_000));
-        assert_eq!(parse_scaled("lt", "du šimtai milijardų"), Some(200_000_000_000));
+        assert_eq!(
+            parse_scaled("lt", "du šimtai milijardų"),
+            Some(200_000_000_000)
+        );
         // Standard spellings the renderer never writes (#240, #259).
         assert_eq!(parse_scaled("sl", "pet milijonov"), Some(5_000_000));
         assert_eq!(parse_scaled("sl", "pet milijard"), Some(5_000_000_000));
@@ -3110,12 +3493,28 @@ mod tests {
         assert_eq!(v("1000000 y medio", "es"), None);
         assert_eq!(v("un millón y medio kilo", "es"), None);
         assert_eq!(
-            crate::w2n_sentence::words2num_sentence("dos millones y medio ambiente", "es", "cardinal", false).unwrap(),
+            crate::w2n_sentence::words2num_sentence(
+                "dos millones y medio ambiente",
+                "es",
+                "cardinal",
+                false
+            )
+            .unwrap(),
             "2000000 y medio ambiente"
         );
-        assert_eq!(crate::w2n_sentence::words2num_sentence("2000000 y medio", "es", "cardinal", false).unwrap(), "2000000 y medio");
         assert_eq!(
-            crate::w2n_sentence::words2num_sentence("dos millones y medio de personas", "es", "cardinal", false).unwrap(),
+            crate::w2n_sentence::words2num_sentence("2000000 y medio", "es", "cardinal", false)
+                .unwrap(),
+            "2000000 y medio"
+        );
+        assert_eq!(
+            crate::w2n_sentence::words2num_sentence(
+                "dos millones y medio de personas",
+                "es",
+                "cardinal",
+                false
+            )
+            .unwrap(),
             "2500000 de personas"
         );
     }
@@ -3124,13 +3523,19 @@ mod tests {
     #[test]
     fn es_split_teens_rewrite() {
         let r = |t: &str| crate::w2n_sentence::es_split_teens(t, "es");
-        assert_eq!(r("tenía diez y ocho años").as_deref(), Some("tenía dieciocho años"));
+        assert_eq!(
+            r("tenía diez y ocho años").as_deref(),
+            Some("tenía dieciocho años")
+        );
         assert_eq!(r("¿diez y seis?").as_deref(), Some("¿dieciséis?"));
         assert_eq!(r("diez y seis€"), None);
         assert_eq!(r("cinco, diez y seis"), None);
         assert_eq!(r("las diez y seis minutos"), None);
         assert_eq!(r("diez y tres"), None);
-        assert_eq!(crate::w2n_sentence::es_split_teens("dez e seis", "pt"), None);
+        assert_eq!(
+            crate::w2n_sentence::es_split_teens("dez e seis", "pt"),
+            None
+        );
     }
 
     /// gladiaio/words2num2#90, #91, #92, #99, #100, #239: glued scales.
@@ -3139,22 +3544,58 @@ mod tests {
         assert_eq!(parse_scaled("hu", "tízezer-száz"), Some(10_100));
         assert_eq!(parse_scaled("hu", "tízezer-kettő"), Some(10_002));
         assert_eq!(parse_scaled("fi", "kymmenentuhatta sata"), Some(10_100));
-        assert_eq!(parse_scaled("sv", "tiotusen trehundrafyrtiofem"), Some(10_345));
-        assert_eq!(parse_scaled("nl", "tienduizend negenhonderdzevenennegentig"), Some(10_997));
-        assert_eq!(parse_scaled("cn", "一千二百三十四万五千六百七十八"), Some(12_345_678));
-        assert_eq!(parse_scaled("ja", "千二百三十四万五千六百七十八"), Some(12_345_678));
-        assert_eq!(parse_scaled("ja", "一億二千三百四十五万六千七百八十九"), Some(123_456_789));
-        assert_eq!(parse_scaled("ko", "천이백삼십사만 오천육백칠십팔"), Some(12_345_678));
-        assert_eq!(parse_scaled("ko", "일억 이천삼백사십오만 육천칠백팔십구"), Some(123_456_789));
+        assert_eq!(
+            parse_scaled("sv", "tiotusen trehundrafyrtiofem"),
+            Some(10_345)
+        );
+        assert_eq!(
+            parse_scaled("nl", "tienduizend negenhonderdzevenennegentig"),
+            Some(10_997)
+        );
+        assert_eq!(
+            parse_scaled("cn", "一千二百三十四万五千六百七十八"),
+            Some(12_345_678)
+        );
+        assert_eq!(
+            parse_scaled("ja", "千二百三十四万五千六百七十八"),
+            Some(12_345_678)
+        );
+        assert_eq!(
+            parse_scaled("ja", "一億二千三百四十五万六千七百八十九"),
+            Some(123_456_789)
+        );
+        assert_eq!(
+            parse_scaled("ko", "천이백삼십사만 오천육백칠십팔"),
+            Some(12_345_678)
+        );
+        assert_eq!(
+            parse_scaled("ko", "일억 이천삼백사십오만 육천칠백팔십구"),
+            Some(123_456_789)
+        );
         assert_eq!(parse_scaled("zh", "九千九百九十九万"), Some(99_990_000));
-        assert_eq!(parse_scaled("bo", "གཅིག་འབུམ་གཅིག་ཁྲི་དྲུག་བརྒྱ་དགུ་བཅུ་བདུན་"), Some(110_697));
+        assert_eq!(
+            parse_scaled("bo", "གཅིག་འབུམ་གཅིག་ཁྲི་དྲུག་བརྒྱ་དགུ་བཅུ་བདུན་"),
+            Some(110_697)
+        );
         // #349: a compound scale (ཁྲི་དུང་ཕྱུར) does not swallow the ཁྲི of the
         // multiplier before དུང་ཕྱུར.
-        assert_eq!(parse_scaled("bo", "གཅིག་འབུམ་གཅིག་ཁྲི་དུང་ཕྱུར་"), Some(11_000_000_000_000));
-        assert_eq!(parse_scaled("bo", "དགུ་འབུམ་དགུ་ཁྲི་དུང་ཕྱུར་"), Some(99_000_000_000_000));
-        assert_eq!(parse_scaled("bo", "གཅིག་ས་ཡ་གཅིག་ཁྲི་དུང་ཕྱུར་"), Some(101_000_000_000_000));
+        assert_eq!(
+            parse_scaled("bo", "གཅིག་འབུམ་གཅིག་ཁྲི་དུང་ཕྱུར་"),
+            Some(11_000_000_000_000)
+        );
+        assert_eq!(
+            parse_scaled("bo", "དགུ་འབུམ་དགུ་ཁྲི་དུང་ཕྱུར་"),
+            Some(99_000_000_000_000)
+        );
+        assert_eq!(
+            parse_scaled("bo", "གཅིག་ས་ཡ་གཅིག་ཁྲི་དུང་ཕྱུར་"),
+            Some(101_000_000_000_000)
+        );
         assert_eq!(parse_scaled("bo", "གཅིག་ཁྲི་དུང་ཕྱུར་"), Some(1_000_000_000_000));
-        assert_eq!(parse_scaled("th", "หนึ่งแสนสองหมื่นสามพันสี่ร้อยห้าสิบหก"), Some(123_456));
+        assert_eq!(
+            parse_scaled("th", "หนึ่งแสนสองหมื่นสามพันสี่ร้อยห้าสิบหก"),
+            Some(123_456)
+        );
         // zh 零 fills a skipped place.
         assert_eq!(parse_scaled("zh", "一万零一"), Some(10_001));
         assert_eq!(parse_scaled("cn", "一亿零一万"), Some(100_010_000));
@@ -3162,13 +3603,16 @@ mod tests {
         assert_eq!(parse_scaled("zh", "一万零一十"), Some(10_010));
         assert_eq!(parse_scaled("zh_TW", "一萬零一"), Some(10_001));
         assert_eq!(parse_scaled("zh", "一万零五千"), None); // no place skipped
-        // Without 零 a short tail is the spoken abbreviation (一万五 = 15000).
+                                                            // Without 零 a short tail is the spoken abbreviation (一万五 = 15000).
         assert_eq!(parse_scaled("zh", "一万五"), None);
         assert_eq!(parse_scaled("zh", "一万 五"), None);
         assert_eq!(parse_scaled("ja", "一万五"), Some(10_005)); // ja writes 10005 so
-        // sv elides the t that "ett" shares with "tusen".
+                                                                // sv elides the t that "ett" shares with "tusen".
         assert_eq!(parse_scaled("sv", "tjugoettusen"), Some(21_000));
-        assert_eq!(parse_scaled("sv", "tjugoettusen niohundrasextiofyra"), Some(21_964));
+        assert_eq!(
+            parse_scaled("sv", "tjugoettusen niohundrasextiofyra"),
+            Some(21_964)
+        );
         assert_eq!(parse_scaled("sv", "en miljonett"), Some(1_000_001));
         assert_eq!(parse_scaled("sv", "två miljonerett"), Some(2_000_001));
         // th "เอ็ด" is the final one after a higher place.
@@ -3199,11 +3643,20 @@ mod tests {
         assert_eq!(parse_year("de", "neunzehn neunundneunzig"), Some(1999));
         assert_eq!(parse_year("nl", "negentien zevenennegentig"), Some(1997));
         // Explicit hundred, spaced (fr "dix-neuf cent ...", hyphens → spaces).
-        assert_eq!(parse_year("fr", "dix neuf cent quatre vingt dix"), Some(1990));
-        assert_eq!(parse_year("fr", "dix-neuf cent quatre-vingt-dix"), Some(1990));
+        assert_eq!(
+            parse_year("fr", "dix neuf cent quatre vingt dix"),
+            Some(1990)
+        );
+        assert_eq!(
+            parse_year("fr", "dix-neuf cent quatre-vingt-dix"),
+            Some(1990)
+        );
         // Hundred glued into one token.
         assert_eq!(parse_year("sv", "nittonhundranittiosju"), Some(1997));
-        assert_eq!(parse_year("nl", "negentienhonderdzevenennegentig"), Some(1997));
+        assert_eq!(
+            parse_year("nl", "negentienhonderdzevenennegentig"),
+            Some(1997)
+        );
         // A plain canonical two-token number must NOT be mis-read as a year:
         // "vingt trois" (23) is a table hit, so the fallback never sees it —
         // but even directly, 20·100+3 is refused because 23 resolves first via
@@ -3217,12 +3670,24 @@ mod tests {
         use w2n_sentence::words2num;
         let int = |n: i64| W2nValue::Int(BigInt::from(n));
         // End-to-end through the same path Python's `words2num` takes.
-        assert_eq!(words2num("neunzehn neunundneunzig", "de", "cardinal").unwrap(), int(1999));
-        assert_eq!(words2num("nittonhundranittiosju", "sv", "cardinal").unwrap(), int(1997));
+        assert_eq!(
+            words2num("neunzehn neunundneunzig", "de", "cardinal").unwrap(),
+            int(1999)
+        );
+        assert_eq!(
+            words2num("nittonhundranittiosju", "sv", "cardinal").unwrap(),
+            int(1997)
+        );
         // De-spaced glued canonical ("mille novecento ottantotto" → 1988).
-        assert_eq!(words2num("mille novecento ottantotto", "it", "cardinal").unwrap(), int(1988));
+        assert_eq!(
+            words2num("mille novecento ottantotto", "it", "cardinal").unwrap(),
+            int(1988)
+        );
         // Regression: a canonical number is unaffected.
-        assert_eq!(words2num("deux mille dix", "fr", "cardinal").unwrap(), int(2010));
+        assert_eq!(
+            words2num("deux mille dix", "fr", "cardinal").unwrap(),
+            int(2010)
+        );
         assert_eq!(words2num("vingt trois", "fr", "cardinal").unwrap(), int(23));
     }
 
@@ -3238,21 +3703,21 @@ mod tests {
     #[test]
     fn negatives_take_the_renderer_prefix_and_the_whole_value() {
         for (lang, text, n) in [
-            ("fr", "moins sept", -7),                                   // #123
+            ("fr", "moins sept", -7), // #123
             ("es", "menos cuarenta y dos", -42),
             ("zh", "负七", -7),
             ("am", "ሰልቢ ሰባት", -7),
             ("tr", "eksi yedi", -7),
             ("xh", "ngaphantsi kwe sixhenxe", -7),
-            ("am", "ሰልቢ አንድ ሺህ ሁለት መቶ ሠላሳ አራት", -1234),        // #61: not -766
+            ("am", "ሰልቢ አንድ ሺህ ሁለት መቶ ሠላሳ አራት", -1234), // #61: not -766
             ("fr", "moins un million mille", -1001000),
             ("fr", "moins un million cinq cents", -1000500),
             ("de", "minus zwölftausenddreihundertfünfundvierzig", -12345),
             ("sv", "minus tolvtusen trehundrafyrtiofem", -12345),
-            ("tr", "eksiyedi", -7),                                     // #124 glued
+            ("tr", "eksiyedi", -7), // #124 glued
             ("th", "ติดลบเจ็ด", -7),
             ("th", "ติดลบหนึ่งพันสองร้อยสามสิบสี่", -1234),
-            ("kn", "ಮೈನಸ್ ಏಳು", -7),                                   // #243
+            ("kn", "ಮೈನಸ್ ಏಳು", -7), // #243
             ("kn", "ಋಣ ಏಳು", -7),
             ("kn", "(-) ಏಳು", -7),
             ("te", "మైనస్ ఏడు", -7),
@@ -3264,12 +3729,17 @@ mod tests {
         for lang in supported_langs() {
             let l = num2words2_core::get_lang_by_key(lang).unwrap();
             for n in [-7i64, -42, -1234] {
-                let Ok(w) = l.to_cardinal(&BigInt::from(n)) else { continue };
+                let Ok(w) = l.to_cardinal(&BigInt::from(n)) else {
+                    continue;
+                };
                 if w.chars().all(|c| c.is_ascii_digit() || c == '-') {
                     continue;
                 }
                 let got = w2n(&w, lang, "cardinal");
-                assert!(got == Some(n) || got.is_none(), "{lang} {w:?} -> {got:?}, want {n}");
+                assert!(
+                    got == Some(n) || got.is_none(),
+                    "{lang} {w:?} -> {got:?}, want {n}"
+                );
             }
         }
         // A bare prefix is not a number.
@@ -3296,12 +3766,21 @@ mod tests {
         assert_eq!(normalize("ഒന\u{0D4D}\u{200D}പത്"), normalize("ഒൻപത്"));
         assert_eq!(normalize("གཅིག"), normalize("གཅིག་"));
         assert_eq!(normalize("ལྔ།"), normalize("ལྔ་"));
-        for p in ["पाँच।", "«cinq»", "(five)", "五。", "خمسة،", "አምስት።"] {
-            assert!(!normalize(p).chars().any(|c| !c.is_alphanumeric() && !unicode_normalization::char::is_combining_mark(c)), "{p:?} -> {:?}", normalize(p));
+        for p in ["पाँच।", "«cinq»", "(five)", "五。", "خمسة،", "አምስት።"]
+        {
+            assert!(
+                !normalize(p)
+                    .chars()
+                    .any(|c| !c.is_alphanumeric()
+                        && !unicode_normalization::char::is_combining_mark(c)),
+                "{p:?} -> {:?}",
+                normalize(p)
+            );
         }
         assert_eq!(normalize("पांच"), normalize("पाँच"));
         // Normalizing twice changes nothing.
-        for t in ["Forty-Two", "åttende", "ติดลบเจ็ด", "(-) ಏಳು", "dreißig"] {
+        for t in ["Forty-Two", "åttende", "ติดลบเจ็ด", "(-) ಏಳು", "dreißig"]
+        {
             assert_eq!(normalize(&normalize(t)), normalize(t));
         }
     }
@@ -3345,7 +3824,8 @@ mod tests {
     /// and an opening bracket or quote stays in front of it (#69).
     #[test]
     fn sentence_mode_keeps_the_punctuation_normalize_drops() {
-        let s = |t: &str, l: &str| w2n_sentence::words2num_sentence(t, l, "cardinal", false).unwrap();
+        let s =
+            |t: &str, l: &str| w2n_sentence::words2num_sentence(t, l, "cardinal", false).unwrap();
         assert_eq!(s("मेरे पास पाँच। सेब", "hi"), "मेरे पास 5। सेब");
         assert_eq!(s("I have five) apples", "en"), "I have 5) apples");
         // #69: the bracket or quote is cut off and kept, the number converts.
@@ -3440,8 +3920,10 @@ mod year_mode_tests {
     #[test]
     fn every_rendered_year_round_trips() {
         // #128-#136, #247: to_year of every table language, 1000..=2100.
-        for lang in ["as", "ba", "bn", "bo", "eu", "gu", "hy", "km", "lo", "mn", "mr", "my", "vi",
-                     "zh", "ja", "ta", "fi", "af", "nb", "am", "dv", "lij"] {
+        for lang in [
+            "as", "ba", "bn", "bo", "eu", "gu", "hy", "km", "lo", "mn", "mr", "my", "vi", "zh",
+            "ja", "ta", "fi", "af", "nb", "am", "dv", "lij",
+        ] {
             let r = num2words2_core::get_lang_by_key(lang).unwrap();
             for y in (1000..=2100).step_by(7) {
                 let w = r.to_year(&BigInt::from(y)).unwrap();
@@ -3453,10 +3935,12 @@ mod year_mode_tests {
     #[test]
     fn regional_english_uses_the_grammar() {
         // #193: decimals, year pairs, "a hundred" -- and the lakh reading stays.
-        let dec = |t: &str, l: &str| words2num(t, l, "cardinal").map(|v| match v {
-            W2nValue::Dec(d) => d.to_string(),
-            other => format!("{other:?}"),
-        });
+        let dec = |t: &str, l: &str| {
+            words2num(t, l, "cardinal").map(|v| match v {
+                W2nValue::Dec(d) => d.to_string(),
+                other => format!("{other:?}"),
+            })
+        };
         assert_eq!(dec("three point one four", "en_IN").unwrap(), "3.14");
         assert_eq!(year("nineteen ninety nine", "en_NG"), Some(1999));
         assert_eq!(year("twenty twenty", "en_IN"), Some(2020));
@@ -3494,7 +3978,10 @@ mod digit_literal_tests {
         assert_eq!(words2num("12,345", "en", "ordinal").unwrap(), int(12345));
         assert_eq!(words2num("1 000", "en", "cardinal").unwrap(), int(1000));
         assert_eq!(words2num("2,000", "en", "year").unwrap(), int(2000));
-        assert_eq!(words2num("1,000,000", "en", "cardinal").unwrap(), int(1_000_000));
+        assert_eq!(
+            words2num("1,000,000", "en", "cardinal").unwrap(),
+            int(1_000_000)
+        );
         assert_eq!(words2num("-17", "en", "cardinal").unwrap(), int(-17));
         assert_eq!(dec(&words2num("3.14", "en", "cardinal").unwrap()), "3.14");
     }
@@ -3504,7 +3991,10 @@ mod digit_literal_tests {
         assert_eq!(words2num("1.234", "de", "cardinal").unwrap(), int(1234));
         assert_eq!(words2num("1.234", "es", "cardinal").unwrap(), int(1234));
         assert_eq!(dec(&words2num("2,5", "de", "cardinal").unwrap()), "2.5");
-        assert_eq!(dec(&words2num("1 234,5", "fr", "cardinal").unwrap()), "1234.5");
+        assert_eq!(
+            dec(&words2num("1 234,5", "fr", "cardinal").unwrap()),
+            "1234.5"
+        );
     }
 
     #[test]
