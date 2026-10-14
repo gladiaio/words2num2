@@ -1224,3 +1224,35 @@ def test_en_pounds_weight(text, expected):
 )
 def test_shared_scale_closed_compound(lang, text, expected):
     assert words2num_sentence(text, lang=lang) == expected
+
+
+@pytest.mark.parametrize(
+    "lang, text, expected",
+    [
+        # es "más", it "più", pt "mais" say "+" before a country code (#941).
+        (
+            "es",
+            "llama al más treinta y cuatro seis uno dos tres cuatro cinco seis siete ocho",
+            "llama al +34 612 34 56 78",
+        ),
+        (
+            "it",
+            "chiama il più trentanove tre tre tre uno due tre quattro cinque sei sette",
+            "chiama il +39 333 123 4567",
+        ),
+        (
+            "pt",
+            "mais trezentos e cinquenta e um nove um nove oito sete seis cinco quatro três",
+            "+351 919 876 543",
+        ),
+        # No country code: left as digits, never a national number.
+        (
+            "pt",
+            "mais trinta e cinco nove um nove oito sete seis cinco quatro três",
+            "mais 35 919876543",
+        ),
+        ("es", "tengo más 5 años", "tengo más 5 años"),
+    ],
+)
+def test_phone_native_plus_word(lang, text, expected):
+    assert words2num_sentence(text, lang=lang, phone=True) == expected
