@@ -1055,11 +1055,83 @@ fn prev_word(parts: &[Part], i: usize) -> Option<usize> {
 
 /// en "pounds" is also a weight: "twenty pounds of flour" stays words; "quid",
 /// "sterling" and "pounds sterling" are money wherever they stand (#81).
-fn is_weight(lang: &str, m: &Match, parts: &[Part]) -> bool {
-    lang == "en"
-        && matches!(m.name.as_str(), "pound" | "pounds")
-        && m.trailing.is_empty()
-        && next_word(parts, m.end).is_some_and(|k| word_key(&parts[k].text).0 == "of")
+///
+/// Also a weight in context (#814): a weighing word shortly before the amount
+/// ("weighs one hundred ninety pounds", "bench pressed three hundred
+/// pounds", "nine stone four pounds"), an imperial subunit after it ("seven
+/// pounds eight ounces"), or a sack or bag it measures ("a fifty pound bag").
+fn is_weight(lang: &str, m: &Match, parts: &[Part], num: usize) -> bool {
+    if lang != "en" || !matches!(m.name.as_str(), "pound" | "pounds") {
+        return false;
+    }
+    let key = |k: usize| word_key(&parts[k].text).0;
+    let next = next_word(parts, m.end).map(key);
+    if m.trailing.is_empty() && next.as_deref() == Some("of") {
+        return true;
+    }
+    if m.trailing.is_empty()
+        && next.as_deref().is_some_and(|n| {
+            matches!(
+                n,
+                "ounce" | "ounces" | "oz" | "bag" | "bags" | "sack" | "sacks" | "dumbbell" | "dumbbells" | "kettlebell"
+                    | "kettlebells"
+            )
+        })
+    {
+        return true;
+    }
+    // "seven pounds eight ounces": ounces after a further amount (not "an
+    // ounce", "per ounce": a price, #1264 audit).
+    // "seven pounds and eight ounces", "seven pounds, eight ounces" too.
+    let after = next_word(parts, m.end).map(|n| if key(n) == "and" { next_word(parts, n) } else { Some(n) }).flatten();
+    if matches!(m.trailing.as_str(), "" | ",")
+        && after.is_some_and(|n| {
+            parse_num(&parts[n].text).is_some()
+                && next_word(parts, n).is_some_and(|n2| matches!(key(n2).as_str(), "ounce" | "ounces" | "oz"))
+        })
+    {
+        return true;
+    }
+    // A money word after the amount wins: "a five pound note", "twenty pounds
+    // and fifty pence".
+    let mut k = m.end;
+    for _ in 0..4 {
+        let Some(n) = next_word(parts, k) else { break };
+        if matches!(key(n).as_str(), "note" | "notes" | "coin" | "coins" | "pence" | "penny" | "p" | "sterling" | "quid") {
+            return false;
+        }
+        k = n;
+    }
+    // The weighing word right before the amount, or before a linking word
+    // ("weighs 190 pounds", "weight is 180 pounds", "weight: 5 pounds",
+    // "bench pressed 300 pounds", "nine stone four pounds"). Nothing wider:
+    // "it weighs nothing and costs five pounds" is money (#1264 audit).
+    let weighing = |w: &str| matches!(w, "weigh" | "weighs" | "weighed" | "weighing" | "weight");
+    let Some(k1) = prev_word(parts, num) else { return false };
+    let w1 = key(k1);
+    let prev = |k: usize| prev_word(parts, k).map(key);
+    if weighing(&w1) && !parts[k1].text.ends_with([',', '.', ';']) {
+        return true;
+    }
+    if matches!(w1.as_str(), "benched" | "deadlifted" | "squatted") {
+        return true;
+    }
+    if w1 == "pressed" && prev(k1).is_some_and(|p| matches!(p.as_str(), "bench" | "leg" | "overhead")) {
+        return true;
+    }
+    if w1 == "stone" && prev_word(parts, k1).is_some_and(|k2| parse_num(&parts[k2].text).is_some()) {
+        return true;
+    }
+    if matches!(w1.as_str(), "is" | "was" | "of" | "about" | "around" | "nearly" | "almost" | "over" | "under")
+        && prev(k1).is_some_and(|p| weighing(&p))
+    {
+        return true;
+    }
+    // "weight: five pounds"
+    if parts[k1].text.ends_with(':') && weighing(&w1) {
+        return true;
+    }
+    false
 }
 
 /// `n` (digits) as a fraction of the currency's minor unit, if it is one:
@@ -1109,7 +1181,7 @@ pub fn fold_currency(text: &str, lang: &str) -> String {
         }
         let m = next_word(&parts, i)
             .and_then(|j| match_currency(base, &parts, j))
-            .filter(|m| !is_weight(base, m, &parts));
+            .filter(|m| !is_weight(base, m, &parts, i));
         let Some(m) = m else {
             out.push_str(&p.text);
             i += 1;
