@@ -1382,3 +1382,18 @@ def test_one_after_figure(text, expected):
 )
 def test_phone_native_plus_word(lang, text, expected):
     assert words2num_sentence(text, lang=lang, phone=True) == expected
+
+
+@pytest.mark.parametrize(
+    "lang, text, expected",
+    [
+        # A unit and the word for ten, spaced, read as their tens word (#983).
+        ("lv", "trīs desmit pieci", "35"),
+        ("hr", "tri deset sedam", "37"),
+        ("eo", "du dek naŭ", "29"),
+        ("bg", "седем десет и осем", "78"),
+        ("lv", "divdesmit trīs", "23"),
+    ],
+)
+def test_spaced_tens_word(lang, text, expected):
+    assert words2num_sentence(text, lang=lang) == expected
