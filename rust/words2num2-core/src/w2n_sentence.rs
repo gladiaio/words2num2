@@ -2474,7 +2474,13 @@ fn en_digit_run(parts: &[String], i: usize) -> Option<(String, usize)> {
     let mut end: Option<(usize, usize)> = None;
     let mut prev_end: Option<(usize, usize)> = None;
     let mut repeat = 1usize;
+    // Opened on "zero" (not "oh"), with no "double"/"triple" (#1255, #1256).
+    let mut zero_head = false;
+    let mut repeated = false;
     for (k, w) in en_number_words(parts, i).iter().enumerate() {
+        if k == 0 {
+            zero_head = w.word == "zero";
+        }
         let d = match w.word.as_str() {
             "oh" | "o" => 0,
             "nought" | "naught" if k == 0 => break,
@@ -2483,6 +2489,7 @@ fn en_digit_run(parts: &[String], i: usize) -> Option<(String, usize)> {
                     break;
                 }
                 repeat = if w.word == "double" { 2 } else { 3 };
+                repeated = true;
                 continue;
             }
             other => match unit_value(other) {
@@ -2499,15 +2506,24 @@ fn en_digit_run(parts: &[String], i: usize) -> Option<(String, usize)> {
             end = Some((digits.len(), w.part));
         }
     }
-    // After a leading zero (a dialling prefix), the last digit before a
-    // multiplier is its count: "zero five hundred thirty two" is 0, then 532
-    // (#825). Zero itself is no count.
+    // After a leading "zero" (a dialling prefix), the last digit before a
+    // multiplier is its count when the number goes on: "zero five hundred
+    // thirty two" is 0, then 532 (#825). Zero itself is no count; "zero six
+    // hundred (hours)" and "oh five hundred" are military times, read as
+    // written (#1255, #1257).
     if let Some((len, part)) = end {
-        if digits.starts_with('0') && digits.as_bytes()[len - 1] != b'0'
+        let goes_on = |n: &str| {
+            n == "and"
+                || crate::w2n_lang_en::unit_value(n).is_some()
+                || crate::w2n_lang_en::tens_value(n).is_some()
+                || n.split('-').next().is_some_and(|h| crate::w2n_lang_en::tens_value(h).is_some())
+        };
+        if zero_head
+            && !repeated
+            && digits.as_bytes()[len - 1] != b'0'
             && !ends_run_mark(&parts[part])
             && next_word(parts, part).is_some_and(|n| is_scale_word(&Converter::En, &n, 100))
-            // "oh five hundred hours": a military time, read as written.
-            && !next_word2(parts, part).is_some_and(|n| matches!(n.as_str(), "hours" | "hrs"))
+            && next_word2(parts, part).is_some_and(|n| goes_on(&n))
         {
             end = prev_end;
         }

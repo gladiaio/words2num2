@@ -1026,6 +1026,15 @@ def test_fi_sataa_homograph(text, expected):
         ("es", "cero cinco mil", "0 5000"),
         # Not a military time, not a pair that is no number, not without zero.
         ("en", "oh five hundred hours", "05 hundred hours"),
+        # en: only "zero", no "double", and the number must go on (#1255-#1257).
+        ("en", "zero five hundred and two", "0 502"),
+        ("en", "meet at oh six hundred", "meet at 06 hundred"),
+        ("en", "zero double five hundred", "055 hundred"),
+        (
+            "en",
+            "zero six hundred to zero eight hundred hours",
+            "06 hundred to 08 hundred hours",
+        ),
         ("es", "cero nueve cinco uno cien", "0951 100"),
         ("en", "one five one million", "151 million"),
         ("en", "zero five six seven", "0567"),

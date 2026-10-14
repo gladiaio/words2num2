@@ -8,7 +8,7 @@ follows [Semantic Versioning](https://semver.org/) and uses
 
 ### Fixed
 
-- Sentence mode: a digit dictation opening on zero leaves its last digit to a multiplier after it ("zero five hundred thirty two" is "0 532", was "05 132"; tr "sıfır beş yüz otuz iki", fr "zéro cinq cents trente-deux", es "cero cinco mil" "0 5000"). Not when the two do not read as one number, nor in "oh five hundred hours" (#825).
+- Sentence mode: a digit dictation opening on zero leaves its last digit to a multiplier after it ("zero five hundred thirty two" is "0 532", was "05 132"; tr "sıfır beş yüz otuz iki", fr "zéro cinq cents trente-deux", es "cero cinco mil" "0 5000"). In en only after "zero" with the number going on, so military times ("oh five hundred", "zero six hundred hours") and "double"/"triple" dictations read as before; not when the two do not read as one number (#825, #1255, #1256, #1257).
 - fi sentence mode: "sataa" (it rains) is 100 only as the continuation of a number ("viisi sataa"), never at its start ("huomenna sataa vettä" was "huomenna 100 vettä", "sataa kolme päivää" "103 päivää", now "sataa 3 päivää"; "viisi sataa" is still 500) (#835).
 - hu/fi case endings: a char that lowercases to another byte length (U+212A KELVIN SIGN) in the ending no longer panics and aborts the interpreter; "öt\u212aor" is "5-\u212aor" (#851). Only the ending is lowercased now, so a stem holding such a char also peels: tr "İKİDE" is "2'DE", hu "KETTŐKOR" "2-KOR" (were left as words).
 - it: the tens and "cento" elided before a vowel read ("vent'anni" is "20 anni", "trent’anni fa" "30 anni fa", "cent'anni" "100 anni", also in a compound: "duecent'anni" "200 anni", "centovent'anni" "120 anni"; were left as words) (#918, #1250).
