@@ -84,6 +84,23 @@ pub fn words2num(
         };
     }
     let res = w2n_sentence::words2num(text, lang, to);
+    // es "tres con cinco": in Latin American usage "con" is the decimal
+    // comma (#864). Only for a whole number, never in a sentence, where it is
+    // as often "with" ("uno con cinco por ciento de grasa", #1224).
+    if res.is_err() && to == "cardinal" {
+        let resolved = w2n_sentence::resolve_lang(lang).unwrap_or_default();
+        if resolved.split(['_', '-']).next() == Some("es") {
+            let words: Vec<&str> = text.split_whitespace().collect();
+            if let Some(k) = words.iter().position(|w| w.eq_ignore_ascii_case("con")).filter(|&k| k > 0 && k + 1 < words.len()) {
+                let mut joined = words.clone();
+                joined[k] = "coma";
+                // The whole chain, so "diez y seis con cinco" reads too.
+                if let Ok(v) = words2num(&joined.join(" "), lang, to) {
+                    return Ok(v);
+                }
+            }
+        }
+    }
     // es "diez y seis": the split teens (#866), in cardinal and year mode.
     if res.is_err() && matches!(to, "cardinal" | "year") {
         let resolved = w2n_sentence::resolve_lang(lang).unwrap_or_default();
