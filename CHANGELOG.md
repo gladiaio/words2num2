@@ -9,6 +9,12 @@ follows [Semantic Versioning](https://semver.org/) and uses
 ### Fixed
 
 - `phone=True`: es "más", it "più", pt "mais" are the spoken "+" before a country code ("más treinta y cuatro seis uno dos …" is "+34 612 34 56 78", was "más 34 612345678"), but only when the digits make an international number and no national one: these words also mean "more" and "no longer" ("no es más 912 34 56 78", pt_BR "não é mais (33) 98765-4321" keep the local reading) (#941, #1274).
+
+## [0.4.4] — 2026-10-14
+
+### Fixed
+
+- Sentence mode: a lone article-one ("one", fr "un", …) closing an item right after a figure counts, as it already did after a number word ("4, 8, 2, one." is "4, 8, 2, 1.", "5, one, 7" "5, 1, 7", "4, 8, 2 and one." "4, 8, 2 and 1."); "pick one", "2 and one is broken" keep the word (#1272).
 - Sentence mode, shared scale of a range (#865): the range word shares too, en "to", es/pt/gl/it/ca "a", fr "à", nl "tot" ("five to six thousand people" is "5000 to 6000 people", was "5 to 6000"); not fr "a" without its accent (the verb "has"), not a range from one ("count from one to five thousand"; de "ein bis zwei Millionen" still shares), not after an adding verb ("add five to six thousand", es "suma", fr "ajoute") (#1263).
 - `date=True`: a comma before the year keeps it in the date, so `date_format="iso"` converts the written en form this pass itself writes ("on March 12, 2026" is "on 2026-03-12", was left as written; fr "le douze mars, deux mille vingt-six" is "le 2026-03-12"). The written form drops the comma where the language writes none ("le 12 mars 2026"). Only where the year ends the span, at the end of the text or with its own mark ("on May 5, 2026, we met"): before a word the number may be a count ("le 12 mars, 2000 personnes" is unchanged) (#946).
 - Sentence mode, shared scale of a range (#865): de/it/nl B glued to its thousand shares it too ("zwei oder dreitausend Leute" is "2000 oder 3000 Leute", it "due o tremila" "2000 o 3000", nl "twee of drieduizend" "2000 of 3000"; a following scale run is shared too, "due o tremila miliardi"). de also takes "bis" and the suspended hyphen ("zwei- oder dreitausend" is "2000 oder 3000", "zwei- bis dreitausend Euro" "2000 bis 3000 Euro") (#1221, #1262).
