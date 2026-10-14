@@ -4343,7 +4343,20 @@ pub(crate) fn share_scale_words(text: &str, lang: &str) -> Option<String> {
         }
         let w = core(t);
         // "one", "un", "ein": the article form the table may leave out.
-        if matches!(w.as_str(), "one" | "un" | "une" | "uno" | "una" | "um" | "uma" | "ein" | "eine" | "een" | "unha") {
+        // Per language: de "um" is "at", not pt "um" (#1266).
+        let article = match base.as_str() {
+            "en" => matches!(w.as_str(), "one"),
+            "es" => matches!(w.as_str(), "un" | "uno" | "una"),
+            "fr" => matches!(w.as_str(), "un" | "une"),
+            "it" => matches!(w.as_str(), "un" | "uno" | "una"),
+            "pt" => matches!(w.as_str(), "um" | "uma"),
+            "gl" => matches!(w.as_str(), "un" | "unha"),
+            "ca" => matches!(w.as_str(), "un" | "una"),
+            "de" => matches!(w.as_str(), "ein" | "eine"),
+            "nl" => matches!(w.as_str(), "een"),
+            _ => false,
+        };
+        if article {
             return Some(1);
         }
         match crate::lookup_norm(lang, &w, false, &[]) {

@@ -1180,6 +1180,8 @@ def test_digit_run_before_multiplier(lang, text, expected):
         ("de", "zwei- und dreitausend", "2000 und 3000"),
         ("de", "von zwei bis dreitausend", "von 2000 bis 3000"),
         ("de", "zwei und dreitausend", "2 und 3000"),
+        # de "um" is "at", not pt "um" (one) (#1266).
+        ("de", "um zwei bis drei Millionen Euro", "um 2000000 bis 3000000 Euro"),
     ],
 )
 def test_shared_scale_closed_compound(lang, text, expected):
