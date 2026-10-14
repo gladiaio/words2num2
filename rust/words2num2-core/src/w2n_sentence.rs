@@ -4472,7 +4472,9 @@ pub(crate) fn share_scale_words(text: &str, lang: &str) -> Option<String> {
         }
         // "from one to five thousand", "a scale of one to five thousand":
         // a range from one counts from one (#1271 audit).
-        if range_word && a == 1 {
+        // de "ein bis zwei Millionen" is the usual "one to two million" and
+        // keeps sharing, as since #1221 (#1271 audit N1).
+        if range_word && a == 1 && base != "de" {
             continue;
         }
         let lead_clean = a_tok.len() + if suspended { toks[ka].chars().last().map_or(0, char::len_utf8) } else { 0 } == toks[ka].len();

@@ -1243,6 +1243,7 @@ def test_shared_scale_closed_compound(lang, text, expected):
         # (#1271 audit).
         ("fr", "Le chapitre cinq a six mille mots.", "Le chapitre 5 a 6000 mots."),
         ("en", "count from one to five thousand", "count from one to 5000"),
+        ("de", "ein bis zwei Millionen Menschen", "1000000 bis 2000000 Menschen"),
         ("it", "sei a settemila metri", "sei a 7000 metri"),
         ("es", "suma cinco a seis mil", "suma 5 a 6000"),
     ],
