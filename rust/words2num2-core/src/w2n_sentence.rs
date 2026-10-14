@@ -2472,6 +2472,7 @@ fn en_digit_run(parts: &[String], i: usize) -> Option<(String, usize)> {
     use crate::w2n_lang_en::unit_value;
     let mut digits = String::new();
     let mut end: Option<(usize, usize)> = None;
+    let mut prev_end: Option<(usize, usize)> = None;
     let mut repeat = 1usize;
     for (k, w) in en_number_words(parts, i).iter().enumerate() {
         let d = match w.word.as_str() {
@@ -2494,7 +2495,15 @@ fn en_digit_run(parts: &[String], i: usize) -> Option<(String, usize)> {
         }
         repeat = 1;
         if w.last {
+            prev_end = end;
             end = Some((digits.len(), w.part));
+        }
+    }
+    // The last digit before a multiplier is its count, not a digit:
+    // "zero five hundred thirty two" is 0, then 532 (#825).
+    if let Some((_, part)) = end {
+        if !ends_run_mark(&parts[part]) && next_word(parts, part).is_some_and(|n| is_scale_word(&Converter::En, &n, 100)) {
+            end = prev_end;
         }
     }
     let (len, part) = end?;
@@ -2547,6 +2556,7 @@ fn table_digit_run(
 ) -> Option<(String, usize)> {
     let mut digits = String::new();
     let mut end: Option<(usize, usize)> = None;
+    let mut prev_end: Option<(usize, usize)> = None;
     let mut j = i;
     let mut article_head = false;
     // my: years and another count is no dictation; the walker reads it, nor
@@ -2590,11 +2600,23 @@ fn table_digit_run(
             article_head = article;
         }
         digits.push_str(&d);
+        prev_end = end;
         end = Some((digits.len(), j));
         if ends_with_terminal_punct(tok) || ends_with_close_quote(tok) {
             break;
         }
         j += 1;
+    }
+    // The last digit before a multiplier is its count (#825).
+    if let Some((_, part)) = end {
+        // A scale, or a hundred word the table reads (tr "yüz", fr "cents").
+        let multiplier = |n: &str| {
+            is_scale_word(converter, n, 100)
+                || matches!(converter.to_cardinal(n), Ok(W2nValue::Int(v)) if v == BigInt::from(100) || v == BigInt::from(1000))
+        };
+        if !ends_run_mark(&parts[part]) && next_word(parts, part).is_some_and(|n| multiplier(&n)) {
+            end = prev_end;
+        }
     }
     let (len, part) = end?;
     digits.truncate(len);
