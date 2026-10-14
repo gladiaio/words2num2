@@ -1534,7 +1534,19 @@ fn morpheme_glued(lang: &str, norm: &str) -> Option<String> {
     let mut k = 0;
     while k < toks.len() {
         let t = toks[k];
-        if crate::w2n_forms::is_glued_morpheme(lang, t) {
+        // lv "div desmit": the tens word glues a unit to the word for ten,
+        // which is a number of its own, so no morpheme; glued only when the
+        // pair is a round tens word of the table (#983).
+        let tens_pair = k > 0
+            && out.last().is_some_and(|prev| {
+                matches!(crate::lookup_norm(lang, &format!("{prev}{t}"), false, &[]), Ok(Some(v)) if (20..=90).contains(&v) && v % 10 == 0)
+            });
+        if tens_pair {
+            any = true;
+            if let Some(prev) = out.last_mut() {
+                prev.push_str(t);
+            }
+        } else if crate::w2n_forms::is_glued_morpheme(lang, t) {
             any = true;
             match out.last_mut() {
                 // A suffix morpheme (fi "kymmentä") joins the unit before it;
