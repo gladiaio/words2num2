@@ -6,6 +6,8 @@ follows [Semantic Versioning](https://semver.org/) and uses
 
 ## [Unreleased]
 
+## [0.4.3] — 2026-10-14
+
 ### Fixed
 
 - tr: a case ending is cut from a number word only when it follows the stem's vowel harmony ("bina", building, was "1000'a"; "bine" is still "1000'e"). An ASCII capital "I" in the stem is resolved by the numeral ("SAAT IKIDE" is "SAAT 2'DE", "BINA" stays) (#826).
