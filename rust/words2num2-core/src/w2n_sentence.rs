@@ -4735,7 +4735,7 @@ fn words2num_sentence_walk(
         let head_is_oh = en_grammar && matches!(head.as_str(), "oh" | "o");
         // Nor, in a script written without spaces, does a piece opening on a
         // glued mark ("，五" of "二十，五"): the mark would be lost (#1028).
-        // fi "sataa" is 100 only after its multiplier ("kaksi sataa"; the
+        // fi "sataa" is 100 only continuing a number ("kaksi sataa"; the
         // renderer glues it: "kaksisataa"); a run never opens on it, where it
         // is the verb "it rains" ("sataa kolme päivää", #835, #1252 audit).
         let fi_sataa = resolved.split(['_', '-']).next() == Some("fi") && crate::normalize(&head) == "sataa";

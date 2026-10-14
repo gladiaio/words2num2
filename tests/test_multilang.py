@@ -996,7 +996,7 @@ def test_suffix_cut_char_boundary(lang, text, expected):
 @pytest.mark.parametrize(
     "text, expected",
     [
-        # fi "sataa" is 100 only after its multiplier; else "it rains" (#835).
+        # fi "sataa" is 100 only continuing a number; else "it rains" (#835).
         ("huomenna sataa vettä", "huomenna sataa vettä"),
         ("alkoi sataa rakeita", "alkoi sataa rakeita"),
         ("viisi sataa", "500"),
