@@ -542,15 +542,15 @@ fn suffixes(lang: &str) -> &'static [&'static str] {
 }
 
 /// Does the tr ending `suf` agree in vowel backness with the last vowel of
-/// `stem`? Front e i ö ü, back a ı o u; an ending with no vowel agrees.
+/// `stem`? Front e i ö ü, back a ı o u; an ending with no vowel agrees. An
+/// ASCII capital "I" may stand for either i or ı ("IKIDE" typed without a
+/// Turkish keyboard), so it agrees with both.
 fn tr_harmony(stem: &str, suf: &str) -> bool {
-    let class = |c: char| match c {
-        'e' | 'i' | 'ö' | 'ü' | 'E' | 'İ' | 'Ö' | 'Ü' => Some(true),
-        'a' | 'ı' | 'o' | 'u' | 'A' | 'I' | 'O' | 'U' => Some(false),
-        _ => None,
-    };
-    match (stem.chars().rev().find_map(class), suf.chars().find_map(class)) {
-        (Some(s), Some(e)) => s == e,
+    let vowel = |c: &char| "eiöüEİÖÜaıouAIOU".contains(*c);
+    let front = |c: char| "eiöüEİÖÜ".contains(c);
+    match (stem.chars().rev().find(vowel), suf.chars().find(vowel)) {
+        (Some('I'), _) | (_, Some('I')) => true,
+        (Some(s), Some(e)) => front(s) == front(e),
         _ => true,
     }
 }
