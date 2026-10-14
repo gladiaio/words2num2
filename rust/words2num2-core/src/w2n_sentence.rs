@@ -2499,10 +2499,16 @@ fn en_digit_run(parts: &[String], i: usize) -> Option<(String, usize)> {
             end = Some((digits.len(), w.part));
         }
     }
-    // The last digit before a multiplier is its count, not a digit:
-    // "zero five hundred thirty two" is 0, then 532 (#825).
-    if let Some((_, part)) = end {
-        if !ends_run_mark(&parts[part]) && next_word(parts, part).is_some_and(|n| is_scale_word(&Converter::En, &n, 100)) {
+    // After a leading zero (a dialling prefix), the last digit before a
+    // multiplier is its count: "zero five hundred thirty two" is 0, then 532
+    // (#825). Zero itself is no count.
+    if let Some((len, part)) = end {
+        if digits.starts_with('0') && digits.as_bytes()[len - 1] != b'0'
+            && !ends_run_mark(&parts[part])
+            && next_word(parts, part).is_some_and(|n| is_scale_word(&Converter::En, &n, 100))
+            // "oh five hundred hours": a military time, read as written.
+            && !next_word2(parts, part).is_some_and(|n| matches!(n.as_str(), "hours" | "hrs"))
+        {
             end = prev_end;
         }
     }
@@ -2607,14 +2613,21 @@ fn table_digit_run(
         }
         j += 1;
     }
-    // The last digit before a multiplier is its count (#825).
-    if let Some((_, part)) = end {
+    // After a leading zero, the last digit before a multiplier is its count
+    // (#825).
+    if let Some((len, part)) = end {
         // A scale, or a hundred word the table reads (tr "yüz", fr "cents").
         let multiplier = |n: &str| {
             is_scale_word(converter, n, 100)
                 || matches!(converter.to_cardinal(n), Ok(W2nValue::Int(v)) if v == BigInt::from(100) || v == BigInt::from(1000))
         };
-        if !ends_run_mark(&parts[part]) && next_word(parts, part).is_some_and(|n| multiplier(&n)) {
+        // ... when the two read as one number (es "cinco mil", not "uno cien").
+        let joins = |n: &str| crate::words2num(&format!("{} {n}", rstrip_punct(&parts[part])), resolved, "cardinal").is_ok();
+        if digits.starts_with('0')
+            && digits.as_bytes()[len - 1] != b'0'
+            && !ends_run_mark(&parts[part])
+            && next_word(parts, part).is_some_and(|n| multiplier(&n) && joins(&n))
+        {
             end = prev_end;
         }
     }

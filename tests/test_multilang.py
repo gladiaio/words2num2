@@ -991,3 +991,27 @@ def test_it_elided_tens(text, expected):
 )
 def test_suffix_cut_char_boundary(lang, text, expected):
     assert words2num_sentence(text, lang=lang) == expected
+
+
+@pytest.mark.parametrize(
+    "lang, text, expected",
+    [
+        # After a leading zero, the digit before a multiplier is its count
+        # (#825).
+        (
+            "en",
+            "my number is zero five hundred thirty two two four five",
+            "my number is 0 532 245",
+        ),
+        ("tr", "Telefon numaram sıfır beş yüz otuz iki", "Telefon numaram 0 532"),
+        ("fr", "appelez zéro cinq cents trente-deux", "appelez 0 532"),
+        ("es", "cero cinco mil", "0 5000"),
+        # Not a military time, not a pair that is no number, not without zero.
+        ("en", "oh five hundred hours", "05 hundred hours"),
+        ("es", "cero nueve cinco uno cien", "0951 100"),
+        ("en", "one five one million", "151 million"),
+        ("en", "zero five six seven", "0567"),
+    ],
+)
+def test_digit_run_before_multiplier(lang, text, expected):
+    assert words2num_sentence(text, lang=lang) == expected
