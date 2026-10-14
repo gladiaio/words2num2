@@ -541,6 +541,16 @@ fn span_at(lang: &str, st: Style, toks: &[&str], i: usize, chained: bool) -> Opt
     let de_of = matches!(st, Style::Es | Style::Pt);
     // Optional year after the month (es/pt: "de 2026").
     let with_year = |k: usize, month_trail: &str| -> (Option<String>, String, usize) {
+        // A comma before the year is the written en form ("March 12, 2026",
+        // which this pass itself writes) and a common ASR pause (fr "12 mars,
+        // 2026"): the year still belongs to the date, unless a counted noun
+        // follows it ("March 12, 2000 people", #946).
+        if month_trail == ","
+            && at(k).and_then(year).is_some_and(|(_, t)| !open(&t) || !low(k + 1).is_some_and(|w| en_counted(&w)))
+        {
+            let (y, trail) = at(k).and_then(year).unwrap_or_default();
+            return (Some(y), trail, 1);
+        }
         if !open(month_trail) {
             return (None, month_trail.to_string(), 0);
         }
