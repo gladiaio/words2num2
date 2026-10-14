@@ -2860,19 +2860,20 @@ fn table_decimal(
 /// on its own, but after the preposition it is the percent sign. Keyed by
 /// language prefix; the walker leaves the pair as words ("vingt pour cent" →
 /// "20 pour cent", never "20 pour 100").
-fn percent_phrase(resolved: &str) -> Option<(&'static str, &'static str)> {
+fn percent_phrase(resolved: &str) -> Option<(&'static str, &'static [&'static str])> {
     let base = resolved.split(&['_', '-'][..]).next().unwrap_or(resolved);
     match base {
-        "fr" => Some(("pour", "cent")),
-        "es" | "gl" => Some(("por", "ciento")),
-        "pt" => Some(("por", "cento")),
-        "it" => Some(("per", "cento")),
-        "en" => Some(("per", "cent")),
-        "ca" => Some(("per", "cent")),
+        "fr" => Some(("pour", &["cent"])),
+        // es "cien por cien" is the standard variant of "por ciento" (#863).
+        "es" => Some(("por", &["ciento", "cien"])),
+        "gl" | "pt" => Some(("por", &["cento"])),
+        "it" => Some(("per", &["cento"])),
+        "en" => Some(("per", &["cent"])),
+        "ca" => Some(("per", &["cent"])),
         // el "τοις εκατό", vi "phần trăm": the everyday words for percent (#82).
         // Normalised, as the walker compares them.
-        "el" => Some(("τοις", "εκατο")),
-        "vi" => Some(("phan", "tram")),
+        "el" => Some(("τοις", &["εκατο"])),
+        "vi" => Some(("phan", &["tram"])),
         _ => None,
     }
 }
@@ -3757,7 +3758,7 @@ fn article_is_count(resolved: &str, parts: &[String], i: usize, next_is_number: 
             return true;
         }
         if percent_phrase(resolved)
-            .is_some_and(|(prep, word)| n == prep && next2.as_deref() == Some(word))
+            .is_some_and(|(prep, words)| n == prep && next2.as_deref().is_some_and(|w| words.contains(&w)))
         {
             return true;
         }
@@ -4460,7 +4461,7 @@ fn words2num_sentence_walk(
         let head_is_article = en_cardinal && matches!(head.as_str(), "a" | "an");
         let head_is_repeat = en_digits && matches!(head.as_str(), "double" | "triple");
         let head_is_scale = after_decimal && is_scale_word(&converter, &head, 1_000);
-        let head_is_percent = percent.is_some_and(|(_, word)| crate::normalize(&head) == word);
+        let head_is_percent = percent.is_some_and(|(_, words)| words.contains(&crate::normalize(&head).as_str()));
         let ordinal_head = plain && !head_is_number && converter.is_ordinal_word(&head);
         after_decimal = false;
         if !head_is_number

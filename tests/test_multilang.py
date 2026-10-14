@@ -820,3 +820,17 @@ def test_es_con_decimal_cardinal(text, expected):
 )
 def test_es_con_not_decimal_in_sentence(text, expected):
     assert words2num_sentence(text, lang="es") == expected
+
+
+@pytest.mark.parametrize(
+    "lang, text, expected",
+    [
+        # gl writes "por cento"; es also says "cien por cien" (#863).
+        ("gl", "o paro subiu trinta por cento", "o paro subiu 30 por cento"),
+        ("gl", "baixou cinco por cento", "baixou 5 por cento"),
+        ("es_MX", "cien por cien", "100 por cien"),
+        ("es", "el diez por ciento", "el 10 por ciento"),
+    ],
+)
+def test_percent_phrase_gl_es(lang, text, expected):
+    assert words2num_sentence(text, lang=lang) == expected

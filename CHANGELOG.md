@@ -8,6 +8,7 @@ follows [Semantic Versioning](https://semver.org/) and uses
 
 ### Fixed
 
+- gl and es percent phrase: gl "trinta por cento" keeps "cento" as the percent word ("30 por cento", was "30 por 100"), and es "cien por cien" is "100 por cien" (was "100 por 100") (#863).
 - es: `words2num("tres con cinco")` is 3.5 ("con" as the decimal comma, as Latin American speakers say it; also "treinta y tres con cinco", "menos tres con cinco"), was an error. In a sentence "con" stays a word: it is as often "with" ("uno con cinco por ciento de grasa") (#864).
 - lo: the billion "ຕື້" (10^9) reads ("ຫ້າຕື້" is 5000000000, was an error); num2words2 writes lo 10^9 and up in figures, so the word was never in the scale table (#878).
 - es: the split teens "diez y seis" .. "diez y nueve" (RAE-accepted) are 16..19 ("tenía diez y ocho años" is "tenía 18 años", was "tenía 10 y 8 años"; `words2num("diez y seis")` is 16, was an error); a clock time ("a las diez y seis", 10:06; "las diez y seis minutos") is read first, and after a number and a comma it stays a list of two numbers ("cinco, diez y seis") (#866).
