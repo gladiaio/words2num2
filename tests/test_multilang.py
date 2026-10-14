@@ -975,3 +975,18 @@ def test_percent_phrase_gl_es(lang, text, expected):
 )
 def test_it_elided_tens(text, expected):
     assert words2num_sentence(text, lang="it") == expected
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        # fi "sataa" alone is "it rains"; next to a number word it is 100 (#835).
+        ("huomenna sataa vettä", "huomenna sataa vettä"),
+        ("alkoi sataa rakeita", "alkoi sataa rakeita"),
+        ("viisi sataa", "500"),
+        ("kaksisataa euroa", "200 euroa"),
+        ("sataa kolme", "103"),
+    ],
+)
+def test_fi_sataa_homograph(text, expected):
+    assert words2num_sentence(text, lang="fi") == expected
