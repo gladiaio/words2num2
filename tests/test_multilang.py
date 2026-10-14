@@ -1100,6 +1100,7 @@ def test_fi_sataa_homograph(text, expected):
         ("saat ucte bulusalim", "saat 3'te bulusalim"),
         ("iki yuzden fazla", "200'den fazla"),
         ("ALTMISA", "60'A"),
+        ("sifirnin", "0'nin"),
     ],
 )
 def test_tr_vowel_harmony(text, expected):

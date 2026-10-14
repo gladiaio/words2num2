@@ -565,8 +565,12 @@ fn tr_harmony(stem: &str, suf: &str) -> bool {
         .map(|&(_, front)| front);
     let vowel = |c: &char| "eiöüEİÖÜaıouAIOU".contains(*c);
     let front = |c: char| "eiöüEİÖÜ".contains(c);
+    // Typed without Turkish letters, an ending's i/u/o may stand for ı/ü/ö
+    // ("sifirnin" is "sıfırnın"); only e and a are sure.
+    let ascii = !stem.chars().chain(suf.chars()).any(|c| "ıİüÜöÖşŞçÇğĞ".contains(c));
     match (stem_front, suf.chars().find(vowel)) {
         (_, Some('I')) | (_, None) | (None, _) => true,
+        (_, Some('i' | 'u' | 'o' | 'U' | 'O')) if ascii => true,
         (Some(s), Some(e)) => s == front(e),
     }
 }
