@@ -6,6 +6,10 @@ follows [Semantic Versioning](https://semver.org/) and uses
 
 ## [Unreleased]
 
+### Fixed
+
+- Sentence mode: a unit and the word for ten written apart read as their tens word where the language glues them (lv "trīs desmit pieci" is 35, hr "tri deset sedam" 37, eo "du dek naŭ" 29, bg "седем десет и осем" 78; were "30 5", …). Also is, sq, bs, sr, mk, nn, ht (#983).
+
 ## [0.4.6] — 2026-10-14
 
 Maintenance release; see the commits since the previous version.

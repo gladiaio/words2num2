@@ -1413,3 +1413,21 @@ def test_phone_native_plus_word(lang, text, expected):
 )
 def test_glued_comma_list(lang, text, expected):
     assert words2num_sentence(text, lang=lang) == expected
+
+
+@pytest.mark.parametrize(
+    "lang, text, expected",
+    [
+        # A unit and the word for ten, spaced, read as their tens word (#983).
+        ("lv", "trīs desmit pieci", "35"),
+        ("hr", "tri deset sedam", "37"),
+        ("eo", "du dek naŭ", "29"),
+        ("bg", "седем десет и осем", "78"),
+        ("lv", "divdesmit trīs", "23"),
+        # With a scale after it (#1280 audit).
+        ("hr", "tri deset pet tisuća", "35000"),
+        ("eo", "du dek unu milionoj", "21000000"),
+    ],
+)
+def test_spaced_tens_word(lang, text, expected):
+    assert words2num_sentence(text, lang=lang) == expected
