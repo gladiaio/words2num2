@@ -922,6 +922,9 @@ def test_shared_scale_keeps_input_private_use_chars():
         ("es", "lo vendió por cien", "lo vendió por 100"),
         ("es", "multiplica cinco por cien", "multiplica 5 por 100"),
         ("es", "cinco por cien de ancho", "5 por 100 de ancho"),
+        # Only "cien" as the whole number (#1241).
+        ("es", "dos mil cien por cien", "2100 por 100"),
+        ("es", "un millón cien por cien.", "1000100 por 100."),
     ],
 )
 def test_percent_phrase_gl_es(lang, text, expected):

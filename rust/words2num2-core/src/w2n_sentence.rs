@@ -2892,6 +2892,16 @@ fn percent_word_at(parts: &[String], j: usize) -> bool {
     if word(prep) != "por" || ends_run_mark(prep) || !matches!(word(num).as_str(), "cien" | "ciento" | "100") || ends_run_mark(num) {
         return false;
     }
+    // The whole number, not the end of "dos mil cien" (#1241).
+    if let Some(t) = before.next().filter(|t| !ends_run_mark(t)) {
+        let w = word(t);
+        if t.chars().any(|c| c.is_ascii_digit())
+            || matches!(w.as_str(), "y" | "mil" | "millon" | "millones" | "billon" | "billones")
+            || matches!(crate::lookup_norm("es", &w, false, &[]), Ok(Some(_)))
+        {
+            return false;
+        }
+    }
     ends_run_mark(&parts[j])
         || parts[j + 1..]
             .iter()
