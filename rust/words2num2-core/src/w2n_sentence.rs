@@ -2860,21 +2860,60 @@ fn table_decimal(
 /// on its own, but after the preposition it is the percent sign. Keyed by
 /// language prefix; the walker leaves the pair as words ("vingt pour cent" →
 /// "20 pour cent", never "20 pour 100").
-fn percent_phrase(resolved: &str) -> Option<(&'static str, &'static str)> {
+fn percent_phrase(resolved: &str) -> Option<(&'static str, &'static [&'static str])> {
     let base = resolved.split(&['_', '-'][..]).next().unwrap_or(resolved);
     match base {
-        "fr" => Some(("pour", "cent")),
-        "es" | "gl" => Some(("por", "ciento")),
-        "pt" => Some(("por", "cento")),
-        "it" => Some(("per", "cento")),
-        "en" => Some(("per", "cent")),
-        "ca" => Some(("per", "cent")),
+        "fr" => Some(("pour", &["cent"])),
+        // es "cien por cien" is the standard variant of "por ciento" (#863).
+        "es" => Some(("por", &["ciento", "cien"])),
+        "gl" | "pt" => Some(("por", &["cento"])),
+        "it" => Some(("per", &["cento"])),
+        "en" => Some(("per", &["cent"])),
+        "ca" => Some(("per", &["cent"])),
         // el "τοις εκατό", vi "phần trăm": the everyday words for percent (#82).
         // Normalised, as the walker compares them.
-        "el" => Some(("τοις", "εκατο")),
-        "vi" => Some(("phan", "tram")),
+        "el" => Some(("τοις", &["εκατο"])),
+        "vi" => Some(("phan", &["tram"])),
         _ => None,
     }
+}
+
+/// es "cien" after "por" is the percent word only in the set phrase "cien
+/// por cien" (100 %), and only where it ends: at the end, before a mark or
+/// before "de". Elsewhere "por cien" is "by a hundred" ("multiplica cinco por
+/// cien", "lo vendió por cien", #863, #1238, #1239).
+fn percent_word_at(parts: &[String], j: usize, resolved: &str) -> bool {
+    let word = |t: &String| crate::normalize(rstrip_punct(t).to_lowercase().as_str());
+    // gl "cento vinte" is 120: a number word right after "cento" continues
+    // the number ("cinco por cento vinte"); gl writes 101..199 without "e",
+    // so "por cento e catro" is "percent and four" (#1237 audit).
+    if word(&parts[j]) == "cento" && resolved.split(['_', '-']).next() == Some("gl") && !ends_run_mark(&parts[j]) {
+        let n = parts[j + 1..].iter().find(|t| !py_str_isspace(t));
+        return !n.is_some_and(|t| matches!(crate::lookup_norm(resolved, &word(t), false, &[]), Ok(Some(_))));
+    }
+    if word(&parts[j]) != "cien" {
+        return true;
+    }
+    let mut before = parts[..j].iter().rev().filter(|t| !py_str_isspace(t));
+    let (Some(prep), Some(num)) = (before.next(), before.next()) else { return false };
+    if word(prep) != "por" || ends_run_mark(prep) || !matches!(word(num).as_str(), "cien" | "ciento" | "100") || ends_run_mark(num) {
+        return false;
+    }
+    // The whole number, not the end of "dos mil cien" (#1241).
+    if let Some(t) = before.next().filter(|t| !ends_run_mark(t)) {
+        let w = word(t);
+        if t.chars().any(|c| c.is_ascii_digit())
+            || matches!(w.as_str(), "y" | "mil" | "millon" | "millones" | "billon" | "billones")
+            || matches!(crate::lookup_norm("es", &w, false, &[]), Ok(Some(_)))
+        {
+            return false;
+        }
+    }
+    ends_run_mark(&parts[j])
+        || parts[j + 1..]
+            .iter()
+            .find(|t| !py_str_isspace(t))
+            .is_none_or(|t| !t.chars().any(char::is_alphanumeric) || matches!(rstrip_punct(t).to_lowercase().as_str(), "de" | "del"))
 }
 
 /// The previous non-blank part before `i`, lowercased and without trailing
@@ -3757,7 +3796,13 @@ fn article_is_count(resolved: &str, parts: &[String], i: usize, next_is_number: 
             return true;
         }
         if percent_phrase(resolved)
-            .is_some_and(|(prep, word)| n == prep && next2.as_deref() == Some(word))
+            .is_some_and(|(prep, words)| n == prep && next2.as_deref().is_some_and(|w| words.contains(&w)))
+            && parts[i + 1..]
+                .iter()
+                .enumerate()
+                .filter(|(_, t)| !py_str_isspace(t))
+                .nth(1)
+                .is_some_and(|(k, _)| percent_word_at(parts, i + 1 + k, resolved))
         {
             return true;
         }
@@ -4674,7 +4719,7 @@ fn words2num_sentence_walk(
         let head_is_article = en_cardinal && matches!(head.as_str(), "a" | "an");
         let head_is_repeat = en_digits && matches!(head.as_str(), "double" | "triple");
         let head_is_scale = after_decimal && is_scale_word(&converter, &head, 1_000);
-        let head_is_percent = percent.is_some_and(|(_, word)| crate::normalize(&head) == word);
+        let head_is_percent = percent.is_some_and(|(_, words)| words.contains(&crate::normalize(&head).as_str()));
         let ordinal_head = plain && !head_is_number && converter.is_ordinal_word(&head);
         after_decimal = false;
         if !head_is_number
@@ -4718,6 +4763,7 @@ fn words2num_sentence_walk(
                 && next.as_deref().is_some_and(|t| is_scale_word(&converter, t, 100)));
         // "vingt pour cent": "cent" after "pour" is the percent sign, not 100.
         let percent_tail = head_is_percent
+            && percent_word_at(&parts, i, &resolved)
             && percent.is_some_and(|(prep, _)| {
                 prev_word(&parts, i).is_some_and(|p| crate::normalize(&p) == prep)
             });
