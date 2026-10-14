@@ -1224,3 +1224,22 @@ def test_en_pounds_weight(text, expected):
 )
 def test_shared_scale_closed_compound(lang, text, expected):
     assert words2num_sentence(text, lang=lang) == expected
+
+
+@pytest.mark.parametrize(
+    "lang, text, expected",
+    [
+        # A "to" range shares the scale like an alternative (#1263).
+        ("en", "five to six thousand people", "5000 to 6000 people"),
+        ("es", "cinco a seis mil personas", "5000 a 6000 personas"),
+        ("fr", "cinq à six mille personnes", "5000 à 6000 personnes"),
+        ("nl", "twee tot drie miljoen", "2000000 tot 3000000"),
+        ("it", "da cinque a seimila", "da 5000 a 6000"),
+        # Not a clock time, not arithmetic, not a falling pair.
+        ("en", "it is five to six", "it is 5 to 6"),
+        ("en", "add five to six thousand", "add 5 to 6000"),
+        ("en", "twenty to six thousand", "20 to 6000"),
+    ],
+)
+def test_shared_scale_to_range(lang, text, expected):
+    assert words2num_sentence(text, lang=lang) == expected
