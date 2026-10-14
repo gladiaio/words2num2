@@ -1094,6 +1094,8 @@ def test_fi_sataa_homograph(text, expected):
         ("otuzda", "30'da"),
         # An ASCII capital I may be i or ı.
         ("SAAT IKIDE", "SAAT 2'DE"),
+        ("YENI BINA YAPILDI", "YENI BINA YAPILDI"),
+        ("KIRKTA", "40'TA"),
     ],
 )
 def test_tr_vowel_harmony(text, expected):

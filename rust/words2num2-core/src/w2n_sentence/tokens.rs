@@ -548,8 +548,18 @@ fn suffixes(lang: &str) -> &'static [&'static str] {
 fn tr_harmony(stem: &str, suf: &str) -> bool {
     let vowel = |c: &char| "eiöüEİÖÜaıouAIOU".contains(*c);
     let front = |c: char| "eiöüEİÖÜ".contains(c);
+    // In a number stem the lexicon resolves an ASCII "I": only "altı",
+    // "kırk", "altmış" and "sıfır" have ı ("BIN" is "bin", "BINA" no dative,
+    // #1260).
+    let back_i = ["altı", "kırk", "altmış", "sıfır"];
+    let dotless: String = stem.chars().map(|c| if c == 'I' { 'ı' } else { c }).collect::<String>().to_lowercase();
+    let stem: String = if back_i.iter().any(|w| dotless.ends_with(w)) {
+        dotless
+    } else {
+        stem.chars().map(|c| if c == 'I' { 'i' } else { c }).collect()
+    };
     match (stem.chars().rev().find(vowel), suf.chars().find(vowel)) {
-        (Some('I'), _) | (_, Some('I')) => true,
+        (_, Some('I')) => true,
         (Some(s), Some(e)) => front(s) == front(e),
         _ => true,
     }
