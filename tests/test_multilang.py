@@ -825,6 +825,91 @@ def test_es_con_not_decimal_in_sentence(text, expected):
 @pytest.mark.parametrize(
     "lang, text, expected",
     [
+        # A spelled-out alternative or range shares its scale (#865).
+        (
+            "es_MX",
+            "Llegaron cinco o seis mil personas a la marcha.",
+            "Llegaron 5000 o 6000 personas a la marcha.",
+        ),
+        (
+            "es_AR",
+            "entre dos y tres millones de personas",
+            "entre 2000000 y 3000000 de personas",
+        ),
+        ("pt_BR", "dois ou três milhões de pessoas", "2000000 ou 3000000 de pessoas"),
+        ("en", "five or six thousand people", "5000 or 6000 people"),
+        ("fr", "cinq ou six mille personnes", "5000 ou 6000 personnes"),
+        # Not a figure as written, a bare "and", or a falling pair.
+        ("es", "5 o seis mil", "5 o 6000"),
+        ("en", "two and three thousand", "2 and 3000"),
+        ("es", "veinte o dos mil", "20 o 2000"),
+        # Figures as written are never multiplied, even next to a spelled
+        # range (#1217); compound scales (#1218); chains (#1219); gl "ou"
+        # (#1220); "one" (#1222); an opener before the first bound.
+        (
+            "es",
+            "Tenía 2 o 3000 pesos y cinco o seis mil",
+            "Tenía 2 o 3000 pesos y 5000 o 6000",
+        ),
+        (
+            "en",
+            "two and three thousand, between five and six thousand",
+            "2 and 3000, between 5000 and 6000",
+        ),
+        (
+            "es",
+            "dos o tres mil millones de personas",
+            "2000000000 o 3000000000 de personas",
+        ),
+        ("en", "five or six or seven thousand", "5000 or 6000 or 7000"),
+        ("es", "cinco, seis o siete mil", "5, 6 o 7000"),
+        ("gl", "dous ou tres mil", "2000 ou 3000"),
+        ("en", "one or two thousand people", "1000 or 2000 people"),
+        ("de", "ein oder zwei Millionen", "1000000 oder 2000000"),
+        ("es", "(cinco o seis mil)", "(5000 o 6000)"),
+        # #1227: A ending a longer number is not shared.
+        ("en", "one point two or three million people", "1.2 or 3000000 people"),
+        ("es", "treinta y cinco o seis mil", "35 o 6000"),
+        # #1228 / F4: B must read with the scale and stay below 10x A.
+        ("es", "cinco o seiscientos mil", "5 o 600000"),
+        ("en", "two or thirty thousand", "2 or 30000"),
+        # #1229: comma list led by a digit item.
+        ("en", "5, six or seven thousand", "5, 6 or 7000"),
+        # A clause comma before A does not make a list (#1216 audit M1).
+        (
+            "en",
+            "Yesterday, five or six thousand people marched.",
+            "Yesterday, 5000 or 6000 people marched.",
+        ),
+        (
+            "es",
+            "cinco o seis mil personas, siete u ocho mil euros",
+            "5000 o 6000 personas, 7000 u 8000 euros",
+        ),
+        # fr feminine article counts as one.
+        ("fr", "une ou deux mille personnes", "1000 ou 2000 personnes"),
+        # A clause conjunction before A does not join a number.
+        (
+            "es",
+            "Tenía 2 o 3000 pesos y cinco o seis mil",
+            "Tenía 2 o 3000 pesos y 5000 o 6000",
+        ),
+    ],
+)
+def test_shared_scale_range(lang, text, expected):
+    assert words2num_sentence(text, lang=lang) == expected
+
+
+def test_shared_scale_keeps_input_private_use_chars():
+    # #1231: input already holding U+E000 keeps it; no mark is added or lost.
+    out = words2num_sentence("icon \ue000 between five and six thousand", lang="en")
+    assert out.count("\ue000") == 1
+    assert "6000" in out
+
+
+@pytest.mark.parametrize(
+    "lang, text, expected",
+    [
         # gl writes "por cento"; es also says "cien por cien" (#863).
         ("gl", "o paro subiu trinta por cento", "o paro subiu 30 por cento"),
         ("gl", "baixou cinco por cento", "baixou 5 por cento"),
