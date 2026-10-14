@@ -1252,6 +1252,18 @@ def test_shared_scale_closed_compound(lang, text, expected):
             "mais 35 919876543",
         ),
         ("es", "tengo más 5 años", "tengo más 5 años"),
+        # Only before a country-code group: "mas" (but) before a local number
+        # (#1274).
+        (
+            "es",
+            "llámame, mas seis uno dos tres cuatro cinco seis siete ocho es el fijo",
+            "llámame, mas 612 34 56 78 es el fijo",
+        ),
+        (
+            "it",
+            "più tre tre tre uno due tre quattro cinque sei sette",
+            "più 333 123 4567",
+        ),
     ],
 )
 def test_phone_native_plus_word(lang, text, expected):

@@ -86,6 +86,12 @@ fn run_at(toks: &[&str], i: usize, commas: bool, base: &str) -> Option<Run> {
         "pt" => first == "mais",
         _ => false,
     };
+    // ... only before a group the size of a country code: "mas 612345678"
+    // is "but" before a local number (#1274).
+    let native = native
+        && toks
+            .get(i + 1)
+            .is_some_and(|t| (1..=3).contains(&split_trail(t).0.len()) && split_trail(t).0.bytes().all(|b| b.is_ascii_digit()));
     let word_plus = first == "plus" || first == "+" || native;
     let mut k = i + usize::from(word_plus);
     let mut plus = word_plus;
