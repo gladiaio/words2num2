@@ -921,11 +921,21 @@ def test_es_con_not_decimal_in_sentence(text, expected):
         ),
         # fr feminine article counts as one.
         ("fr", "une ou deux mille personnes", "1000 ou 2000 personnes"),
-        # A clause conjunction before A does not join a number.
+        # #1242 audit: decimals, marks after the scale, "hundred,", ";",
+        # words the walk reads only in context.
+        ("es", "tres coma uno cuatro o cinco millones", "3,14 o 5000000"),
         (
-            "es",
-            "Tenía 2 o 3000 pesos y cinco o seis mil",
-            "Tenía 2 o 3000 pesos y 5000 o 6000",
+            "en",
+            "five or six thousand\u2026 maybe more",
+            "5000 or 6000\u2026 maybe more",
+        ),
+        ("en", "five or six thousand\u2014", "5000 or 6000\u2014"),
+        ("en", "one hundred, six or seven thousand people", "100, 6 or 7000 people"),
+        ("es", "cinco; seis o siete mil", "5; 6 o 7000"),
+        (
+            "it",
+            "cinque o sei mila. Sei o sette milioni",
+            "5000 o 6000. 6000000 o 7000000",
         ),
     ],
 )

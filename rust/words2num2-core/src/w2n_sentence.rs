@@ -4249,10 +4249,15 @@ pub(crate) fn share_scale_words(text: &str, lang: &str) -> Option<String> {
     let mut changed = false;
     // What the walk makes of a few words, without this pass.
     let walk = |t: &str| -> String {
-        SHARE_OFF.with(|f| f.set(true));
-        let out = words2num_sentence_folded(t, lang, "cardinal", false, false).unwrap_or_default();
-        SHARE_OFF.with(|f| f.set(false));
-        out
+        // Restored on every exit, a panic unwinding included.
+        struct Restore(bool);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                SHARE_OFF.with(|f| f.set(self.0));
+            }
+        }
+        let _restore = Restore(SHARE_OFF.with(|f| f.replace(true)));
+        words2num_sentence_folded(t, lang, "cardinal", false, false).unwrap_or_default()
     };
     let last_word = |t: &str| t.split_whitespace().last().unwrap_or("").to_string();
     for p in (1..nb.len().saturating_sub(1)).rev() {
@@ -4274,6 +4279,13 @@ pub(crate) fn share_scale_words(text: &str, lang: &str) -> Option<String> {
         if p >= 2 && !is_and && lead_clean {
             let prev = toks[nb[p - 2]];
             let prev_bare = bare(prev);
+            // The words before A back to a sentence mark, at most six: enough
+            // for "tres coma uno cuatro" or "one thousand two hundred and".
+            let mut first = p - 1;
+            while first > 0 && p - 1 - first < 6 && !toks[nb[first - 1]].ends_with(['.', '!', '?', '…']) {
+                first -= 1;
+            }
+            let from = nb[first];
             // A figure before A: a list or a longer number ("5, six or seven
             // thousand", "In 2020 five or six thousand", #1229).
             if prev.chars().any(|c| c.is_ascii_digit()) {
@@ -4283,14 +4295,19 @@ pub(crate) fn share_scale_words(text: &str, lang: &str) -> Option<String> {
             // after a word, a scale or a sentence mark it is the clause's
             // ("cinco, seis o siete mil", "Yesterday, five or six thousand",
             // "five or six thousand, seven or eight million", #1236).
-            if prev.ends_with(',') && !scale(&prev_bare) && matches!(crate::lookup_norm(lang, &core(&prev_bare), false, &[]), Ok(Some(_))) {
+            if prev.ends_with(',')
+                && !scale(&prev_bare)
+                && from <= nb[p - 2]
+                && last_word(&walk(&toks[from..=nb[p - 2]].join(" "))).chars().any(|c| c.is_ascii_digit())
+            {
                 continue;
             }
             // A number word right before A, with no mark between, is a figure
             // of its own or the head of A's number: either way not a range
             // bound ("cinco seis o siete mil", "zéro six douze ou treize
-            // mille", #1243). A scale with a comma ends the previous range.
-            let marked = prev.ends_with(['.', '!', '?', ';', ':', ',', '…']);
+            // mille", #1243). A sentence mark, or a scale with a comma, ends
+            // the previous number; ";" and ":" may separate list items.
+            let marked = prev.ends_with(['.', '!', '?', ',', '…']);
             if !marked && walk(prev).chars().any(|c| c.is_ascii_digit()) {
                 continue;
             }
@@ -4298,8 +4315,10 @@ pub(crate) fn share_scale_words(text: &str, lang: &str) -> Option<String> {
             // words before it ("ciento cinco", "treinta y cinco", "one point
             // two", "triple five"), and not across a mark ("veinte. Cinco",
             // #1227, #1233, #1236).
-            let from = nb[p.saturating_sub(3)];
-            if last_word(&walk(&toks[from..=ka].join(" "))) != last_word(&walk(toks[ka])) {
+            // A read whole is its own value; a word the walk leaves alone
+            // ("sei", "neuf", "one") may also stay a word.
+            let tail = last_word(&walk(&toks[from..=ka].join(" ")));
+            if tail != a.to_string() && tail != last_word(&walk(toks[ka])) {
                 continue;
             }
         }
@@ -4309,16 +4328,23 @@ pub(crate) fn share_scale_words(text: &str, lang: &str) -> Option<String> {
             after[kb].clone()
         } else {
             let mut run = Vec::new();
+            let mut raw = vec![toks[kb]];
             for t in nb[p + 2..].iter().map(|&i| toks[i]) {
-                let w = bare(t);
+                let w = t.trim_end_matches(|c: char| !c.is_alphanumeric()).to_string();
                 if !scale(&w) {
                     break;
                 }
                 let marked = w.len() != t.len();
                 run.push(w);
+                raw.push(t);
                 if marked {
                     break;
                 }
+            }
+            // The walk must read B with the scale words as written:
+            // "thousand…" is read, "thousand™" is not (#1235, #1242 audit).
+            if !run.is_empty() && walk(&raw.join(" ")).chars().any(char::is_alphabetic) {
+                continue;
             }
             run
         };
