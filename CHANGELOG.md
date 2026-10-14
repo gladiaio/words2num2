@@ -6,6 +6,10 @@ follows [Semantic Versioning](https://semver.org/) and uses
 
 ## [Unreleased]
 
+### Fixed
+
+- Sentence mode, shared scale of a range (#865): de/it/nl B glued to its thousand shares it too ("zwei oder dreitausend Leute" is "2000 oder 3000 Leute", it "due o tremila" "2000 o 3000", nl "twee of drieduizend" "2000 of 3000") (#1221).
+
 ## [0.4.3] — 2026-10-14
 
 ### Fixed

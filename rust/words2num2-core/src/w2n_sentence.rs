@@ -4329,7 +4329,19 @@ pub(crate) fn share_scale_words(text: &str, lang: &str) -> Option<String> {
             continue;
         }
         let a_tok = toks[ka].trim_start_matches(is_opener);
-        let (Some(a), Some(b)) = (value(a_tok), value(toks[kb])) else { continue };
+        // de "dreitausend", it "tremila", nl "drieduizend": B glued to its
+        // thousand (#1221). The scale shared is the thousand word.
+        let glued = (|| {
+            let w = bare(toks[kb]);
+            let lower = w.to_lowercase();
+            let suf = ["tausend", "mila", "duizend"].into_iter().find(|s| lower.ends_with(s) && lower.len() > s.len())?;
+            let head = &w[..w.len() - suf.len()];
+            let v = value(head)?;
+            let walked = walk(toks[kb]);
+            (walked.chars().any(|c| c.is_ascii_digit()) && !walked.chars().any(char::is_alphabetic)).then_some((v, suf.to_string()))
+        })();
+        let b_value = value(toks[kb]).or(glued.as_ref().map(|g| g.0));
+        let (Some(a), Some(b)) = (value(a_tok), b_value) else { continue };
         // Rising, and of one order ("cinco o seis mil", not "veinte o dos
         // mil" nor "cinco o seiscientos mil").
         if a >= b || b >= 10 * a {
@@ -4410,7 +4422,9 @@ pub(crate) fn share_scale_words(text: &str, lang: &str) -> Option<String> {
         }
         // The scale words of the second bound: those shared from its right,
         // or the run that follows it.
-        let words: Vec<String> = if !after[kb].is_empty() {
+        let words: Vec<String> = if let Some((_, suf)) = &glued {
+            vec![suf.clone()]
+        } else if !after[kb].is_empty() {
             after[kb].clone()
         } else {
             let mut run = Vec::new();
@@ -4439,7 +4453,7 @@ pub(crate) fn share_scale_words(text: &str, lang: &str) -> Option<String> {
         }
         // Only scale words the language reads after this bound ("dous
         // millóns" is no gl number, #1228).
-        if crate::words2num(&format!("{} {}", bare(toks[kb]), words.join(" ")), lang, "cardinal").is_err() {
+        if glued.is_none() && crate::words2num(&format!("{} {}", bare(toks[kb]), words.join(" ")), lang, "cardinal").is_err() {
             continue;
         }
         after[ka] = words;
