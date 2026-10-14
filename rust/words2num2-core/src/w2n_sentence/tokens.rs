@@ -578,8 +578,11 @@ fn suffix_cut(
     for suf in suffixes(lang) {
         let Some(stem) = core.strip_suffix(suf).or_else(|| {
             // Case-insensitive ending ("ÜÇTE" is rare; the stem keeps its case).
-            let lower = core.to_lowercase();
-            lower.ends_with(suf).then(|| &core[..core.len() - suf.len()]).filter(|_| core.len() == lower.len())
+            // Cut on a char boundary: a char may lowercase to another byte
+            // length (U+212A KELVIN SIGN is "k", #851).
+            let n = suf.chars().count();
+            let cut = core.char_indices().rev().nth(n.checked_sub(1)?)?.0;
+            (core[cut..].to_lowercase() == *suf).then(|| &core[..cut])
         }) else {
             continue;
         };
