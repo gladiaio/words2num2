@@ -2513,7 +2513,7 @@ fn en_digit_run(parts: &[String], i: usize) -> Option<(String, usize)> {
     // written (#1255, #1257).
     if let Some((len, part)) = end {
         let number_word = |n: &str| {
-            n != "zero"
+            !matches!(n, "zero" | "oh" | "o" | "nought" | "naught")
                 && (crate::w2n_lang_en::unit_value(n).is_some()
                     || crate::w2n_lang_en::tens_value(n).is_some()
                     || n.split('-').next().is_some_and(|h| crate::w2n_lang_en::tens_value(h).is_some()))
