@@ -4319,7 +4319,7 @@ pub(crate) fn share_scale_words(text: &str, lang: &str) -> Option<String> {
         "fr" => (&["ou"], &["et"], &["entre"]),
         "it" => (&["o", "oppure"], &["e"], &["tra", "fra"]),
         "ca" => (&["o"], &["i"], &["entre"]),
-        "de" => (&["oder"], &["und"], &["zwischen"]),
+        "de" => (&["oder", "bis"], &["und"], &["zwischen"]),
         "nl" => (&["of"], &["en"], &["tussen"]),
         _ => return None,
     };
@@ -4343,7 +4343,20 @@ pub(crate) fn share_scale_words(text: &str, lang: &str) -> Option<String> {
         }
         let w = core(t);
         // "one", "un", "ein": the article form the table may leave out.
-        if matches!(w.as_str(), "one" | "un" | "une" | "uno" | "una" | "um" | "uma" | "ein" | "eine" | "een" | "unha") {
+        // Per language: de "um" is "at", not pt "um" (#1266).
+        let article = match base.as_str() {
+            "en" => matches!(w.as_str(), "one"),
+            "es" => matches!(w.as_str(), "un" | "uno" | "una"),
+            "fr" => matches!(w.as_str(), "un" | "une"),
+            "it" => matches!(w.as_str(), "un" | "uno" | "una"),
+            "pt" => matches!(w.as_str(), "um" | "uma"),
+            "gl" => matches!(w.as_str(), "un" | "unha"),
+            "ca" => matches!(w.as_str(), "un" | "una"),
+            "de" => matches!(w.as_str(), "ein" | "eine"),
+            "nl" => matches!(w.as_str(), "een"),
+            _ => false,
+        };
+        if article {
             return Some(1);
         }
         match crate::lookup_norm(lang, &w, false, &[]) {
@@ -4375,6 +4388,7 @@ pub(crate) fn share_scale_words(text: &str, lang: &str) -> Option<String> {
     // is rebuilt once at the end (#1230).
     let mut after: Vec<Vec<String>> = vec![Vec::new(); toks.len()];
     let mut mark: Vec<bool> = vec![false; toks.len()];
+    let mut unhyphen: Vec<bool> = vec![false; toks.len()];
     // The range mark is only safe when the input holds none (#1231).
     let marks_ok = !text.contains(SHARE_MARK);
     let mut changed = false;
@@ -4394,19 +4408,37 @@ pub(crate) fn share_scale_words(text: &str, lang: &str) -> Option<String> {
     for p in (1..nb.len().saturating_sub(1)).rev() {
         let (ka, k, kb) = (nb[p - 1], nb[p], nb[p + 1]);
         let conn = core(toks[k]);
+        // de "zwei- oder dreitausend": the suspended hyphen (Ergänzungsstrich)
+        // marks A as sharing B's ending; it is dropped once shared (#1262).
+        let suspended = matches!(base.as_str(), "de" | "nl") && toks[ka].ends_with(['-', '\u{2010}', '\u{2011}']);
         let is_or = or_words.contains(&conn.as_str());
-        let is_and = marks_ok && and_words.contains(&conn.as_str()) && p >= 2 && range_cues.contains(&core(toks[nb[p - 2]]).as_str());
+        let is_and = marks_ok
+            && and_words.contains(&conn.as_str())
+            && (suspended || p >= 2 && range_cues.contains(&core(toks[nb[p - 2]]).as_str()));
         if !(is_or || is_and) || !toks[k].chars().all(char::is_alphabetic) {
             continue;
         }
         let a_tok = toks[ka].trim_start_matches(is_opener);
-        let (Some(a), Some(b)) = (value(a_tok), value(toks[kb])) else { continue };
+        let a_tok = if suspended { a_tok.trim_end_matches(['-', '\u{2010}', '\u{2011}']) } else { a_tok };
+        // de "dreitausend", it "tremila", nl "drieduizend": B glued to its
+        // thousand (#1221). The scale shared is the thousand word.
+        let glued = (|| {
+            let w = bare(toks[kb]);
+            let lower = w.to_lowercase();
+            let suf = ["tausend", "mila", "duizend"].into_iter().find(|s| lower.ends_with(s) && lower.len() > s.len())?;
+            let head = &w[..w.len() - suf.len()];
+            let v = value(head)?;
+            let walked = walk(toks[kb]);
+            (walked.chars().any(|c| c.is_ascii_digit()) && !walked.chars().any(char::is_alphabetic)).then_some((v, suf.to_string()))
+        })();
+        let b_value = value(toks[kb]).or(glued.as_ref().map(|g| g.0));
+        let (Some(a), Some(b)) = (value(a_tok), b_value) else { continue };
         // Rising, and of one order ("cinco o seis mil", not "veinte o dos
         // mil" nor "cinco o seiscientos mil").
         if a >= b || b >= 10 * a {
             continue;
         }
-        let lead_clean = a_tok.len() == toks[ka].len();
+        let lead_clean = a_tok.len() + if suspended { toks[ka].chars().last().map_or(0, char::len_utf8) } else { 0 } == toks[ka].len();
         if p >= 2 && !is_and && lead_clean {
             // A list mark or closer standing alone ("cinq\u{202f}; six", "5 ,
             // six") goes with the word before it (#1242 audit L7); an opener,
@@ -4481,7 +4513,49 @@ pub(crate) fn share_scale_words(text: &str, lang: &str) -> Option<String> {
         }
         // The scale words of the second bound: those shared from its right,
         // or the run that follows it.
-        let words: Vec<String> = if !after[kb].is_empty() {
+        let words: Vec<String> = if let Some((_, suf)) = &glued {
+            // The thousand, then any scale run after it ("dreitausend
+            // Millionen" shares "tausend Millionen", #1261 audit M1). A number
+            // after it continues B ("dreitausend fünfhundert"), no share.
+            let mut run = vec![suf.clone()];
+            let mut raw = vec![toks[kb]];
+            let mut q = p + 2;
+            while let Some(&i) = nb.get(q) {
+                let w = toks[i].trim_end_matches(|c: char| !c.is_alphanumeric()).to_string();
+                if !scale(&w) {
+                    break;
+                }
+                let marked = w.len() != toks[i].len();
+                run.push(w);
+                raw.push(toks[i]);
+                q += 1;
+                if marked {
+                    break;
+                }
+            }
+            if raw.len() > 1 && walk(&raw.join(" ")).chars().any(char::is_alphabetic) {
+                continue;
+            }
+            // A word the walk joins to B continues it ("dreitausend
+            // fünfhundert", "dreitausend einen Monat"): B is not this bound,
+            // no share. A figure or a bracket after B stays apart (#1261
+            // audit L2).
+            if !ends_run_mark(raw[raw.len() - 1]) {
+                if let Some(&i) = nb.get(q) {
+                    let joined = walk(&format!("{} {}", raw.join(" "), toks[i]));
+                    let apart = format!("{} {}", walk(&raw.join(" ")), walk(toks[i]));
+                    let and_num = and_words.contains(&core(&bare(toks[i])).as_str())
+                        && nb.get(q + 1).is_some_and(|&j| {
+                            walk(&format!("{} {} {}", raw.join(" "), toks[i], toks[j]))
+                                != format!("{} {} {}", walk(&raw.join(" ")), toks[i], walk(toks[j]))
+                        });
+                    if joined != apart || and_num {
+                        continue;
+                    }
+                }
+            }
+            run
+        } else if !after[kb].is_empty() {
             after[kb].clone()
         } else {
             let mut run = Vec::new();
@@ -4510,11 +4584,14 @@ pub(crate) fn share_scale_words(text: &str, lang: &str) -> Option<String> {
         }
         // Only scale words the language reads after this bound ("dous
         // millóns" is no gl number, #1228).
-        if crate::words2num(&format!("{} {}", bare(toks[kb]), words.join(" ")), lang, "cardinal").is_err() {
+        if glued.is_none() && crate::words2num(&format!("{} {}", bare(toks[kb]), words.join(" ")), lang, "cardinal").is_err() {
             continue;
         }
         after[ka] = words;
         mark[k] = is_and;
+        if suspended {
+            unhyphen[ka] = true;
+        }
         changed = true;
     }
     if !changed {
@@ -4527,7 +4604,8 @@ pub(crate) fn share_scale_words(text: &str, lang: &str) -> Option<String> {
         if mark[i] {
             out.push(SHARE_MARK);
         }
-        out.push_str(&text[a..b]);
+        let tok = &text[a..b];
+        out.push_str(if unhyphen[i] { tok.trim_end_matches(['-', '\u{2010}', '\u{2011}']) } else { tok });
         for w in &after[i] {
             out.push(' ');
             out.push_str(w);
