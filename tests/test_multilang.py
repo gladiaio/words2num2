@@ -1164,6 +1164,16 @@ def test_digit_run_before_multiplier(lang, text, expected):
         # Not a compound with more after the thousand, nor a falling pair.
         ("de", "zwei oder dreitausendfünfhundert", "2 oder 3500"),
         ("de", "zwanzig oder dreitausend", "20 oder 3000"),
+        # The scale run after the glued B is shared; a number after it is
+        # B's own (#1261 audit).
+        (
+            "it",
+            "due o tremila miliardi di lire",
+            "2000000000000 o 3000000000000 di lire",
+        ),
+        ("de", "zwei oder dreitausend Millionen", "2000000000 oder 3000000000"),
+        ("de", "zwei oder dreitausend fünfhundert", "2 oder 3500"),
+        ("it", "due o tremila e cinquecento", "2 o 3500"),
     ],
 )
 def test_shared_scale_closed_compound(lang, text, expected):

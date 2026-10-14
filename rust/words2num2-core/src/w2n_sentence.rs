@@ -4494,7 +4494,39 @@ pub(crate) fn share_scale_words(text: &str, lang: &str) -> Option<String> {
         // The scale words of the second bound: those shared from its right,
         // or the run that follows it.
         let words: Vec<String> = if let Some((_, suf)) = &glued {
-            vec![suf.clone()]
+            // The thousand, then any scale run after it ("dreitausend
+            // Millionen" shares "tausend Millionen", #1261 audit M1). A number
+            // after it continues B ("dreitausend fünfhundert"), no share.
+            let mut run = vec![suf.clone()];
+            let mut raw = vec![toks[kb]];
+            let mut q = p + 2;
+            while let Some(&i) = nb.get(q) {
+                let w = toks[i].trim_end_matches(|c: char| !c.is_alphanumeric()).to_string();
+                if !scale(&w) {
+                    break;
+                }
+                let marked = w.len() != toks[i].len();
+                run.push(w);
+                raw.push(toks[i]);
+                q += 1;
+                if marked {
+                    break;
+                }
+            }
+            if raw.len() > 1 && walk(&raw.join(" ")).chars().any(char::is_alphabetic) {
+                continue;
+            }
+            if !ends_run_mark(raw[raw.len() - 1]) {
+                if let Some(&i) = nb.get(q) {
+                    let next = core(&bare(toks[i]));
+                    let next2 = nb.get(q + 1).map(|&j| core(&bare(toks[j])));
+                    let is_num = |w: &str| value(w).is_some() || walk(w).chars().any(|c| c.is_ascii_digit());
+                    if is_num(&next) || (and_words.contains(&next.as_str()) && next2.as_deref().is_some_and(is_num)) {
+                        continue;
+                    }
+                }
+            }
+            run
         } else if !after[kb].is_empty() {
             after[kb].clone()
         } else {
