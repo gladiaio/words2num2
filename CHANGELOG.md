@@ -9,6 +9,7 @@ follows [Semantic Versioning](https://semver.org/) and uses
 ### Fixed
 
 - `phone=True`: es "más", it "più", pt "mais" are the spoken "+" before a country code ("más treinta y cuatro seis uno dos …" is "+34 612 34 56 78", was "más 34 612345678"), but only when the digits make an international number and no national one: these words also mean "more" and "no longer" ("no es más 912 34 56 78", pt_BR "não é mais (33) 98765-4321" keep the local reading) (#941, #1274).
+- Sentence mode: a list written with no space after its commas reads item by item and keeps its spacing ("3,2,one" is "3,2,1", "three,two,one" "3,2,1", fr "trois,deux,un" "3,2,1"; were left as written). Only a token of three items or more, all numbers, at least one a word; figures alone ("3,2", "1,000"), a glued pair ("twenty,two", which would read as a decimal) and scripts written without spaces are unchanged (#1276).
 
 ## [0.4.4] — 2026-10-14
 
