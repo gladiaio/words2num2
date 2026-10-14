@@ -1245,11 +1245,17 @@ def test_shared_scale_closed_compound(lang, text, expected):
             "mais trezentos e cinquenta e um nove um nove oito sete seis cinco quatro três",
             "+351 919 876 543",
         ),
-        # No country code: left as digits, never a national number.
+        # Only when the digits make an international number and no national
+        # one: these words also mean "more", "no longer" (#1273 audit).
         (
-            "pt",
-            "mais trinta e cinco nove um nove oito sete seis cinco quatro três",
-            "mais 35 919876543",
+            "pt_BR",
+            "meu número não é mais trinta e três nove oito sete seis cinco quatro três dois um",
+            "meu número não é mais (33) 98765-4321",
+        ),
+        (
+            "es",
+            "no es más nueve uno dos tres cuatro cinco seis siete ocho",
+            "no es más 912 34 56 78",
         ),
         ("es", "tengo más 5 años", "tengo más 5 años"),
         # Only before a country-code group: "mas" (but) before a local number
