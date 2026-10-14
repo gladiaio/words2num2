@@ -886,13 +886,85 @@ def test_es_con_not_decimal_in_sentence(text, expected):
             "cinco o seis mil personas, siete u ocho mil euros",
             "5000 o 6000 personas, 7000 u 8000 euros",
         ),
-        # fr feminine article counts as one.
-        ("fr", "une ou deux mille personnes", "1000 ou 2000 personnes"),
-        # A clause conjunction before A does not join a number.
+        # The walk decides whether A ends a longer number (#1233).
+        ("es", "ciento cinco o seis mil", "105 o 6000"),
+        ("gl", "cento dous ou tres mil", "102 ou 3000"),
+        ("de", "hundert fünf oder sechs Millionen", "105 oder 6000000"),
+        ("en", "triple five or six thousand", "555 or 6000"),
+        ("en", "two dot five or six million", "2.5 or 6000000"),
+        # A number word right before A is no range bound (#1243).
+        ("en", "five six or seven thousand", "5 6 or 7000"),
+        ("fr", "zéro six douze ou treize mille", "06 12 ou 13000"),
+        ("en", "(five) six or seven thousand", "(5) 6 or 7000"),
+        # Blanks between the words (#1234).
+        ("en", "one hundred  five or six thousand", "105 or 6000"),
+        ("en", "one hundred \t five or six thousand", "105 or 6000"),
+        ("en", "5,  six or seven thousand", "5,  6 or 7000"),
+        # A scale word the walk does not read stays (#1235).
+        ("en", "five or six thousand\u2122", "5 or 6 thousand\u2122"),
+        ("es", "cinco o seis mil*", "5 o 6 mil*"),
+        # A mark or a scale before A ends the previous number (#1236).
         (
             "es",
-            "Tenía 2 o 3000 pesos y cinco o seis mil",
-            "Tenía 2 o 3000 pesos y 5000 o 6000",
+            "cinco o seis mil. Siete o ocho millones",
+            "5000 o 6000. 7000000 o 8000000",
+        ),
+        (
+            "en",
+            "We were twenty. Five or six thousand came.",
+            "We were 20. 5000 or 6000 came.",
+        ),
+        (
+            "en",
+            "five or six thousand, seven or eight million",
+            "5000 or 6000, 7000000 or 8000000",
+        ),
+        # fr feminine article counts as one.
+        ("fr", "une ou deux mille personnes", "1000 ou 2000 personnes"),
+        # #1242 audit: decimals, marks after the scale, "hundred,", ";",
+        # words the walk reads only in context.
+        ("es", "tres coma uno cuatro o cinco millones", "3,14 o 5000000"),
+        (
+            "en",
+            "five or six thousand\u2026 maybe more",
+            "5000 or 6000\u2026 maybe more",
+        ),
+        ("en", "five or six thousand\u2014", "5000 or 6000\u2014"),
+        ("en", "one hundred, six or seven thousand people", "100, 6 or 7000 people"),
+        ("es", "cinco; seis o siete mil", "5; 6 o 7000"),
+        # Any blank separates words, kept as written (#1245, #1247).
+        ("en", "five,\n six or seven thousand", "5,\n 6 or 7000"),
+        ("en", "five or\tsix thousand people", "5000 or\t6000 people"),
+        ("es", "entre dos y\u00a0tres millones", "entre 2000000 y\u00a03000000"),
+        # Number words the walk leaves alone still mark a list (#1242 audit M2).
+        ("fr", "neuf, six ou sept mille", "9, 6 ou 7000"),
+        ("en", "one hundred; six or seven thousand", "100; 6 or 7000"),
+        ("en", "page one five or six thousand", "page 1 5 or 6000"),
+        # A detached mark goes with the word before it (L7); de ordinal (L6).
+        ("fr", "cinq\u202f; six ou sept mille", "5\u202f; 6 ou 7000"),
+        ("de", "der zweite fünf oder sechs tausend", "der 2. 5000 oder 6000"),
+        # A detached opener, dash or sentence mark ends what comes before
+        # (#1242 audit M3); an article heads A's noun phrase (L8).
+        (
+            "fr",
+            "en 1990 « cinq ou six mille personnes »",
+            "en 1990 « 5000 ou 6000 personnes »",
+        ),
+        (
+            "en",
+            "1990 – five or six thousand people died",
+            "1990 – 5000 or 6000 people died",
+        ),
+        ("de", "ein fünf oder sechs tausend Mann", "ein 5000 oder 6000 Mann"),
+        ("pt", "uma cinco ou seis mil pessoas", "1 5 ou 6000 pessoas"),
+        ("en", "5 , six or seven thousand", "5 , 6 or 7000"),
+        # An ordinal before A is no figure of a list (#1248).
+        ("fr", "les premiers cinq ou six mille", "les 1ers 5000 ou 6000"),
+        ("en", "the 2nd five or six thousand", "the 2nd 5000 or 6000"),
+        (
+            "it",
+            "cinque o sei mila. Sei o sette milioni",
+            "5000 o 6000. 6000000 o 7000000",
         ),
     ],
 )
