@@ -3494,6 +3494,9 @@ fn homograph_words(resolved: &str) -> &'static str {
         // семью: 7 and "family", сорока: 40 and "magpie" (#433).
         "ru" => "семью сорока",
         "uk" => "сорока",
+        // fi "sataa": the partitive of 100 inside a number ("kaksi sataa"),
+        // alone the verb "it rains" (#835).
+        "fi" => "sataa",
         _ => "",
     }
 }
