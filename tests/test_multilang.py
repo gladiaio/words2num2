@@ -795,6 +795,9 @@ def test_lo_billion_sentence():
         ("menos tres con cinco", Decimal("-3.5")),
         ("tres con cinco.", Decimal("3.5")),
         ("tres  con cinco", Decimal("3.5")),
+        # The split teens read before "con" too (#1223 audit A).
+        ("diez y seis con cinco", Decimal("16.5")),
+        ("diez y nueve con cincuenta", Decimal("19.50")),
     ],
 )
 def test_es_con_decimal_cardinal(text, expected):

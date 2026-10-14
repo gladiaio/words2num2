@@ -94,7 +94,8 @@ pub fn words2num(
             if let Some(k) = words.iter().position(|w| w.eq_ignore_ascii_case("con")).filter(|&k| k > 0 && k + 1 < words.len()) {
                 let mut joined = words.clone();
                 joined[k] = "coma";
-                if let Ok(v) = w2n_sentence::words2num(&joined.join(" "), lang, to) {
+                // The whole chain, so "diez y seis con cinco" reads too.
+                if let Ok(v) = words2num(&joined.join(" "), lang, to) {
                     return Ok(v);
                 }
             }
