@@ -1248,6 +1248,7 @@ def test_shared_scale_closed_compound(lang, text, expected):
         # Not before a counted noun.
         ("en", "March 12, 2000 people marched", {}, "March 12, 2000 people marched"),
         # Before a word the number may be a count, in any language (#1269 audit).
+        ("fr", "le 12 mars, 2000  personnes", {}, "le 12 mars, 2000  personnes"),
         (
             "fr",
             "le 12 mars, 2000 personnes sont venues",

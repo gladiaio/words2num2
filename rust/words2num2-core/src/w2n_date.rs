@@ -547,7 +547,9 @@ fn span_at(lang: &str, st: Style, toks: &[&str], i: usize, chained: bool) -> Opt
         // the end of the text or with a mark of its own. Before a word it may
         // be a count ("le 12 mars, 2000 personnes", #946, #1269 audit).
         if month_trail == ","
-            && at(k).and_then(year).is_some_and(|(_, t)| !open(&t) || at(k + 1).is_none())
+            // The end of the text: no further word, blanks aside (a double
+            // space before a count is no end, #1269 audit).
+            && at(k).and_then(year).is_some_and(|(_, t)| !open(&t) || toks[k + 1..].iter().all(|t| t.trim().is_empty()))
         {
             let (y, trail) = at(k).and_then(year).unwrap_or_default();
             return (Some(y), trail, 1);
