@@ -615,7 +615,7 @@ fn suffix_cut(
         }
         // tr endings follow the stem's vowel harmony: "bine" is the dative of
         // "bin" (1000), "bina" is "building" (#826).
-        if lang == "tr" && !tr_harmony(stem, suf) {
+        if lang == "tr" && !tr_harmony(stem, &core[stem.len()..]) {
             continue;
         }
         let norm = crate::normalize(stem);
