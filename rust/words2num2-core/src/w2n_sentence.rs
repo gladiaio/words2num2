@@ -4359,7 +4359,12 @@ pub(crate) fn share_scale_words(text: &str, lang: &str) -> Option<String> {
             // An article the walk leaves a word ("ein fünf oder sechs tausend
             // Mann", "una cinco o seis mil") heads A's noun phrase, not a
             // list; only a comma makes it an item (audit L8).
-            let article = matches!(core(&prev_bare).as_str(), "una" | "une" | "unha" | "ein" | "uma");
+            // Not where the walk reads it as 1 before a number (pt "uma", ca
+            // "una"), nor before a list mark (#1242 audit L9, N4).
+            let article = matches!(
+                (base.as_str(), core(&prev_bare).as_str()),
+                ("es" | "it", "una") | ("fr", "une") | ("gl", "unha") | ("de", "ein")
+            ) && !prev.ends_with([';', ':']);
             // The words before A back to a sentence mark, at most six: enough
             // for "tres coma uno cuatro" or "one thousand two hundred and".
             let mut first = p - 1;

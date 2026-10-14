@@ -956,6 +956,7 @@ def test_es_con_not_decimal_in_sentence(text, expected):
             "1990 – 5000 or 6000 people died",
         ),
         ("de", "ein fünf oder sechs tausend Mann", "ein 5000 oder 6000 Mann"),
+        ("pt", "uma cinco ou seis mil pessoas", "1 5 ou 6000 pessoas"),
         ("en", "5 , six or seven thousand", "5 , 6 or 7000"),
         # An ordinal before A is no figure of a list (#1248).
         ("fr", "les premiers cinq ou six mille", "les 1ers 5000 ou 6000"),
