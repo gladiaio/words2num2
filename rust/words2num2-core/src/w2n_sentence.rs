@@ -1698,6 +1698,23 @@ fn base_convert_as_written(lang: &str, norm: &str, ordinal: bool) -> Result<W2nV
                             return Ok(W2nValue::Int(BigInt::from(v)));
                         }
                     }
+                    // A scale form the renderer does not write ("dudek unu
+                    // miliono", "trideset pet tisuće"): read as the glued text
+                    // reads (#1280 audit).
+                    // Once only: the glued text must not glue again.
+                    if g != norm && !GLUING.with(|f| f.get()) {
+                        struct Reset;
+                        impl Drop for Reset {
+                            fn drop(&mut self) {
+                                GLUING.with(|f| f.set(false));
+                            }
+                        }
+                        GLUING.with(|f| f.set(true));
+                        let _reset = Reset;
+                        if let Ok(v) = base_convert_as_written(lang, &g, false) {
+                            return Ok(v);
+                        }
+                    }
                 }
                 // Beyond the table: tr writes "üç yüz bin" spaced where
                 // num2words2 glues "üçyüzbin" (300000). Kept only when the
@@ -1711,8 +1728,12 @@ fn base_convert_as_written(lang: &str, norm: &str, ordinal: bool) -> Result<W2nV
             }
             // Spoken "year" readings (two 2-digit groups, or an explicit/glued
             // hundred) that are not num2words' canonical spelling.
-            if let Some(v) = crate::parse_year_norm(lang, &norm) {
-                return Ok(W2nValue::Int(BigInt::from(v)));
+            // Not on a glued re-read: "fimmtíu fimm" is no year 5005 (#1282
+            // audit).
+            if !GLUING.with(|f| f.get()) {
+                if let Some(v) = crate::parse_year_norm(lang, &norm) {
+                    return Ok(W2nValue::Int(BigInt::from(v)));
+                }
             }
             // Scale words in an oblique, dual or glued form (kn "ಸಾವಿರದ", ar
             // "مليونان", da "tolvtusinde"), respelled for the scale split.
@@ -4813,6 +4834,12 @@ pub(crate) fn split_glued_lists(text: &str, lang: &str) -> Option<String> {
         }
     }
     changed.then_some(out)
+}
+
+thread_local! {
+    /// Set while spaced tens are re-read glued (`base_convert_as_written` on
+    /// the morpheme-glued text): no second glue, no spoken-year reading.
+    static GLUING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// es "diez y seis" -> "dieciséis" (16..19, #866), or None when the text

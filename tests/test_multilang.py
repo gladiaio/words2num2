@@ -1427,6 +1427,13 @@ def test_glued_comma_list(lang, text, expected):
         # With a scale after it (#1280 audit).
         ("hr", "tri deset pet tisuća", "35000"),
         ("eo", "du dek unu milionoj", "21000000"),
+        # A scale form the renderer does not write reads as glued (#1280
+        # audit).
+        ("eo", "du dek unu miliono", "21000000"),
+        ("hr", "tri deset pet tisuće", "35000"),
+        ("bg", "три десет и пет хиляди и сто", "35100"),
+        # No year reading on the glued text (#1282 audit).
+        ("is", "fimm tíu fimm", "50 5"),
     ],
 )
 def test_spaced_tens_word(lang, text, expected):
