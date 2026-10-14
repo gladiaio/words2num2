@@ -961,6 +961,12 @@ def test_percent_phrase_gl_es(lang, text, expected):
         ("centovent'anni", "120 anni"),
         ("duemilavent'anni", "2020 anni"),
         ("accent'acuto", "accent'acuto"),
+        # "per cento" is the percent phrase; elided it is a hundred.
+        ("per cent'anni", "per 100 anni"),
+        ("(per cent'anni)", "(per 100 anni)"),
+        # Other apostrophes and blanks (#1249 audit).
+        ("ho vent\u02bcanni", "ho 20 anni"),
+        ("trent'anni\tfa", "30 anni\tfa"),
         # Not elision: a clitic before a number, a number word after.
         ("dell'otto", "dell'8"),
         ("l'anno", "l'anno"),

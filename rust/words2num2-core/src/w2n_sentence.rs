@@ -4376,7 +4376,10 @@ pub(crate) fn share_scale_words(text: &str, lang: &str) -> Option<String> {
 /// of "cento" before a vowel, which the walk never reads (#918). None when the
 /// text holds none.
 pub(crate) fn it_elided_tens(text: &str, lang: &str) -> Option<String> {
-    if lang.split(['_', '-']).next() != Some("it") || !text.contains(['\'', '\u{2019}']) {
+    // The apostrophes in use: ASCII, the typographic ones, the modifier letter
+    // of some keyboards and OCR (#1249 audit).
+    const QUOTES: [char; 4] = ['\'', '\u{2019}', '\u{2018}', '\u{02BC}'];
+    if lang.split(['_', '-']).next() != Some("it") || !text.contains(QUOTES) {
         return None;
     }
     const STEMS: [(&str, &str); 9] = [
@@ -4391,38 +4394,53 @@ pub(crate) fn it_elided_tens(text: &str, lang: &str) -> Option<String> {
         ("cent", "cento"),
     ];
     let mut changed = false;
-    let out: Vec<String> = text
-        .split(' ')
-        .map(|tok| {
-            let Some(q) = tok.find(['\'', '\u{2019}']) else { return tok.to_string() };
-            let (head, rest) = (&tok[..q], &tok[q + tok[q..].chars().next().map_or(1, char::len_utf8)..]);
-            let word = head.trim_start_matches(is_opener);
-            let opener = &head[..head.len() - word.len()];
-            let lower = word.to_lowercase();
-            let starts_vowel = rest.chars().next().is_some_and(|c| "aeiouàèéìòùhAEIOUÀÈÉÌÒÙH".contains(c));
+    let mut out = String::with_capacity(text.len() + 8);
+    let mut prev = String::new();
+    // Word by word, any run of blanks kept as written.
+    let mut rest_text = text;
+    while !rest_text.is_empty() {
+        let blank = rest_text.len() - rest_text.trim_start().len();
+        out.push_str(&rest_text[..blank]);
+        rest_text = &rest_text[blank..];
+        let end = rest_text.find(char::is_whitespace).unwrap_or(rest_text.len());
+        let tok = &rest_text[..end];
+        rest_text = &rest_text[end..];
+        let word = tok.trim_start_matches(|c: char| is_opener(c) || QUOTES.contains(&c));
+        let opener = &tok[..tok.len() - word.len()];
+        let rewritten = word.find(QUOTES).and_then(|q| {
+            let (head, after) = (&word[..q], &word[q + word[q..].chars().next().map_or(1, char::len_utf8)..]);
+            let lower = head.to_lowercase();
+            let starts_vowel = after.chars().next().is_some_and(|c| "aeiouàèéìòùhAEIOUÀÈÉÌÒÙH".contains(c));
+            // Not before a number word: "novant'otto" is no "90 8".
+            if !starts_vowel
+                || !after.trim_end_matches(|c: char| !c.is_alphanumeric()).chars().all(char::is_alphabetic)
+                || matches!(crate::lookup_norm(lang, &crate::normalize(rstrip_punct(after)), false, &[]), Ok(Some(_)))
+            {
+                return None;
+            }
             // A closed compound ending in one ("duecent'", "centovent'",
             // "duemilavent'") restores the same vowel, kept when the table
             // reads the whole word (#1250).
-            let restored = STEMS.iter().find_map(|(stem, full)| {
+            let full = STEMS.iter().find_map(|(stem, full)| {
                 let head = lower.strip_suffix(stem)?;
                 let whole = format!("{head}{full}");
                 (head.is_empty() || matches!(crate::lookup_norm(lang, &crate::normalize(&whole), false, &[]), Ok(Some(_)))).then_some(whole)
-            });
-            match restored {
-                // Not before a number word: "novant'otto" is no "90 8".
-                Some(full)
-                    if starts_vowel
-                        && rest.trim_end_matches(|c: char| !c.is_alphanumeric()).chars().all(char::is_alphabetic)
-                        && !matches!(crate::lookup_norm(lang, &crate::normalize(rstrip_punct(rest)), false, &[]), Ok(Some(_))) =>
-                {
-                    changed = true;
-                    format!("{opener}{full} {rest}")
-                }
-                _ => tok.to_string(),
+            })?;
+            // "per cento" is the percent phrase, which is never elided: "per
+            // cent'anni" is a hundred years (#1249 audit).
+            let full = if full == "cento" && prev == "per" { "100".to_string() } else { full };
+            Some(format!("{opener}{full} {after}"))
+        });
+        match rewritten {
+            Some(t) => {
+                changed = true;
+                out.push_str(&t);
             }
-        })
-        .collect();
-    changed.then(|| out.join(" "))
+            None => out.push_str(tok),
+        }
+        prev = rstrip_punct(tok.trim_start_matches(is_opener)).to_lowercase();
+    }
+    changed.then_some(out)
 }
 
 /// es "diez y seis" -> "dieciséis" (16..19, #866), or None when the text
