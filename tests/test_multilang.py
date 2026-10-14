@@ -1182,6 +1182,12 @@ def test_digit_run_before_multiplier(lang, text, expected):
         ("de", "zwei und dreitausend", "2 und 3000"),
         # de "um" is "at", not pt "um" (one) (#1266).
         ("de", "um zwei bis drei Millionen Euro", "um 2000000 bis 3000000 Euro"),
+        # The hyphen counts only in de/nl; elsewhere A stays (#1261 audit M2).
+        ("nl", "twee- of drieduizend", "2000 of 3000"),
+        ("en", "five- or six thousand people", "five- or 6000 people"),
+        # B continues only where the walk joins it (L2).
+        ("de", "zwei oder dreitausend einen Monat", "2 oder 3001 Monat"),
+        ("de", "zwei oder dreitausend (fünf)", "2000 oder 3000 (5)"),
     ],
 )
 def test_shared_scale_closed_compound(lang, text, expected):

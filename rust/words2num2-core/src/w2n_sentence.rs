@@ -4410,7 +4410,7 @@ pub(crate) fn share_scale_words(text: &str, lang: &str) -> Option<String> {
         let conn = core(toks[k]);
         // de "zwei- oder dreitausend": the suspended hyphen (Ergänzungsstrich)
         // marks A as sharing B's ending; it is dropped once shared (#1262).
-        let suspended = base == "de" && toks[ka].ends_with(['-', '\u{2010}', '\u{2011}']);
+        let suspended = matches!(base.as_str(), "de" | "nl") && toks[ka].ends_with(['-', '\u{2010}', '\u{2011}']);
         let is_or = or_words.contains(&conn.as_str());
         let is_and = marks_ok
             && and_words.contains(&conn.as_str())
@@ -4418,7 +4418,8 @@ pub(crate) fn share_scale_words(text: &str, lang: &str) -> Option<String> {
         if !(is_or || is_and) || !toks[k].chars().all(char::is_alphabetic) {
             continue;
         }
-        let a_tok = toks[ka].trim_start_matches(is_opener).trim_end_matches(['-', '\u{2010}', '\u{2011}']);
+        let a_tok = toks[ka].trim_start_matches(is_opener);
+        let a_tok = if suspended { a_tok.trim_end_matches(['-', '\u{2010}', '\u{2011}']) } else { a_tok };
         // de "dreitausend", it "tremila", nl "drieduizend": B glued to its
         // thousand (#1221). The scale shared is the thousand word.
         let glued = (|| {
@@ -4535,12 +4536,20 @@ pub(crate) fn share_scale_words(text: &str, lang: &str) -> Option<String> {
             if raw.len() > 1 && walk(&raw.join(" ")).chars().any(char::is_alphabetic) {
                 continue;
             }
+            // A word the walk joins to B continues it ("dreitausend
+            // fünfhundert", "dreitausend einen Monat"): B is not this bound,
+            // no share. A figure or a bracket after B stays apart (#1261
+            // audit L2).
             if !ends_run_mark(raw[raw.len() - 1]) {
                 if let Some(&i) = nb.get(q) {
-                    let next = core(&bare(toks[i]));
-                    let next2 = nb.get(q + 1).map(|&j| core(&bare(toks[j])));
-                    let is_num = |w: &str| value(w).is_some() || walk(w).chars().any(|c| c.is_ascii_digit());
-                    if is_num(&next) || (and_words.contains(&next.as_str()) && next2.as_deref().is_some_and(is_num)) {
+                    let joined = walk(&format!("{} {}", raw.join(" "), toks[i]));
+                    let apart = format!("{} {}", walk(&raw.join(" ")), walk(toks[i]));
+                    let and_num = and_words.contains(&core(&bare(toks[i])).as_str())
+                        && nb.get(q + 1).is_some_and(|&j| {
+                            walk(&format!("{} {} {}", raw.join(" "), toks[i], toks[j]))
+                                != format!("{} {} {}", walk(&raw.join(" ")), toks[i], walk(toks[j]))
+                        });
+                    if joined != apart || and_num {
                         continue;
                     }
                 }
