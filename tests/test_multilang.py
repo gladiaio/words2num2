@@ -1247,6 +1247,31 @@ def test_shared_scale_closed_compound(lang, text, expected):
         ("fr", "le douze mars, deux mille vingt-six", {}, "le 12 mars 2026"),
         # Not before a counted noun.
         ("en", "March 12, 2000 people marched", {}, "March 12, 2000 people marched"),
+        # Before a word the number may be a count, in any language (#1269 audit).
+        (
+            "fr",
+            "le 12 mars, 2000 personnes sont venues",
+            {},
+            "le 12 mars, 2000 personnes sont venues",
+        ),
+        (
+            "es",
+            "el 5 de mayo, 2000 personas murieron",
+            {},
+            "el 5 de mayo, 2000 personas murieron",
+        ),
+        (
+            "en",
+            "on March 12, 2000 protesters marched",
+            {"date_format": "iso"},
+            "on March 12, 2000 protesters marched",
+        ),
+        (
+            "en",
+            "on May 5, 2026, we met",
+            {"date_format": "iso"},
+            "on 2026-05-05, we met",
+        ),
     ],
 )
 def test_date_comma_before_year(lang, text, kwargs, expected):
