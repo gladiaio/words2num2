@@ -15,7 +15,8 @@ categories = ["parser-implementations", "internationalization", "text-processing
 # this renderer, so a words2num2 release must be reproducible from crates.io
 # alone. 0.1.3 renders ti / ky / or / ckb / kok in their own scripts (#14).
 num2words2-core = "0.1.3"
-num-bigint = "0.4"
+# 0.4.2: 0.4.0/0.4.1 do not build on rustc >= 1.73 (div_ceil).
+num-bigint = "0.4.2"
 # 0.4.7: BigDecimal::to_plain_string (#921).
 bigdecimal = "0.4.7"
 # NFKD normalisation + combining-mark detection, matching Python's unicodedata.

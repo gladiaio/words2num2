@@ -2,7 +2,8 @@
 name = "words2num2-py"
 version.workspace = true
 edition.workspace = true
-rust-version.workspace = true
+# pyo3 0.28+ needs rustc 1.83 (#1267 audit).
+rust-version = "1.83"
 
 [lib]
 name = "_rust"
