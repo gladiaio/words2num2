@@ -1600,15 +1600,25 @@ const MY_COUNTERS: &[&str] = &[
 fn my_counter(next: Option<&str>) -> bool {
     // A particle glued after the counter ("ကျပ်ပါ", "ယောက်တွေ") leaves the
     // counter; only these, as "လ" also opens "လာတယ်" (#1016).
-    const PARTICLES: &[&str] = &["ပါ", "တွေ", "ကို", "နဲ့", "လည်း", "စီ", "လောက်", "ခန့်", "တည်း", "မှာ", "က"];
+    // Several may stack ("ကျပ်ပါတယ်", #1284).
+    const PARTICLES: &[&str] = &[
+        "ပါ", "တွေ", "ကို", "နဲ့", "လည်း", "စီ", "လောက်", "ခန့်", "တည်း", "မှာ", "က", "ပဲ", "တယ်", "ရယ်", "နော်",
+    ];
     next.is_some_and(|w| {
-        let w = crate::normalize(w);
         let is = |x: &str| MY_COUNTERS.iter().any(|c| crate::normalize(c) == x);
+        let mut w = crate::normalize(w);
+        for _ in 0..4 {
+            if is(&w) {
+                return true;
+            }
+            let Some(head) = PARTICLES.iter().find_map(|p| {
+                w.strip_suffix(crate::normalize(p).as_str()).filter(|h| !h.is_empty()).map(str::to_string)
+            }) else {
+                return false;
+            };
+            w = head;
+        }
         is(&w)
-            || PARTICLES.iter().any(|p| {
-                let p = crate::normalize(p);
-                w.strip_suffix(p.as_str()).is_some_and(|head| !head.is_empty() && is(head))
-            })
     })
 }
 

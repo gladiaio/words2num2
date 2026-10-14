@@ -8,7 +8,7 @@ follows [Semantic Versioning](https://semver.org/) and uses
 
 ### Fixed
 
-- my: a counter with a glued particle after "နှစ်" makes it the number two, as the bare counter does ("ငါးရာ နှစ် ကျပ်ပါ" is "502 ကျပ်ပါ", was "500 နှစ် ကျပ်ပါ"); only listed particles ("ပါ", "တွေ", …), so "လာတယ်" is no month (#1016).
+- my: a counter with a glued particle after "နှစ်" makes it the number two, as the bare counter does ("ငါးရာ နှစ် ကျပ်ပါ" is "502 ကျပ်ပါ", was "500 နှစ် ကျပ်ပါ"); listed particles only, stacked too ("ကျပ်ပါတယ်", "ယောက်ပဲ"), so "လာတယ်" is no month (#1016, #1284).
 - Sentence mode: spaced tens before a scale word in a form the renderer does not write read as the glued text does (eo "du dek unu miliono" is 21000000, hr "tri deset pet tisuće" 35000, bg "три десет и пет хиляди и сто" 35100; were "21 miliono", "35 1000", "35000 и 100") (#983).
 - Sentence mode: a unit and the word for ten written apart read as their tens word where the language glues them (lv "trīs desmit pieci" is 35, hr "tri deset sedam" 37, eo "du dek naŭ" 29, bg "седем десет и осем" 78; were "30 5", …). Also is, sq, bs, sr, mk, nn, ht (#983).
 
