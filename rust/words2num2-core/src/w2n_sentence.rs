@@ -4400,9 +4400,17 @@ pub(crate) fn it_elided_tens(text: &str, lang: &str) -> Option<String> {
             let opener = &head[..head.len() - word.len()];
             let lower = word.to_lowercase();
             let starts_vowel = rest.chars().next().is_some_and(|c| "aeiouàèéìòùhAEIOUÀÈÉÌÒÙH".contains(c));
-            match STEMS.iter().find(|(stem, _)| lower == *stem) {
+            // A closed compound ending in one ("duecent'", "centovent'",
+            // "duemilavent'") restores the same vowel, kept when the table
+            // reads the whole word (#1250).
+            let restored = STEMS.iter().find_map(|(stem, full)| {
+                let head = lower.strip_suffix(stem)?;
+                let whole = format!("{head}{full}");
+                (head.is_empty() || matches!(crate::lookup_norm(lang, &crate::normalize(&whole), false, &[]), Ok(Some(_)))).then_some(whole)
+            });
+            match restored {
                 // Not before a number word: "novant'otto" is no "90 8".
-                Some((_, full))
+                Some(full)
                     if starts_vowel
                         && rest.trim_end_matches(|c: char| !c.is_alphanumeric()).chars().all(char::is_alphabetic)
                         && !matches!(crate::lookup_norm(lang, &crate::normalize(rstrip_punct(rest)), false, &[]), Ok(Some(_))) =>

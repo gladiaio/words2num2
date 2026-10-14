@@ -956,6 +956,11 @@ def test_percent_phrase_gl_es(lang, text, expected):
         ("ho vent’anni", "ho 20 anni"),
         ("cinquant'anni.", "50 anni."),
         ("(trent'anni)", "(30 anni)"),
+        # Closed compounds ending in an elided ten or "cento" (#1250).
+        ("duecent'anni fa", "200 anni fa"),
+        ("centovent'anni", "120 anni"),
+        ("duemilavent'anni", "2020 anni"),
+        ("accent'acuto", "accent'acuto"),
         # Not elision: a clitic before a number, a number word after.
         ("dell'otto", "dell'8"),
         ("l'anno", "l'anno"),
