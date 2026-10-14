@@ -1080,6 +1080,24 @@ fn is_weight(lang: &str, m: &Match, parts: &[Part], num: usize) -> bool {
     {
         return true;
     }
+    // "seven pounds eight ounces": ounces after the next amount.
+    if m.trailing.is_empty()
+        && next_word(parts, m.end)
+            .and_then(|n| next_word(parts, n))
+            .is_some_and(|n2| matches!(key(n2).as_str(), "ounce" | "ounces" | "oz"))
+    {
+        return true;
+    }
+    // A money word after the amount wins: "a five pound note", "twenty pounds
+    // and fifty pence".
+    let mut k = m.end;
+    for _ in 0..4 {
+        let Some(n) = next_word(parts, k) else { break };
+        if matches!(key(n).as_str(), "note" | "notes" | "coin" | "coins" | "pence" | "penny" | "p" | "sterling" | "quid") {
+            return false;
+        }
+        k = n;
+    }
     // Up to four words back, within the sentence.
     let mut j = num;
     for _ in 0..4 {
@@ -1089,8 +1107,8 @@ fn is_weight(lang: &str, m: &Match, parts: &[Part], num: usize) -> bool {
         }
         if matches!(
             key(k).as_str(),
-            "weigh" | "weighs" | "weighed" | "weighing" | "weight" | "weights" | "weighted" | "stone" | "pressed"
-                | "benched" | "lifted" | "deadlifted" | "squatted" | "heavier" | "lighter"
+            "weigh" | "weighs" | "weighed" | "weighing" | "weight" | "stone" | "pressed" | "benched" | "deadlifted"
+                | "squatted" | "heavier" | "lighter"
         ) {
             return true;
         }

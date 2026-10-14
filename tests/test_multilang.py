@@ -1167,6 +1167,8 @@ def test_digit_run_before_multiplier(lang, text, expected):
         # Money stays money, also after a weighing word in another sentence.
         ("it costs five pounds", "it costs £5"),
         ("He weighs a lot. It costs five pounds.", "He weighs a lot. It costs £5."),
+        ("weighs five pounds and fifty pence", "weighs £5.50"),
+        ("the price of the weights is five pounds", "the price of the weights is £5"),
     ],
 )
 def test_en_pounds_weight(text, expected):
