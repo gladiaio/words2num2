@@ -6,6 +6,8 @@ follows [Semantic Versioning](https://semver.org/) and uses
 
 ## [Unreleased]
 
+## [0.4.4] — 2026-10-14
+
 ### Fixed
 
 - Sentence mode: a lone article-one ("one", fr "un", …) closing an item right after a figure counts, as it already did after a number word ("4, 8, 2, one." is "4, 8, 2, 1.", "5, one, 7" "5, 1, 7", "4, 8, 2 and one." "4, 8, 2 and 1."); "pick one", "2 and one is broken" keep the word (#1272).
