@@ -943,6 +943,20 @@ def test_es_con_not_decimal_in_sentence(text, expected):
         # A detached mark goes with the word before it (L7); de ordinal (L6).
         ("fr", "cinq\u202f; six ou sept mille", "5\u202f; 6 ou 7000"),
         ("de", "der zweite fünf oder sechs tausend", "der 2. 5000 oder 6000"),
+        # A detached opener, dash or sentence mark ends what comes before
+        # (#1242 audit M3); an article heads A's noun phrase (L8).
+        (
+            "fr",
+            "en 1990 « cinq ou six mille personnes »",
+            "en 1990 « 5000 ou 6000 personnes »",
+        ),
+        (
+            "en",
+            "1990 – five or six thousand people died",
+            "1990 – 5000 or 6000 people died",
+        ),
+        ("de", "ein fünf oder sechs tausend Mann", "ein 5000 oder 6000 Mann"),
+        ("en", "5 , six or seven thousand", "5 , 6 or 7000"),
         # An ordinal before A is no figure of a list (#1248).
         ("fr", "les premiers cinq ou six mille", "les 1ers 5000 ou 6000"),
         ("en", "the 2nd five or six thousand", "the 2nd 5000 or 6000"),

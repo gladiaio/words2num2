@@ -4337,9 +4337,13 @@ pub(crate) fn share_scale_words(text: &str, lang: &str) -> Option<String> {
         }
         let lead_clean = a_tok.len() == toks[ka].len();
         if p >= 2 && !is_and && lead_clean {
-            // A mark standing alone ("cinq\u{202f}; six") goes with the word
-            // before it (#1242 audit L7).
-            let pi = if p >= 3 && !toks[nb[p - 2]].chars().any(char::is_alphanumeric) { p - 3 } else { p - 2 };
+            // A list mark or closer standing alone ("cinq\u{202f}; six", "5 ,
+            // six") goes with the word before it (#1242 audit L7); an opener,
+            // a dash, a slash or a sentence mark standing alone ends what
+            // comes before ("1990 « cinq", "2020 – five", audit M3).
+            let detached = !toks[nb[p - 2]].chars().any(char::is_alphanumeric);
+            let boundary = detached && !toks[nb[p - 2]].chars().all(|c| ",;:)]»\"”’".contains(c));
+            let pi = if p >= 3 && detached && !boundary { p - 3 } else { p - 2 };
             let prev_own: String = toks[nb[pi]..=nb[p - 2]].concat();
             let prev = prev_own.as_str();
             // A figure, not an ordinal ("the 2nd five or six thousand", #1248).
@@ -4350,10 +4354,12 @@ pub(crate) fn share_scale_words(text: &str, lang: &str) -> Option<String> {
             // "2.", #1242 audit M2, L6).
             let number_word = {
                 let w = walk(&prev_bare);
-                (figure(&w) && !(w.ends_with('.') && !prev_bare.ends_with('.')))
-                    || value(&prev_bare).is_some()
-                    || core(&prev_bare) == "hundred"
+                (figure(&w) && !w.ends_with('.')) || value(&prev_bare).is_some() || core(&prev_bare) == "hundred"
             };
+            // An article the walk leaves a word ("ein fünf oder sechs tausend
+            // Mann", "una cinco o seis mil") heads A's noun phrase, not a
+            // list; only a comma makes it an item (audit L8).
+            let article = matches!(core(&prev_bare).as_str(), "una" | "une" | "unha" | "ein" | "uma");
             // The words before A back to a sentence mark, at most six: enough
             // for "tres coma uno cuatro" or "one thousand two hundred and".
             let mut first = p - 1;
@@ -4363,7 +4369,7 @@ pub(crate) fn share_scale_words(text: &str, lang: &str) -> Option<String> {
             let from = nb[first];
             // A figure before A: a list or a longer number ("5, six or seven
             // thousand", "In 2020 five or six thousand", #1229).
-            if figure(prev) {
+            if !boundary && figure(prev) {
                 continue;
             }
             // A comma ends a list item after a number word of the same order;
@@ -4382,8 +4388,8 @@ pub(crate) fn share_scale_words(text: &str, lang: &str) -> Option<String> {
             // bound ("cinco seis o siete mil", "zéro six douze ou treize
             // mille", #1243). A sentence mark, or a scale with a comma, ends
             // the previous number; ";" and ":" may separate list items.
-            let marked = prev.ends_with(['.', '!', '?', ',', '…', '—']);
-            if !marked && number_word {
+            let marked = boundary || prev.ends_with(['.', '!', '?', ',', '…', '—', '–']);
+            if !marked && number_word && !article {
                 continue;
             }
             // A is the tail of a longer number when the walk joins it to the
