@@ -1185,6 +1185,48 @@ def test_en_pounds_weight(text, expected):
 
 
 @pytest.mark.parametrize(
+    "lang, text, expected",
+    [
+        # de/it/nl write B glued to its thousand (#1221).
+        ("de", "zwei oder dreitausend Leute", "2000 oder 3000 Leute"),
+        ("de", "zwischen zwei und dreitausend", "zwischen 2000 und 3000"),
+        ("it", "due o tremila persone", "2000 o 3000 persone"),
+        ("nl", "twee of drieduizend mensen", "2000 of 3000 mensen"),
+        ("de", "zwei oder drei oder viertausend", "2000 oder 3000 oder 4000"),
+        # Not a compound with more after the thousand, nor a falling pair.
+        ("de", "zwei oder dreitausendfünfhundert", "2 oder 3500"),
+        ("de", "zwanzig oder dreitausend", "20 oder 3000"),
+        # The scale run after the glued B is shared; a number after it is
+        # B's own (#1261 audit).
+        (
+            "it",
+            "due o tremila miliardi di lire",
+            "2000000000000 o 3000000000000 di lire",
+        ),
+        ("de", "zwei oder dreitausend Millionen", "2000000000 oder 3000000000"),
+        ("de", "zwei oder dreitausend fünfhundert", "2 oder 3500"),
+        ("it", "due o tremila e cinquecento", "2 o 3500"),
+        # de suspended hyphen and "bis" (#1262).
+        ("de", "zwei- oder dreitausend Menschen", "2000 oder 3000 Menschen"),
+        ("de", "zwei- bis dreitausend Euro", "2000 bis 3000 Euro"),
+        ("de", "zwei- und dreitausend", "2000 und 3000"),
+        ("de", "von zwei bis dreitausend", "von 2000 bis 3000"),
+        ("de", "zwei und dreitausend", "2 und 3000"),
+        # de "um" is "at", not pt "um" (one) (#1266).
+        ("de", "um zwei bis drei Millionen Euro", "um 2000000 bis 3000000 Euro"),
+        # The hyphen counts only in de/nl; elsewhere A stays (#1261 audit M2).
+        ("nl", "twee- of drieduizend", "2000 of 3000"),
+        ("en", "five- or six thousand people", "five- or 6000 people"),
+        # B continues only where the walk joins it (L2).
+        ("de", "zwei oder dreitausend einen Monat", "2 oder 3001 Monat"),
+        ("de", "zwei oder dreitausend (fünf)", "2000 oder 3000 (5)"),
+    ],
+)
+def test_shared_scale_closed_compound(lang, text, expected):
+    assert words2num_sentence(text, lang=lang) == expected
+
+
+@pytest.mark.parametrize(
     "lang, text, kwargs, expected",
     [
         # A comma before the year keeps it in the date (#946).
