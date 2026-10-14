@@ -1432,6 +1432,8 @@ def test_glued_comma_list(lang, text, expected):
         ("eo", "du dek unu miliono", "21000000"),
         ("hr", "tri deset pet tisuće", "35000"),
         ("bg", "три десет и пет хиляди и сто", "35100"),
+        # No year reading on the glued text (#1282 audit).
+        ("is", "fimm tíu fimm", "50 5"),
     ],
 )
 def test_spaced_tens_word(lang, text, expected):
