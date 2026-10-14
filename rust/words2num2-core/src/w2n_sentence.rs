@@ -4420,13 +4420,35 @@ pub(crate) fn share_scale_words(text: &str, lang: &str) -> Option<String> {
         if !(is_or || is_and) || !toks[k].chars().all(char::is_alphabetic) {
             continue;
         }
-        // "add five to six thousand": arithmetic, not a range.
-        if base == "en"
-            && conn == "to"
-            && p >= 2
-            && matches!(core(&bare(toks[nb[p - 2]])).as_str(), "add" | "adds" | "added" | "adding" | "plus")
-        {
-            continue;
+        // The range words ("to", "a", "à", "tot", "bis"), as opposed to the
+        // alternatives.
+        let range_word = matches!(
+            (base.as_str(), conn.as_str()),
+            ("en", "to") | ("es" | "pt" | "gl" | "it" | "ca" | "fr", "a") | ("nl", "tot") | ("de", "bis")
+        );
+        if range_word {
+            let raw = toks[k].to_lowercase();
+            let prev = (p >= 2).then(|| core(&bare(toks[nb[p - 2]])));
+            // fr "a" without its accent is the verb "has" ("la saison trois a
+            // quatre millions de vues", #1271 audit).
+            if base == "fr" && raw != "à" {
+                continue;
+            }
+            // "add five to six thousand", "suma cinco a seis mil": arithmetic.
+            if prev.as_deref().is_some_and(|w| {
+                matches!(
+                    w,
+                    "add" | "adds" | "added" | "adding" | "plus" | "suma" | "sumar" | "sumo" | "anade" | "anadir" | "ajoute"
+                        | "ajouter" | "aggiungi" | "aggiungere" | "somma" | "sommare" | "soma" | "somar" | "adiciona"
+                        | "adicionar" | "tel" | "optellen" | "addiere" | "addieren"
+                )
+            }) {
+                continue;
+            }
+            // it "sei a settemila metri": "you are at", not six.
+            if base == "it" && core(&bare(toks[ka])) == "sei" {
+                continue;
+            }
         }
         let a_tok = toks[ka].trim_start_matches(is_opener);
         let a_tok = if suspended { a_tok.trim_end_matches(['-', '\u{2010}', '\u{2011}']) } else { a_tok };
@@ -4446,6 +4468,11 @@ pub(crate) fn share_scale_words(text: &str, lang: &str) -> Option<String> {
         // Rising, and of one order ("cinco o seis mil", not "veinte o dos
         // mil" nor "cinco o seiscientos mil").
         if a >= b || b >= 10 * a {
+            continue;
+        }
+        // "from one to five thousand", "a scale of one to five thousand":
+        // a range from one counts from one (#1271 audit).
+        if range_word && a == 1 {
             continue;
         }
         let lead_clean = a_tok.len() + if suspended { toks[ka].chars().last().map_or(0, char::len_utf8) } else { 0 } == toks[ka].len();

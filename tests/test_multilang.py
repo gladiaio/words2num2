@@ -1239,6 +1239,12 @@ def test_shared_scale_closed_compound(lang, text, expected):
         ("en", "it is five to six", "it is 5 to 6"),
         ("en", "add five to six thousand", "add 5 to 6000"),
         ("en", "twenty to six thousand", "20 to 6000"),
+        # fr "a" (has), a range from one, it "sei a", other arithmetic verbs
+        # (#1271 audit).
+        ("fr", "Le chapitre cinq a six mille mots.", "Le chapitre 5 a 6000 mots."),
+        ("en", "count from one to five thousand", "count from one to 5000"),
+        ("it", "sei a settemila metri", "sei a 7000 metri"),
+        ("es", "suma cinco a seis mil", "suma 5 a 6000"),
     ],
 )
 def test_shared_scale_to_range(lang, text, expected):
