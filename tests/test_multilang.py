@@ -1182,3 +1182,30 @@ def test_digit_run_before_multiplier(lang, text, expected):
 )
 def test_en_pounds_weight(text, expected):
     assert words2num_sentence(text, lang="en", currency=True) == expected
+
+
+@pytest.mark.parametrize(
+    "lang, text, kwargs, expected",
+    [
+        # A comma before the year keeps it in the date (#946).
+        ("en", "on March 12, 2026", {"date_format": "iso"}, "on 2026-03-12"),
+        (
+            "en",
+            "on march twelfth, twenty twenty six",
+            {"date_format": "iso"},
+            "on 2026-03-12",
+        ),
+        ("en", "march 12, 2026", {}, "March 12, 2026"),
+        (
+            "fr",
+            "le douze mars, deux mille vingt-six",
+            {"date_format": "iso"},
+            "le 2026-03-12",
+        ),
+        ("fr", "le douze mars, deux mille vingt-six", {}, "le 12 mars 2026"),
+        # Not before a counted noun.
+        ("en", "March 12, 2000 people marched", {}, "March 12, 2000 people marched"),
+    ],
+)
+def test_date_comma_before_year(lang, text, kwargs, expected):
+    assert words2num_sentence(text, lang=lang, date=True, **kwargs) == expected
