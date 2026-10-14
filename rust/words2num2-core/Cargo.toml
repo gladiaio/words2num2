@@ -2,6 +2,7 @@
 name = "words2num2-core"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 description = "Pure-Rust core for words2num2 — parse spoken-form numbers back to numeric values across 100+ locales (the inverse of num2words2). No Python."
 license.workspace = true
 repository.workspace = true
@@ -14,10 +15,13 @@ categories = ["parser-implementations", "internationalization", "text-processing
 # this renderer, so a words2num2 release must be reproducible from crates.io
 # alone. 0.1.3 renders ti / ky / or / ckb / kok in their own scripts (#14).
 num2words2-core = "0.1.3"
-num-bigint = "0.4"
-bigdecimal = "0.4"
+# 0.4.2: 0.4.0/0.4.1 do not build on rustc >= 1.73 (div_ceil).
+num-bigint = "0.4.2"
+# 0.4.7: BigDecimal::to_plain_string (#921).
+bigdecimal = "0.4.7"
 # NFKD normalisation + combining-mark detection, matching Python's unicodedata.
-unicode-normalization = "0.1"
+# 0.1.2: char::is_combining_mark (#921).
+unicode-normalization = "0.1.2"
 # Phone numbers (`phone=True`): Google libphonenumber's numbering plans, compiled
 # in (Apache-2.0), so the package keeps no runtime dependency.
 phonenumber = "0.3.10"
