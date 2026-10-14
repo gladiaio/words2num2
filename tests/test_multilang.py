@@ -1150,3 +1150,24 @@ def test_tr_vowel_harmony(text, expected):
 )
 def test_digit_run_before_multiplier(lang, text, expected):
     assert words2num_sentence(text, lang=lang) == expected
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        # en "pounds" as a weight in context (#814).
+        ("patient weighs one hundred ninety pounds", "patient weighs 190 pounds"),
+        ("bench pressed three hundred pounds", "bench pressed 300 pounds"),
+        ("a fifty pound bag of rice", "a 50 pound bag of rice"),
+        (
+            "the baby weighed seven pounds eight ounces",
+            "the baby weighed 7 pounds 8 ounces",
+        ),
+        ("she weighs nine stone four pounds", "she weighs 9 stone 4 pounds"),
+        # Money stays money, also after a weighing word in another sentence.
+        ("it costs five pounds", "it costs £5"),
+        ("He weighs a lot. It costs five pounds.", "He weighs a lot. It costs £5."),
+    ],
+)
+def test_en_pounds_weight(text, expected):
+    assert words2num_sentence(text, lang="en", currency=True) == expected
