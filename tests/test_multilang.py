@@ -1321,3 +1321,64 @@ def test_shared_scale_to_range(lang, text, expected):
 )
 def test_one_after_figure(text, expected):
     assert words2num_sentence(text, lang="en") == expected
+
+
+@pytest.mark.parametrize(
+    "lang, text, expected",
+    [
+        # es "más", it "più", pt "mais" say "+" before a country code (#941).
+        (
+            "es",
+            "llama al más treinta y cuatro seis uno dos tres cuatro cinco seis siete ocho",
+            "llama al +34 612 34 56 78",
+        ),
+        (
+            "it",
+            "chiama il più trentanove tre tre tre uno due tre quattro cinque sei sette",
+            "chiama il +39 333 123 4567",
+        ),
+        (
+            "pt",
+            "mais trezentos e cinquenta e um nove um nove oito sete seis cinco quatro três",
+            "+351 919 876 543",
+        ),
+        # Only when the digits make an international number and no national
+        # one: these words also mean "more", "no longer" (#1273 audit).
+        (
+            "pt_BR",
+            "meu número não é mais trinta e três nove oito sete seis cinco quatro três dois um",
+            "meu número não é mais (33) 98765-4321",
+        ),
+        (
+            "es",
+            "no es más nueve uno dos tres cuatro cinco seis siete ocho",
+            "no es más 912 34 56 78",
+        ),
+        ("es", "tengo más 5 años", "tengo más 5 años"),
+        # Not with a mark on the word, nor after a figure (a sum) (#1273 audit).
+        (
+            "es",
+            "más, treinta y cuatro seis uno dos tres cuatro cinco seis siete ocho",
+            "más, 34 612345678",
+        ),
+        (
+            "es",
+            "dos más treinta y cuatro seis uno dos tres cuatro cinco seis siete ocho",
+            "2 más 34 612345678",
+        ),
+        # Only before a country-code group: "mas" (but) before a local number
+        # (#1274).
+        (
+            "es",
+            "llámame, mas seis uno dos tres cuatro cinco seis siete ocho es el fijo",
+            "llámame, mas 612 34 56 78 es el fijo",
+        ),
+        (
+            "it",
+            "più tre tre tre uno due tre quattro cinque sei sette",
+            "più 333 123 4567",
+        ),
+    ],
+)
+def test_phone_native_plus_word(lang, text, expected):
+    assert words2num_sentence(text, lang=lang, phone=True) == expected

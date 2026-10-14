@@ -6,6 +6,10 @@ follows [Semantic Versioning](https://semver.org/) and uses
 
 ## [Unreleased]
 
+### Fixed
+
+- `phone=True`: es "más", it "più", pt "mais" are the spoken "+" before a country code ("más treinta y cuatro seis uno dos …" is "+34 612 34 56 78", was "más 34 612345678"), but only when the digits make an international number and no national one: these words also mean "more" and "no longer" ("no es más 912 34 56 78", pt_BR "não é mais (33) 98765-4321" keep the local reading) (#941, #1274).
+
 ## [0.4.4] — 2026-10-14
 
 ### Fixed

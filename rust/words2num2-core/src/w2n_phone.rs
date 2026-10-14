@@ -68,6 +68,8 @@ fn regions(lang: &str, region: Option<&str>) -> Vec<Id> {
 /// A run of digit groups at token `i`.
 struct Run {
     plus: bool,
+    /// Opened by a word that also means "more" (es "más", it "più", pt "mais").
+    native: bool,
     digits: String,
     taken: usize,
     trail: String,
@@ -77,9 +79,26 @@ struct Run {
 }
 
 /// `commas`: may the run cross a comma between groups?
-fn run_at(toks: &[&str], i: usize, commas: bool) -> Option<Run> {
+fn run_at(toks: &[&str], i: usize, commas: bool, base: &str) -> Option<Run> {
     let first = split_trail(toks.get(i)?).0.to_lowercase();
-    let word_plus = first == "plus" || first == "+";
+    // The word speakers say for "+": es "más", it "più", pt "mais" (#941).
+    let native = match base {
+        "es" => matches!(first.as_str(), "más" | "mas"),
+        "it" => matches!(first.as_str(), "più" | "piu"),
+        "pt" => first == "mais",
+        _ => false,
+    };
+    // ... only before a group the size of a country code: "mas 612345678"
+    // is "but" before a local number (#1274).
+    // A mark on the word ("más, treinta …") or a figure before it ("dos más
+    // treinta …", a sum) is no "+" (#1273 audit).
+    let native = native
+        && split_trail(toks[i]).1.is_empty()
+        && !(i > 0 && split_trail(toks[i - 1]).0.bytes().all(|b| b.is_ascii_digit()) && !split_trail(toks[i - 1]).0.is_empty())
+        && toks
+            .get(i + 1)
+            .is_some_and(|t| (1..=3).contains(&split_trail(t).0.len()) && split_trail(t).0.bytes().all(|b| b.is_ascii_digit()));
+    let word_plus = first == "plus" || first == "+" || native;
     let mut k = i + usize::from(word_plus);
     let mut plus = word_plus;
     let mut digits = String::new();
@@ -114,7 +133,7 @@ fn run_at(toks: &[&str], i: usize, commas: bool) -> Option<Run> {
     if segs.last() == Some(&0) {
         segs.pop();
     }
-    (!digits.is_empty()).then_some(Run { plus, digits, taken: k - i, trail, segs })
+    (!digits.is_empty()).then_some(Run { plus, native: native && !(first == "plus" || first == "+"), digits, taken: k - i, trail, segs })
 }
 
 fn only_digits(s: &str) -> String {
@@ -159,6 +178,7 @@ fn date_shape(toks: &[&str]) -> bool {
 /// writes it. A run no numbering plan knows comes back unchanged.
 pub fn fold_phones(text: &str, lang: &str, region: Option<&str>) -> String {
     let candidates = regions(lang, region);
+    let base = lang.split(['_', '-']).next().unwrap_or(lang).to_lowercase();
     let toks: Vec<&str> = text.split(' ').collect();
     let mut out: Vec<String> = Vec::with_capacity(toks.len());
     let mut i = 0;
@@ -172,13 +192,26 @@ pub fn fold_phones(text: &str, lang: &str, region: Option<&str>) -> String {
         // A comma joins groups as before (#939 stays open: a list and a
         // number dictated in comma groups cannot be told apart from the walked
         // figures alone); only not inside a list, where "+" still joins.
-        let run = run_at(&toks, i, !in_list);
+        let run = run_at(&toks, i, !in_list, &base);
+        // es "más", it "più", pt "mais" also mean "more", "no longer", "once
+        // more": they are the "+" only when the digits make an international
+        // number and no national one ("no es más 912 34 56 78", "não é mais
+        // (33) 98765-4321" keep the local reading, #1273 audit).
+        if run.as_ref().is_some_and(|r| r.native) {
+            let r = run.as_ref().unwrap();
+            let national = run_at(&toks, i + 1, !in_list, &base).and_then(|n| written(&n, &candidates));
+            if written(r, &candidates).is_none() || national.is_some() {
+                out.push(toks[i].to_string());
+                i += 1;
+                continue;
+            }
+        }
         // A run that crossed a comma and is no phone number is tried again
         // up to its first comma: a phone after a list figure still reads
         // ("call 2, 212 555 1234", #1179 audit).
         let run = run.and_then(|r| {
             if r.segs.len() > 1 && written(&r, &candidates).is_none() {
-                run_at(&toks, i, false)
+                run_at(&toks, i, false, &base)
             } else {
                 Some(r)
             }
