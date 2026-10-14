@@ -8,7 +8,7 @@ follows [Semantic Versioning](https://semver.org/) and uses
 
 ### Fixed
 
-- fi sentence mode: "sataa" (it rains) stays a word unless another number word is next to it ("huomenna sataa vettä" was "huomenna 100 vettä"; "viisi sataa" is still 500) (#835).
+- fi sentence mode: "sataa" (it rains) is 100 only after its multiplier 2..9 and never opens a number ("huomenna sataa vettä" was "huomenna 100 vettä", "sataa kolme päivää" "103 päivää", now "sataa 3 päivää"; "viisi sataa" is still 500) (#835).
 - hu/fi case endings: a char that lowercases to another byte length (U+212A KELVIN SIGN) in the ending no longer panics and aborts the interpreter; "öt\u212aor" is "5-\u212aor" (#851). Only the ending is lowercased now, so a stem holding such a char also peels: tr "İKİDE" is "2'DE", hu "KETTŐKOR" "2-KOR" (were left as words).
 - it: the tens and "cento" elided before a vowel read ("vent'anni" is "20 anni", "trent’anni fa" "30 anni fa", "cent'anni" "100 anni", also in a compound: "duecent'anni" "200 anni", "centovent'anni" "120 anni"; were left as words) (#918, #1250).
 - gl and es percent phrase: gl "trinta por cento" keeps "cento" as the percent word ("30 por cento", was "30 por 100"), and the es set phrase "cien por cien" (100 %) is "100 por cien" (was "100 por 100") where it ends or before "de"; elsewhere "por cien" stays "by a hundred" ("multiplica cinco por cien" is "multiplica 5 por 100", "cien por cien metros" "100 por 100 metros") (#863).

@@ -3494,9 +3494,6 @@ fn homograph_words(resolved: &str) -> &'static str {
         // семью: 7 and "family", сорока: 40 and "magpie" (#433).
         "ru" => "семью сорока",
         "uk" => "сорока",
-        // fi "sataa": the partitive of 100 inside a number ("kaksi sataa"),
-        // alone the verb "it rains" (#835).
-        "fi" => "sataa",
         _ => "",
     }
 }
@@ -4738,7 +4735,12 @@ fn words2num_sentence_walk(
         let head_is_oh = en_grammar && matches!(head.as_str(), "oh" | "o");
         // Nor, in a script written without spaces, does a piece opening on a
         // glued mark ("，五" of "二十，五"): the mark would be lost (#1028).
-        let starts = starts_run(&converter, &head, decimal_heads)
+        // fi "sataa" is 100 only after its multiplier ("kaksi sataa"; the
+        // renderer glues it: "kaksisataa"); a run never opens on it, where it
+        // is the verb "it rains" ("sataa kolme päivää", #835, #1252 audit).
+        let fi_sataa = resolved.split(['_', '-']).next() == Some("fi") && crate::normalize(&head) == "sataa";
+        let starts = !fi_sataa
+            && starts_run(&converter, &head, decimal_heads)
             && !(unspaced_script(&resolved) && piece.trim_start_matches(is_format_char).starts_with(tokens::is_trailing_punct))
             && !(head_is_oh && !(en_cardinal && en_digit_run(&parts, i).is_some()));
         // kn "ನೂರ", he "שני", mn "дөчин": a number only with what follows, so it
