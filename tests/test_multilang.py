@@ -1393,6 +1393,9 @@ def test_phone_native_plus_word(lang, text, expected):
         ("eo", "du dek naŭ", "29"),
         ("bg", "седем десет и осем", "78"),
         ("lv", "divdesmit trīs", "23"),
+        # With a scale after it (#1280 audit).
+        ("hr", "tri deset pet tisuća", "35000"),
+        ("eo", "du dek unu milionoj", "21000000"),
     ],
 )
 def test_spaced_tens_word(lang, text, expected):

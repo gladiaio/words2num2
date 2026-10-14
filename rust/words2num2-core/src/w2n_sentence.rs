@@ -1686,8 +1686,18 @@ fn base_convert_as_written(lang: &str, norm: &str, ordinal: bool) -> Result<W2nV
                 }
                 // Only the morpheme glued, the renderer's own spaces kept:
                 // et "kaks kümmend kolm" is "kakskümmend kolm" (#983).
-                if let Some(v) = morpheme_glued(lang, &norm).and_then(|g| crate::lookup_norm(lang, &g, false, &[]).ok().flatten()) {
-                    return Ok(W2nValue::Int(BigInt::from(v)));
+                if let Some(g) = morpheme_glued(lang, &norm) {
+                    if let Some(v) = crate::lookup_norm(lang, &g, false, &[]).ok().flatten() {
+                        return Ok(W2nValue::Int(BigInt::from(v)));
+                    }
+                    // With a scale after it: hr "tri deset pet tisuća" is
+                    // "trideset pet tisuća", kept when that is the
+                    // renderer's spelling (#1280 audit).
+                    if let Some(v) = crate::parse_scaled_norm(lang, &g) {
+                        if lexicon::renders_as(lang, &BigInt::from(v), &g) {
+                            return Ok(W2nValue::Int(BigInt::from(v)));
+                        }
+                    }
                 }
                 // Beyond the table: tr writes "üç yüz bin" spaced where
                 // num2words2 glues "üçyüzbin" (300000). Kept only when the
