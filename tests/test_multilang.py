@@ -830,7 +830,27 @@ def test_lo_billion_sentence():
         ("en", "one or two thousand people", "1000 or 2000 people"),
         ("de", "ein oder zwei Millionen", "1000000 oder 2000000"),
         ("es", "(cinco o seis mil)", "(5000 o 6000)"),
+        # #1227: A ending a longer number is not shared.
+        ("en", "one point two or three million people", "1.2 or 3000000 people"),
+        ("es", "treinta y cinco o seis mil", "35 o 6000"),
+        # #1228 / F4: B must read with the scale and stay below 10x A.
+        ("es", "cinco o seiscientos mil", "5 o 600000"),
+        ("en", "two or thirty thousand", "2 or 30000"),
+        # #1229: comma list led by a digit item.
+        ("en", "5, six or seven thousand", "5, 6 or 7000"),
+        # fr feminine article counts as one.
+        ("fr", "une ou deux mille personnes", "1000 ou 2000 personnes"),
+        # A clause conjunction before A does not join a number.
+        ("es", "Tenía 2 o 3000 pesos y cinco o seis mil", "Tenía 2 o 3000 pesos y 5000 o 6000"),
     ],
 )
 def test_shared_scale_range(lang, text, expected):
     assert words2num_sentence(text, lang=lang) == expected
+
+
+
+def test_shared_scale_keeps_input_private_use_chars():
+    # #1231: input already holding U+E000 keeps it; no mark is added or lost.
+    out = words2num_sentence("icon \ue000 between five and six thousand", lang="en")
+    assert out.count("\ue000") == 1
+    assert "6000" in out
