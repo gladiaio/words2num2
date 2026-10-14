@@ -1015,3 +1015,34 @@ def test_es_many_con_fails_fast():
 )
 def test_percent_phrase_gl_es(lang, text, expected):
     assert words2num_sentence(text, lang=lang) == expected
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        # it tens and "cento" elided before a vowel (#918).
+        ("Ho compiuto vent'anni ieri", "Ho compiuto 20 anni ieri"),
+        ("trent'anni fa", "30 anni fa"),
+        ("cent'anni di solitudine", "100 anni di solitudine"),
+        ("ho vent’anni", "ho 20 anni"),
+        ("cinquant'anni.", "50 anni."),
+        ("(trent'anni)", "(30 anni)"),
+        # Closed compounds ending in an elided ten or "cento" (#1250).
+        ("duecent'anni fa", "200 anni fa"),
+        ("centovent'anni", "120 anni"),
+        ("duemilavent'anni", "2020 anni"),
+        ("accent'acuto", "accent'acuto"),
+        # "per cento" is the percent phrase; elided it is a hundred.
+        ("per cent'anni", "per 100 anni"),
+        ("(per cent'anni)", "(per 100 anni)"),
+        ("per\u02bc cent'anni", "per\u02bc 100 anni"),
+        # Other apostrophes and blanks (#1249 audit).
+        ("ho vent\u02bcanni", "ho 20 anni"),
+        ("trent'anni\tfa", "30 anni\tfa"),
+        # Not elision: a clitic before a number, a number word after.
+        ("dell'otto", "dell'8"),
+        ("l'anno", "l'anno"),
+    ],
+)
+def test_it_elided_tens(text, expected):
+    assert words2num_sentence(text, lang="it") == expected

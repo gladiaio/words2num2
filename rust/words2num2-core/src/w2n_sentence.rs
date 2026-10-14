@@ -4462,6 +4462,78 @@ pub(crate) fn share_scale_words(text: &str, lang: &str) -> Option<String> {
     Some(out)
 }
 
+/// it "vent'anni", "trent’anni", "cent'anni" -> "venti anni", "trenta
+/// anni", "cento anni": standard Italian drops the last vowel of the tens and
+/// of "cento" before a vowel, which the walk never reads (#918). None when the
+/// text holds none.
+pub(crate) fn it_elided_tens(text: &str, lang: &str) -> Option<String> {
+    // The apostrophes in use: ASCII, the typographic ones, the modifier letter
+    // of some keyboards and OCR (#1249 audit).
+    const QUOTES: [char; 4] = ['\'', '\u{2019}', '\u{2018}', '\u{02BC}'];
+    if lang.split(['_', '-']).next() != Some("it") || !text.contains(QUOTES) {
+        return None;
+    }
+    const STEMS: [(&str, &str); 9] = [
+        ("vent", "venti"),
+        ("trent", "trenta"),
+        ("quarant", "quaranta"),
+        ("cinquant", "cinquanta"),
+        ("sessant", "sessanta"),
+        ("settant", "settanta"),
+        ("ottant", "ottanta"),
+        ("novant", "novanta"),
+        ("cent", "cento"),
+    ];
+    let mut changed = false;
+    let mut out = String::with_capacity(text.len() + 8);
+    let mut prev = String::new();
+    // Word by word, any run of blanks kept as written.
+    let mut rest_text = text;
+    while !rest_text.is_empty() {
+        let blank = rest_text.len() - rest_text.trim_start().len();
+        out.push_str(&rest_text[..blank]);
+        rest_text = &rest_text[blank..];
+        let end = rest_text.find(char::is_whitespace).unwrap_or(rest_text.len());
+        let tok = &rest_text[..end];
+        rest_text = &rest_text[end..];
+        let word = tok.trim_start_matches(|c: char| is_opener(c) || QUOTES.contains(&c));
+        let opener = &tok[..tok.len() - word.len()];
+        let rewritten = word.find(QUOTES).and_then(|q| {
+            let (head, after) = (&word[..q], &word[q + word[q..].chars().next().map_or(1, char::len_utf8)..]);
+            let lower = head.to_lowercase();
+            let starts_vowel = after.chars().next().is_some_and(|c| "aeiouàèéìòùhAEIOUÀÈÉÌÒÙH".contains(c));
+            // Not before a number word: "novant'otto" is no "90 8".
+            if !starts_vowel
+                || !after.trim_end_matches(|c: char| !c.is_alphanumeric()).chars().all(char::is_alphabetic)
+                || matches!(crate::lookup_norm(lang, &crate::normalize(rstrip_punct(after)), false, &[]), Ok(Some(_)))
+            {
+                return None;
+            }
+            // A closed compound ending in one ("duecent'", "centovent'",
+            // "duemilavent'") restores the same vowel, kept when the table
+            // reads the whole word (#1250).
+            let full = STEMS.iter().find_map(|(stem, full)| {
+                let head = lower.strip_suffix(stem)?;
+                let whole = format!("{head}{full}");
+                (head.is_empty() || matches!(crate::lookup_norm(lang, &crate::normalize(&whole), false, &[]), Ok(Some(_)))).then_some(whole)
+            })?;
+            // "per cento" is the percent phrase, which is never elided: "per
+            // cent'anni" is a hundred years (#1249 audit).
+            let full = if full == "cento" && prev == "per" { "100".to_string() } else { full };
+            Some(format!("{opener}{full} {after}"))
+        });
+        match rewritten {
+            Some(t) => {
+                changed = true;
+                out.push_str(&t);
+            }
+            None => out.push_str(tok),
+        }
+        prev = rstrip_punct(tok.trim_start_matches(is_opener)).trim_end_matches(QUOTES).to_lowercase();
+    }
+    changed.then_some(out)
+}
+
 /// es "diez y seis" -> "dieciséis" (16..19, #866), or None when the text
 /// holds none. Not in a list after "<number>," ("cinco, diez y seis" is two
 /// numbers), not before "minutos" (a clock time), and only with a mark after
@@ -4568,6 +4640,16 @@ fn words2num_sentence_folded(
         Some(t) => {
             teens = t;
             teens.as_str()
+        }
+        None => sentence,
+    };
+    // it "vent'anni" -> "venti anni": the tens and "cento" elided before a
+    // vowel (#918).
+    let elided;
+    let sentence = match it_elided_tens(sentence, &resolved_lang).filter(|_| matches!(to, "cardinal" | "year" | "currency")) {
+        Some(t) => {
+            elided = t;
+            elided.as_str()
         }
         None => sentence,
     };
