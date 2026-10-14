@@ -4319,7 +4319,7 @@ pub(crate) fn share_scale_words(text: &str, lang: &str) -> Option<String> {
         "fr" => (&["ou"], &["et"], &["entre"]),
         "it" => (&["o", "oppure"], &["e"], &["tra", "fra"]),
         "ca" => (&["o"], &["i"], &["entre"]),
-        "de" => (&["oder"], &["und"], &["zwischen"]),
+        "de" => (&["oder", "bis"], &["und"], &["zwischen"]),
         "nl" => (&["of"], &["en"], &["tussen"]),
         _ => return None,
     };
@@ -4375,6 +4375,7 @@ pub(crate) fn share_scale_words(text: &str, lang: &str) -> Option<String> {
     // is rebuilt once at the end (#1230).
     let mut after: Vec<Vec<String>> = vec![Vec::new(); toks.len()];
     let mut mark: Vec<bool> = vec![false; toks.len()];
+    let mut unhyphen: Vec<bool> = vec![false; toks.len()];
     // The range mark is only safe when the input holds none (#1231).
     let marks_ok = !text.contains(SHARE_MARK);
     let mut changed = false;
@@ -4394,12 +4395,17 @@ pub(crate) fn share_scale_words(text: &str, lang: &str) -> Option<String> {
     for p in (1..nb.len().saturating_sub(1)).rev() {
         let (ka, k, kb) = (nb[p - 1], nb[p], nb[p + 1]);
         let conn = core(toks[k]);
+        // de "zwei- oder dreitausend": the suspended hyphen (Ergänzungsstrich)
+        // marks A as sharing B's ending; it is dropped once shared (#1262).
+        let suspended = base == "de" && toks[ka].ends_with(['-', '\u{2010}', '\u{2011}']);
         let is_or = or_words.contains(&conn.as_str());
-        let is_and = marks_ok && and_words.contains(&conn.as_str()) && p >= 2 && range_cues.contains(&core(toks[nb[p - 2]]).as_str());
+        let is_and = marks_ok
+            && and_words.contains(&conn.as_str())
+            && (suspended || p >= 2 && range_cues.contains(&core(toks[nb[p - 2]]).as_str()));
         if !(is_or || is_and) || !toks[k].chars().all(char::is_alphabetic) {
             continue;
         }
-        let a_tok = toks[ka].trim_start_matches(is_opener);
+        let a_tok = toks[ka].trim_start_matches(is_opener).trim_end_matches(['-', '\u{2010}', '\u{2011}']);
         // de "dreitausend", it "tremila", nl "drieduizend": B glued to its
         // thousand (#1221). The scale shared is the thousand word.
         let glued = (|| {
@@ -4418,7 +4424,7 @@ pub(crate) fn share_scale_words(text: &str, lang: &str) -> Option<String> {
         if a >= b || b >= 10 * a {
             continue;
         }
-        let lead_clean = a_tok.len() == toks[ka].len();
+        let lead_clean = a_tok.len() + if suspended { toks[ka].chars().last().map_or(0, char::len_utf8) } else { 0 } == toks[ka].len();
         if p >= 2 && !is_and && lead_clean {
             // A list mark or closer standing alone ("cinq\u{202f}; six", "5 ,
             // six") goes with the word before it (#1242 audit L7); an opener,
@@ -4561,6 +4567,9 @@ pub(crate) fn share_scale_words(text: &str, lang: &str) -> Option<String> {
         }
         after[ka] = words;
         mark[k] = is_and;
+        if suspended {
+            unhyphen[ka] = true;
+        }
         changed = true;
     }
     if !changed {
@@ -4573,7 +4582,8 @@ pub(crate) fn share_scale_words(text: &str, lang: &str) -> Option<String> {
         if mark[i] {
             out.push(SHARE_MARK);
         }
-        out.push_str(&text[a..b]);
+        let tok = &text[a..b];
+        out.push_str(if unhyphen[i] { tok.trim_end_matches(['-', '\u{2010}', '\u{2011}']) } else { tok });
         for w in &after[i] {
             out.push(' ');
             out.push_str(w);

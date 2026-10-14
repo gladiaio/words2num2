@@ -1174,6 +1174,12 @@ def test_digit_run_before_multiplier(lang, text, expected):
         ("de", "zwei oder dreitausend Millionen", "2000000000 oder 3000000000"),
         ("de", "zwei oder dreitausend fünfhundert", "2 oder 3500"),
         ("it", "due o tremila e cinquecento", "2 o 3500"),
+        # de suspended hyphen and "bis" (#1262).
+        ("de", "zwei- oder dreitausend Menschen", "2000 oder 3000 Menschen"),
+        ("de", "zwei- bis dreitausend Euro", "2000 bis 3000 Euro"),
+        ("de", "zwei- und dreitausend", "2000 und 3000"),
+        ("de", "von zwei bis dreitausend", "von 2000 bis 3000"),
+        ("de", "zwei und dreitausend", "2 und 3000"),
     ],
 )
 def test_shared_scale_closed_compound(lang, text, expected):
