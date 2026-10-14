@@ -541,6 +541,20 @@ fn suffixes(lang: &str) -> &'static [&'static str] {
     }
 }
 
+/// Does the tr ending `suf` agree in vowel backness with the last vowel of
+/// `stem`? Front e i ö ü, back a ı o u; an ending with no vowel agrees.
+fn tr_harmony(stem: &str, suf: &str) -> bool {
+    let class = |c: char| match c {
+        'e' | 'i' | 'ö' | 'ü' | 'E' | 'İ' | 'Ö' | 'Ü' => Some(true),
+        'a' | 'ı' | 'o' | 'u' | 'A' | 'I' | 'O' | 'U' => Some(false),
+        _ => None,
+    };
+    match (stem.chars().rev().find_map(class), suf.chars().find_map(class)) {
+        (Some(s), Some(e)) => s == e,
+        _ => true,
+    }
+}
+
 /// The separator a language writes between figures and a case ending.
 fn suffix_sep(lang: &str) -> &'static str {
     match lang {
@@ -587,6 +601,11 @@ fn suffix_cut(
             continue;
         };
         if stem.chars().count() < 2 {
+            continue;
+        }
+        // tr endings follow the stem's vowel harmony: "bine" is the dative of
+        // "bin" (1000), "bina" is "building" (#826).
+        if lang == "tr" && !tr_harmony(stem, suf) {
             continue;
         }
         let norm = crate::normalize(stem);
