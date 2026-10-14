@@ -978,20 +978,6 @@ def test_it_elided_tens(text, expected):
 
 
 @pytest.mark.parametrize(
-<<<<<<< HEAD
-    "text, expected",
-    [
-        # fi "sataa" alone is "it rains"; next to a number word it is 100 (#835).
-        ("huomenna sataa vettä", "huomenna sataa vettä"),
-        ("alkoi sataa rakeita", "alkoi sataa rakeita"),
-        ("viisi sataa", "500"),
-        ("kaksisataa euroa", "200 euroa"),
-        ("sataa kolme", "103"),
-    ],
-)
-def test_fi_sataa_homograph(text, expected):
-    assert words2num_sentence(text, lang="fi") == expected
-=======
     "lang, text, expected",
     [
         # A char that lowercases to another byte length in a case ending
@@ -1005,4 +991,18 @@ def test_fi_sataa_homograph(text, expected):
 )
 def test_suffix_cut_char_boundary(lang, text, expected):
     assert words2num_sentence(text, lang=lang) == expected
->>>>>>> origin/main
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        # fi "sataa" alone is "it rains"; next to a number word it is 100 (#835).
+        ("huomenna sataa vettä", "huomenna sataa vettä"),
+        ("alkoi sataa rakeita", "alkoi sataa rakeita"),
+        ("viisi sataa", "500"),
+        ("kaksisataa euroa", "200 euroa"),
+        ("sataa kolme", "103"),
+    ],
+)
+def test_fi_sataa_homograph(text, expected):
+    assert words2num_sentence(text, lang="fi") == expected
