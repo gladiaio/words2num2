@@ -1150,3 +1150,21 @@ def test_tr_vowel_harmony(text, expected):
 )
 def test_digit_run_before_multiplier(lang, text, expected):
     assert words2num_sentence(text, lang=lang) == expected
+
+
+@pytest.mark.parametrize(
+    "lang, text, expected",
+    [
+        # de/it/nl write B glued to its thousand (#1221).
+        ("de", "zwei oder dreitausend Leute", "2000 oder 3000 Leute"),
+        ("de", "zwischen zwei und dreitausend", "zwischen 2000 und 3000"),
+        ("it", "due o tremila persone", "2000 o 3000 persone"),
+        ("nl", "twee of drieduizend mensen", "2000 of 3000 mensen"),
+        ("de", "zwei oder drei oder viertausend", "2000 oder 3000 oder 4000"),
+        # Not a compound with more after the thousand, nor a falling pair.
+        ("de", "zwei oder dreitausendfünfhundert", "2 oder 3500"),
+        ("de", "zwanzig oder dreitausend", "20 oder 3000"),
+    ],
+)
+def test_shared_scale_closed_compound(lang, text, expected):
+    assert words2num_sentence(text, lang=lang) == expected
