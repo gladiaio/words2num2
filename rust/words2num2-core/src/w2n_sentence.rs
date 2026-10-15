@@ -546,6 +546,10 @@ fn continues_punct_led(
     for _ in 0..5 {
         let Some(p) = (0..k).rev().find(|&q| !blank(&parts[q]) && !pause(&parts[q])) else { break };
         let raw = &parts[p];
+        // A markup tag is no word ("<|0.00|>three", #910).
+        if tokens::is_markup(raw) {
+            break;
+        }
         // Format characters alone in front are no mark ("\u{200b}a").
         if raw.trim_start_matches(is_format_char).starts_with(|c: char| !c.is_alphanumeric()) {
             found = Some(p);

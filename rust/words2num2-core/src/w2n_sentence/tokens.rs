@@ -143,9 +143,80 @@ pub(crate) fn has_interior_punct(part: &str) -> bool {
 /// Is `part` punctuation split off a word (or a token made only of
 /// punctuation)? It never belongs to a number run.
 pub(super) fn is_punct_part(part: &str) -> bool {
-    !part.is_empty()
+    is_markup(part)
+        || !part.is_empty()
         && part.chars().any(|c| !is_format(c))
         && part.chars().all(|c| is_leading_punct(c) || is_trailing_punct(c) || is_leading_clause_mark(c) || is_format(c))
+}
+
+/// Subtitle and markup tag names (WebVTT cues, the HTML subset SRT players
+/// render).
+const MARKUP_TAGS: &[&str] =
+    &["b", "i", "u", "s", "c", "v", "lang", "ruby", "rt", "font", "span", "em", "strong", "br", "p", "sub", "sup"];
+
+/// The length in chars of the tag opening `chars[i..]`, if one does: a
+/// decoder token ("<|2.40|>", "<|en|>"), a WebVTT timestamp
+/// ("<00:01.500>"), or a known tag ("<i>", "</i>", "<v Bob>", "<c.red>",
+/// "<br/>"). Anything else ("<six>", "a < b") is text.
+fn markup_len(chars: &[char], i: usize) -> Option<usize> {
+    const MAX: usize = 128;
+    if chars.get(i) != Some(&'<') {
+        return None;
+    }
+    let close = chars[i + 1..].iter().take(MAX).position(|&c| c == '>' || c == '<' || c == '\n')?;
+    let end = i + 1 + close;
+    if chars[end] != '>' {
+        return None;
+    }
+    let inner = &chars[i + 1..end];
+    let len = end + 1 - i;
+    // "<|2.40|>": no blank inside.
+    if inner.len() >= 2 && inner[0] == '|' && inner[inner.len() - 1] == '|' {
+        return (!inner.iter().any(|&c| super::py_is_space(c))).then_some(len);
+    }
+    // "<00:01.500>", "<00:00:01.500>".
+    if inner.contains(&':') && inner.iter().all(|&c| c.is_ascii_digit() || c == ':' || c == '.') && inner[0].is_ascii_digit() {
+        return Some(len);
+    }
+    let body = inner.strip_prefix(&['/']).unwrap_or(inner);
+    let name_end = body.iter().position(|c| !c.is_ascii_alphanumeric()).unwrap_or(body.len());
+    let name: String = body[..name_end].iter().collect::<String>().to_ascii_lowercase();
+    let rest = &body[name_end..];
+    (MARKUP_TAGS.contains(&name.as_str()) && rest.first().is_none_or(|&c| c == '.' || c == '/' || super::py_is_space(c)))
+        .then_some(len)
+}
+
+/// Is `part` a whole markup tag ([`markup_len`])?
+pub(super) fn is_markup(part: &str) -> bool {
+    let chars: Vec<char> = part.chars().collect();
+    markup_len(&chars, 0) == Some(chars.len())
+}
+
+/// [`super::tokenize`] with each markup tag a token of its own, blanks
+/// inside it included ("<v Bob>").
+fn tokenize_markup(sentence: &str) -> Vec<String> {
+    if !sentence.contains('<') {
+        return super::tokenize(sentence);
+    }
+    let chars: Vec<char> = sentence.chars().collect();
+    let mut out = Vec::new();
+    let (mut start, mut i) = (0, 0);
+    while i < chars.len() {
+        if let Some(n) = markup_len(&chars, i) {
+            if start < i {
+                out.extend(super::tokenize(&chars[start..i].iter().collect::<String>()));
+            }
+            out.push(chars[i..i + n].iter().collect());
+            i += n;
+            start = i;
+        } else {
+            i += 1;
+        }
+    }
+    if start < chars.len() {
+        out.extend(super::tokenize(&chars[start..].iter().collect::<String>()));
+    }
+    out
 }
 
 /// An invisible format character (ZWSP, ZWNJ, ZWJ, word joiner, BOM, soft
@@ -166,7 +237,15 @@ pub(super) fn split_parts(
     // Was the previous word a number word? A suffixed homograph ("yüzde",
     // percent) is only peeled inside a number.
     let mut prev_number = false;
-    for tok in super::tokenize(sentence) {
+    for tok in tokenize_markup(sentence) {
+        // A subtitle or decoder tag is a mark of its own: "four.<|2.40|>",
+        // "<v Bob>twenty", "five</i>" leave the number words whole (#910).
+        if is_markup(&tok) {
+            parts.push(tok);
+            glue.push(Glue::Free);
+            prev_number = false;
+            continue;
+        }
         if super::py_str_isspace(&tok) {
             parts.push(tok);
             glue.push(Glue::Free);

@@ -1471,3 +1471,44 @@ def test_spaced_tens_word(lang, text, expected):
 )
 def test_my_counter_particle(text, expected):
     assert words2num_sentence(text, lang="my") == expected
+
+
+@pytest.mark.parametrize(
+    "lang,text,expected",
+    [
+        # Whisper timestamp tokens and WebVTT / SRT tags glued to a number
+        # word are marks of their own: the number reads whole (#910).
+        (
+            "en",
+            "<|0.00|> it was nineteen eighty four.<|2.40|>",
+            "<|0.00|> it was 1984.<|2.40|>",
+        ),
+        (
+            "en",
+            "<|0.00|> I paid twenty five<|2.40|><|2.40|> dollars",
+            "<|0.00|> I paid 25<|2.40|><|2.40|> dollars",
+        ),
+        ("ru", "двадцать пять.<|2.40|>", "25.<|2.40|>"),
+        ("ar", "خمسة وعشرون<|2.40|>", "25<|2.40|>"),
+        ("hi", "पच्चीस सौ<|2.40|>", "2500<|2.40|>"),
+        ("tr", "yirmi beş<|2.40|>", "25<|2.40|>"),
+        ("en", "twenty five</i> people", "25</i> people"),
+        ("en", "<v Bob>twenty five people", "<v Bob>25 people"),
+        ("es", "<v Ana>dos mil veinticinco", "<v Ana>2025"),
+        ("de", "<v Anna>zwanzig tausend Euro", "<v Anna>20000 Euro"),
+        ("fr", "<v Marie>vingt cinq personnes", "<v Marie>25 personnes"),
+        ("pl", "<v Jan>dwadzieścia pięć osób", "<v Jan>25 osób"),
+        ("en", "<i>twenty five</i>", "<i>25</i>"),
+        ("en", "<00:01.500>twenty five", "<00:01.500>25"),
+        ("en", "<c.red>three</c>", "<c.red>3</c>"),
+        # A tag holding digits is no figure glued to the word.
+        ("en", "<|0.00|>three<|2.40|>", "<|0.00|>3<|2.40|>"),
+        # A tag ends a number: two cues, two numbers.
+        ("en", "twenty<br/>five", "20<br/>5"),
+        # Angle brackets that are no tag stay text.
+        ("en", "five <six> seven", "5 <six> 7"),
+        ("en", "(5)three", "(5)three"),
+    ],
+)
+def test_glued_markup_tags(lang, text, expected):
+    assert words2num_sentence(text, lang=lang) == expected

@@ -8,6 +8,7 @@ follows [Semantic Versioning](https://semver.org/) and uses
 
 ### Fixed
 
+- all: a Whisper timestamp token or a WebVTT / SRT tag glued to a number word no longer cuts the number: "nineteen eighty four.<|2.40|>" is "1984.<|2.40|>" (was "1980 four.<|2.40|>"), "<v Bob>twenty five" is "<v Bob>25" (#910).
 - my: years and months with a particle on the month read as years and months ("သုံး နှစ် လေး လပါ" is "3 နှစ် 4 လပါ", was "324 လပါ"; "ငါး နှစ် နှစ် လပါ" is "5 နှစ် 2 လပါ") (#1285, #1296).
 
 ## [0.4.8] — 2026-10-15
