@@ -2826,7 +2826,13 @@ fn my_years_shape(converter: &Converter, resolved: &str, parts: &[String], k: us
                 .any(|u| crate::normalize(u) == t)
         })
     };
-    let three = unmarked(2) && !unit(w(3)) && my_counter(w(3).map(|t| rstrip_punct(t).to_lowercase()).as_deref());
+    // The month keeps its particles here: "N နှစ် M လပါ" is years and months
+    // (#1285); "လ" is bare-only only for "နှစ်" + counter.
+    let counter_any = |t: Option<&str>| {
+        let t = t.map(|t| rstrip_punct(t).to_lowercase());
+        my_counter(t.as_deref()) || t.is_some_and(|t| my_counter_head(&t) == crate::normalize("လ"))
+    };
+    let three = unmarked(2) && !unit(w(3)) && counter_any(w(3));
     // Not "<d> နှစ် သုည နှစ်": the walker reads no "သုည နှစ်" as years. Nor
     // when a number goes on after the last နှစ် ("… နှစ် ဒသမ ငါး", "… နှစ်
     // ထောင်"): it is a digit there (#1042).
