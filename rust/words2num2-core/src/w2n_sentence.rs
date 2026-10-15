@@ -4457,10 +4457,11 @@ fn read_through_inline(
             let k = read[s..run_end]
                 .chars()
                 .fold(0usize, |n, c| n.saturating_mul(base).saturating_add(alphabet.iter().position(|&a| a == c).unwrap_or(0)));
-            // In order only: a mask before the last one found is no mask.
-            if ks.contains(&k) && last.is_none_or(|l| k > l) {
+            // In order only, each with its own blanks: a mask before the last
+            // one found, or sharing its blank, is no mask.
+            if ks.contains(&k) && last.is_none_or(|(l, end)| k > l && s - 1 >= end) {
                 places[k - ks.start] = Some((s - 1, run_end + 1));
-                last = Some(k);
+                last = Some((k, run_end + 1));
             }
         }
         places
