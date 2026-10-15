@@ -1538,6 +1538,57 @@ def test_glued_markup_tags_folds(lang, text, kwargs, expected):
     assert words2num_sentence(text, lang=lang, **kwargs) == expected
 
 
+@pytest.mark.parametrize(
+    "lang,text",
+    [
+        # An inline tag (a word timestamp, a style) inside a number cuts
+        # nothing: karaoke WebVTT puts one between every word, and the number
+        # stays as written, as before, rather than in wrong pieces.
+        ("en", "I paid twenty<00:00:01.500><c> five</c><00:00:01.900><c> dollars</c>"),
+        ("en", "in nineteen<00:00:01.500><c> eighty</c><00:00:01.900><c> four</c>"),
+        ("en", "<00:01.000>nineteen <00:01.400>eighty <00:01.800>four"),
+        ("en", "<c>twenty</c><c> five</c>"),
+        (
+            "en",
+            "one<00:00:01.000><c> thousand,</c><00:00:01.200><c> nine</c>"
+            "<00:00:01.400><c> hundred</c><00:00:01.600><c> and</c>"
+            "<00:00:01.800><c> eighty-four</c>",
+        ),
+        ("id", "dua<00:00:01.500><c> puluh</c><00:00:02.500><c> lima</c>"),
+        ("de", "<i>zwanzig</i>tausend"),
+        ("de", "zwanzig<00:01.500>tausend"),
+        ("en", "<i>twenty</i>-five"),
+        ("en", "twenty-<i>five</i>"),
+        # Not a tag: a clock time with no milliseconds, prose after a name.
+        ("en", "<12:30>three"),
+    ],
+)
+def test_inline_markup_inside_a_number(lang, text):
+    assert words2num_sentence(text, lang=lang) == text
+
+
+@pytest.mark.parametrize(
+    "lang,text,expected",
+    [
+        # One word per cue converts: no tag is inside it.
+        (
+            "en",
+            "<00:01.000>twenty-five <00:01.400>people",
+            "<00:01.000>25 <00:01.400>people",
+        ),
+        ("en", "<i love you> twenty five", "<i love you> 25"),
+        # "y" after the number is no connector into it.
+        (
+            "es",
+            "x <i>doce de marzo de dos mil veintiséis</i> y",
+            "x <i>12 de marzo de 2026</i> y",
+        ),
+    ],
+)
+def test_inline_markup_edges(lang, text, expected):
+    assert words2num_sentence(text, lang=lang) == expected
+
+
 def test_glued_markup_tags_check_lang():
     with pytest.raises(NotImplementedError):
         words2num_sentence("<i>", lang="xx")
