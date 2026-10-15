@@ -1456,6 +1456,7 @@ def test_spaced_tens_word(lang, text, expected):
         ("ငါးရာ နှစ် ပြားပါ", "502 ပြားပါ"),
         # Years and months with a particle on the month (#1285).
         ("သုံး နှစ် လေး လပါ", "3 နှစ် 4 လပါ"),
+        ("ငါး နှစ် နှစ် လပါ", "5 နှစ် 2 လပါ"),
         ("ငါးရာ နှစ် ကျပ်တယ်", "500 နှစ် ကျပ်တယ်"),
         # A unit with a particle stays a dictated number, as the bare unit (#1038).
         ("သုံး နှစ် လေး ကျပ်ပါ", "324 ကျပ်ပါ"),

@@ -6168,8 +6168,13 @@ fn words2num_sentence_walk(
                 && parts[..i].iter().rev().find(|t| !py_str_isspace(t)).is_some_and(|raw| {
                     !has_trailing_mark(raw) && !tokens::is_punct_part(raw) && rstrip_punct(raw) == raw.as_str()
                 })
-                // Not before a counter: "ငါးရာ နှစ် ကျပ်" (#1015).
-                && !(!has_trailing_mark(piece) && my_counter(next_word(&parts, i).as_deref()))
+                // Not before a counter: "ငါးရာ နှစ် ကျပ်" (#1015); right after a
+                // year, a month with its particles counts too ("ငါး နှစ်
+                // နှစ် လပါ", 5 years 2 months, #1296).
+                && !(!has_trailing_mark(piece)
+                    && (my_counter(next_word(&parts, i).as_deref())
+                        || (prev_word(&parts, i).is_some_and(|p| crate::normalize(&p) == crate::normalize("နှစ်"))
+                            && next_word(&parts, i).is_some_and(|n| my_counter_head(&n) == crate::normalize("လ")))))
             {
                 // my "ငါး နှစ်": the year after a number, no 2 (#876).
                 None
