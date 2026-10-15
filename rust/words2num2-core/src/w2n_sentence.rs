@@ -6224,8 +6224,13 @@ fn words2num_sentence_walk(
                 && !(!has_trailing_mark(piece)
                     && (my_counter(next_word(&parts, i).as_deref())
                         || (prev_word(&parts, i).is_some_and(|p| crate::normalize(&p) == crate::normalize("နှစ်"))
-                            && prev_word2(&parts, i)
-                                .is_some_and(|p| starts_run(&converter, &p, decimal_heads) || my_figure(&p))
+                            && prev_word_index(&parts, i).and_then(|k| prev_word_index(&parts, k)).is_some_and(|f| {
+                                let raw = &parts[f];
+                                !has_trailing_mark(raw)
+                                    && !tokens::is_punct_part(raw)
+                                    && rstrip_punct(raw) == raw.as_str()
+                                    && (starts_run(&converter, &raw.to_lowercase(), decimal_heads) || my_figure(raw))
+                            })
                             && next_word(&parts, i).is_some_and(|n| my_counter_head(&n) == crate::normalize("လ")))))
             {
                 // my "ငါး နှစ်": the year after a number, no 2 (#876).

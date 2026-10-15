@@ -1461,6 +1461,7 @@ def test_spaced_tens_word(lang, text, expected):
         # A lone "နှစ်" is the count, its year word kept (#1283).
         ("နှစ် နှစ် လကို စောင့်တယ်", "2 နှစ် လကို စောင့်တယ်"),
         ("ဒီ နှစ် နှစ် လပါ", "ဒီ 2 နှစ် လပါ"),
+        ("ငါး။ နှစ် နှစ် လပါ", "5။ 2 နှစ် လပါ"),
         ("ငါးရာ နှစ် ကျပ်တယ်", "500 နှစ် ကျပ်တယ်"),
         # A unit with a particle stays a dictated number, as the bare unit (#1038).
         ("သုံး နှစ် လေး ကျပ်ပါ", "324 ကျပ်ပါ"),
