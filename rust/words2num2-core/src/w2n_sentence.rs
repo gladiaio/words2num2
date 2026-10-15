@@ -1601,7 +1601,11 @@ fn my_counter(next: Option<&str>) -> bool {
     // Counters that are also everyday verb roots count only bare: with a
     // particle the word is the verb ("စုပါတယ်", saved; "ဆောင်ပါ", carry;
     // #1283 audit). "ကျပ်ပါ" (kyat) keeps the counter reading.
-    const VERB_ROOTS: &[&str] = &["စု", "ပတ်", "စီး", "ပွင့်", "ရက်", "ဆောင်", "ခါ", "ဖွဲ့", "လုံး", "ပြား", "ပါး", "ချောင်း"];
+    // Also nouns a case particle follows ("အိမ်ကို", home; "လကို", the moon).
+    // "ပြား" (pya) is a currency and keeps the counter reading, as "ကျပ်".
+    const VERB_ROOTS: &[&str] = &[
+        "စု", "ပတ်", "စီး", "ပွင့်", "ရက်", "ဆောင်", "ခါ", "ဖွဲ့", "လုံး", "ပါး", "ချောင်း", "ရွက်", "အုပ်", "အိမ်", "လ",
+    ];
     next.is_some_and(|w| {
         let head = my_counter_head(w);
         let bare = crate::normalize(w) == head;
