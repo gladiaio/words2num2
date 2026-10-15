@@ -1448,6 +1448,11 @@ def test_spaced_tens_word(lang, text, expected):
         ("ငါးရာ နှစ် ယောက်တွေ", "502 ယောက်တွေ"),
         ("ငါးရာ နှစ် ကျပ်ပါတယ်", "502 ကျပ်ပါတယ်"),
         ("ငါးရာ နှစ် ယောက်ပဲ", "502 ယောက်ပဲ"),
+        # A sentence ending right after the word makes a verb (#1283 audit).
+        ("ငါး နှစ် စုတယ်", "5 နှစ် စုတယ်"),
+        ("ငါးရာ နှစ် ကျပ်တယ်", "500 နှစ် ကျပ်တယ်"),
+        # A unit with a particle stays a dictated number, as the bare unit (#1038).
+        ("သုံး နှစ် လေး ကျပ်ပါ", "324 ကျပ်ပါ"),
         # "လ" (month) also opens "လာတယ်" (come): no counter.
         ("ငါးရာ နှစ် လာမယ်", "500 နှစ် လာမယ်"),
     ],
