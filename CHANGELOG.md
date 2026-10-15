@@ -6,6 +6,8 @@ follows [Semantic Versioning](https://semver.org/) and uses
 
 ## [Unreleased]
 
+## [0.4.8] — 2026-10-15
+
 ### Fixed
 
 - en, regressions of 0.4.7's spoken pairs (#1286), its prices and counts kept:
