@@ -4287,6 +4287,68 @@ fn fold_currency_half(text: &str, lang: &str, input: &str) -> String {
     out.join(" ")
 }
 
+/// en "at two fifty dollars" -> "at $2.50", not "at 2 $50": a spoken price,
+/// units then cents with no "and" or "point", read as one amount. The walk
+/// leaves the pair as two figures ("2 50 dollars": since 0.4.2 minutes before
+/// a currency name are no clock time); the figure gets ".50" before the
+/// currency pass renders it. Only a pair the input spelled out (units 1-99,
+/// cents 10-99) right before a plural main unit the pass renders with two
+/// decimals: "2 fifty dollars" as written, "two fifty dollar bills" (an
+/// adjective) and "yen" (no minor unit) stay.
+fn fold_spoken_price(text: &str, lang: &str, input: &str) -> String {
+    let base = lang.split(['_', '-']).next().unwrap_or(lang).to_lowercase();
+    if base != "en" {
+        return text.to_string();
+    }
+    let core = |t: &str| crate::normalize(t.trim_end_matches(|c: char| !c.is_alphanumeric()));
+    let currency = |t: &str| !t.is_empty() && crate::w2n_currency::is_currency_word(lang, &core(t));
+    // Each currency word of the input, in order: was it a plural main unit
+    // after spelled-out number words, with no figure written before them?
+    let words: Vec<&str> = input.split_whitespace().collect();
+    let number_word = |w: &str| {
+        let c = core(w);
+        !c.is_empty()
+            && !w.chars().any(|ch| ch.is_numeric())
+            && c.split('-').all(|part| matches!(crate::lookup_norm(&base, part, false, &[]), Ok(Some(v)) if (0..100).contains(&v)))
+    };
+    let spelled: Vec<bool> = (0..words.len())
+        .filter(|&k| currency(words[k]))
+        .map(|k| {
+            let span = (0..k).rev().take_while(|&j| number_word(words[j])).count();
+            let before_ok = k > span && !words[k - span - 1].chars().any(|c| c.is_numeric()) || k == span;
+            let unit = core(words[k]);
+            span >= 2 && before_ok && unit.ends_with('s') && crate::w2n_currency::half_renders(lang, &unit)
+        })
+        .collect();
+    let toks: Vec<&str> = text.split(' ').collect();
+    if toks.iter().filter(|t| currency(t)).count() != spelled.len() || !spelled.contains(&true) {
+        return text.to_string();
+    }
+    let digits = |t: &str| !t.is_empty() && t.bytes().all(|b| b.is_ascii_digit());
+    let mut seen = 0;
+    let mut out: Vec<String> = Vec::with_capacity(toks.len());
+    let mut i = 0;
+    while i < toks.len() {
+        let t = toks[i];
+        if currency(t) {
+            seen += 1;
+        }
+        if i + 2 < toks.len() && currency(toks[i + 2]) && spelled[seen] {
+            let figure = t.trim_start_matches(is_opener);
+            let units = digits(figure).then(|| figure.parse::<u32>().ok()).flatten();
+            let cents = toks[i + 1];
+            if units.is_some_and(|u| (1..100).contains(&u)) && cents.len() == 2 && digits(cents) && !cents.starts_with('0') {
+                out.push(format!("{t}.{cents}"));
+                i += 2;
+                continue;
+            }
+        }
+        out.push(t.to_string());
+        i += 1;
+    }
+    out.join(" ")
+}
+
 /// "un millón y medio" -> 1500000, not "1000000 y medio" (#859): a figure
 /// that is a whole number of millions (or more) followed by "and a half" in
 /// the language takes half of its largest scale.
@@ -5013,7 +5075,8 @@ fn words2num_sentence_folded(
         // Scale-half first: the currency half consumes no pair it counts
         // (#1212 audit).
         let halved = fold_currency_half(&fold_scale_half(&out, &resolved, sentence), &resolved, sentence);
-        return Ok(crate::w2n_currency::fold_currency(&halved, &resolved));
+        let priced = fold_spoken_price(&halved, &resolved, sentence);
+        return Ok(crate::w2n_currency::fold_currency(&priced, &resolved));
     }
     // The plain walk cuts the same subunit off: fr "douze dollars et
     // cinquante cents" is "12 dollars et 50 cents", not "… 5000" (#868).
@@ -7880,6 +7943,41 @@ mod audit_tests {
             super::auto_parse_sentence("0.0000001 kg", "en", &prefer, None, None, false).unwrap(),
             "0.0000001 kg"
         );
+    }
+}
+
+#[cfg(test)]
+mod spoken_price_tests {
+    use super::words2num_sentence_opts;
+
+    fn c(t: &str) -> String {
+        words2num_sentence_opts(t, "en", "cardinal", false, true).unwrap()
+    }
+
+    /// en "two fifty dollars" is a price, units then cents: "$2.50", not "2 $50".
+    #[test]
+    fn units_then_cents_before_the_unit() {
+        assert_eq!(c("the price is at two fifty dollars"), "the price is at $2.50");
+        assert_eq!(c("it costs nine ninety-nine dollars"), "it costs $9.99");
+        assert_eq!(c("twelve fifty euros please"), "€12.50 please");
+        assert_eq!(c("twenty one forty dollars"), "$21.40");
+        assert_eq!(c("(two fifty dollars)"), "($2.50)");
+        assert_eq!(c("he paid two fifty dollars and three dollars"), "he paid $2.50 and $3");
+    }
+
+    /// Not a price: a figure as written, an adjective, no minor unit, a single
+    /// cents digit, a clock time, a count, a scale.
+    #[test]
+    fn other_readings_stay() {
+        assert_eq!(c("2 fifty dollars"), "2 $50");
+        assert_eq!(c("two fifty dollar bills"), "2 $50 bills");
+        assert_eq!(c("two fifty yen"), "2 ¥50");
+        assert_eq!(c("two five dollars"), "2 $5");
+        assert_eq!(c("meet at two fifty"), "meet at 2:50");
+        assert_eq!(c("sold at nine fifty each"), "sold at 9 50 each");
+        assert_eq!(c("two hundred fifty dollars"), "$250");
+        assert_eq!(c("the price is two dollars fifty"), "the price is $2.50");
+        assert_eq!(words2num_sentence_opts("at two fifty dollars", "en", "cardinal", false, false).unwrap(), "at 2 50 dollars");
     }
 }
 

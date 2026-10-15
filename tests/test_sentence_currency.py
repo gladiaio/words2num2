@@ -575,3 +575,29 @@ def test_opener_around_amount_is_kept(text, lang, expected):
 )
 def test_amount_and_a_half(text, lang, expected):
     assert words2num_sentence(text, lang=lang, currency=True) == expected
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        # A spoken price, units then cents before the unit: one amount (#1283).
+        ("the price is at two fifty dollars", "the price is at $2.50"),
+        ("it costs nine ninety-nine dollars", "it costs $9.99"),
+        ("twelve fifty euros please", "€12.50 please"),
+        ("it is two fifty dollars.", "it is $2.50."),
+        # A figure as written, an adjective, no minor unit, a single digit, a
+        # clock time, a count: no price.
+        ("2 fifty dollars", "2 $50"),
+        ("two fifty dollar bills", "2 $50 bills"),
+        ("two fifty yen", "2 ¥50"),
+        ("two five dollars", "2 $5"),
+        ("meet at two fifty", "meet at 2:50"),
+        ("sold at nine fifty each", "sold at 9 50 each"),
+    ],
+)
+def test_spoken_price_units_then_cents(text, expected):
+    assert words2num_sentence(text, lang="en", currency=True) == expected
+
+
+def test_spoken_price_plain_mode_unchanged():
+    assert words2num_sentence("at two fifty dollars", lang="en") == "at 2 50 dollars"

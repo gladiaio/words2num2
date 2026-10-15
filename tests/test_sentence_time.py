@@ -182,7 +182,8 @@ def test_time_reader_leaves_longer_numbers_and_counts(text, lang, expected):
         ),
         ("six heures dix francs", "fr", {}, "6 heures 10 francs"),
         # Upper or title case still counts (#1197 audit).
-        ("AT NINE FIFTY RUPEES", "en", {"currency": True}, "AT 9 ₹50"),
+        # A spoken price in currency mode: units then cents (#PR).
+        ("AT NINE FIFTY RUPEES", "en", {"currency": True}, "AT ₹9.50"),
         ("a las dos y cinco Pesos", "es", {"currency": True}, "a las 2 y $5"),
     ],
 )

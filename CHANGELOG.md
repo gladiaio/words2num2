@@ -10,6 +10,7 @@ follows [Semantic Versioning](https://semver.org/) and uses
 
 - Sentence mode: spaced tens before a scale word in a form the renderer does not write read as the glued text does (eo "du dek unu miliono" is 21000000, hr "tri deset pet tisuće" 35000, bg "три десет и пет хиляди и сто" 35100; were "21 miliono", "35 1000", "35000 и 100") (#983).
 - Sentence mode: a unit and the word for ten written apart read as their tens word where the language glues them (lv "trīs desmit pieci" is 35, hr "tri deset sedam" 37, eo "du dek naŭ" 29, bg "седем десет и осем" 78; were "30 5", …). Also is, sq, bs, sr, mk, nn, ht (#983).
+- Currency mode, en: a spoken price, units then cents right before a plural unit, is one amount ("at two fifty dollars" is "at $2.50", "nine ninety-nine dollars" "$9.99", "twelve fifty euros" "€12.50"; were "at 2 $50", "9 $99", "12 €50"). A figure as written ("2 fifty dollars"), an adjective ("two fifty dollar bills"), a currency with no minor unit ("two fifty yen"), a clock time and a count stay as before; plain mode is unchanged (#PR).
 
 ## [0.4.6] — 2026-10-14
 
