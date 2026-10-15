@@ -4205,18 +4205,39 @@ pub fn words2num_sentence_full(
             )))
         }
     };
-    // A subtitle or decoder tag ("<v Bob>", "</i>", "<|2.40|>") cuts the text
-    // into cues, each read on its own by every pass, the tags kept as
-    // written: "<v Bob>twenty five dollars" is "<v Bob>$25" (#910, #1298).
-    let spans = cue_breaks(sentence, lang);
-    if !spans.is_empty() {
+    // A subtitle or decoder tag ("<v Bob>", "<|en|>") cuts the text into cues,
+    // each read on its own by every pass, the tags kept as written: "<v
+    // Bob>twenty five dollars" is "<v Bob>$25" (#910, #1298). A number with
+    // an inline tag inside it ("twenty<00:01.500><c> five") is kept as
+    // written too (#1299); the other inline tags are read through (#1300).
+    let groups = markup_groups(sentence);
+    if !groups.is_empty() {
         // The language and mode are checked even when only tags are left.
         words2num_sentence_full("", lang, to, has_kwargs, currency, date, region, date_format, phone)?;
+        let full = |t: &str| words2num_sentence_full(t, lang, to, has_kwargs, currency, date, region, date_format, phone);
+        // Kept as written: the break tags and the tagged number words.
+        let mut verbatim: Vec<(usize, usize)> = groups.iter().filter(|g| !g.2).map(|g| (g.0, g.1)).collect();
+        verbatim.extend(tagged_number_words(sentence, &groups, lang));
+        verbatim.sort_unstable();
         let mut out = String::with_capacity(sentence.len());
         let mut at = 0;
-        for (start, end) in spans.into_iter().chain(std::iter::once((sentence.len(), sentence.len()))) {
+        let mut inline = groups.iter().filter(|g| g.2).map(|g| (g.0, g.1)).peekable();
+        for (start, end) in verbatim.into_iter().chain(std::iter::once((sentence.len(), sentence.len()))) {
+            if start < at {
+                continue;
+            }
+            let mut tags = Vec::new();
+            while let Some(&(s, e)) = inline.peek() {
+                if s >= start {
+                    break;
+                }
+                if s >= at {
+                    tags.push((s - at, e - at));
+                }
+                inline.next();
+            }
             if start > at {
-                out.push_str(&words2num_sentence_full(&sentence[at..start], lang, to, has_kwargs, currency, date, region, date_format, phone)?);
+                out.push_str(&read_through_inline(&sentence[at..start], &tags, lang, &full)?);
             }
             out.push_str(&sentence[start..end]);
             at = end;
@@ -4249,21 +4270,12 @@ pub fn words2num_sentence_full(
     Ok(if date { crate::w2n_date::fold_dates_with(&out, lang, region, iso) } else { out })
 }
 
-/// The tags that cut `sentence` into cues (#910, #1298): each run of tags
-/// written together, as one byte range. An inline run (a style or a word
-/// timestamp) inside a number, number words or connectors on both sides
-/// ("twenty<00:01.500><c> five", "<i>zwanzig</i>tausend"), cuts nothing: the
-/// number stays as written, tags and all, as is any other tag glued to one
-/// of those words. A player shows those words one by one; no figure is split
-/// into wrong pieces.
-fn cue_breaks(sentence: &str, lang: &str) -> Vec<(usize, usize)> {
-    let tags = tokens::markup_spans(sentence);
-    if tags.is_empty() {
-        return Vec::new();
-    }
-    // Tags written together are one group.
+/// The markup tags of `sentence`, tags written together as one group: byte
+/// range, and whether the group is inline (styles, word timestamps) rather
+/// than a cue break.
+fn markup_groups(sentence: &str) -> Vec<(usize, usize, bool)> {
     let mut groups: Vec<(usize, usize, bool)> = Vec::new();
-    for (start, end, inline) in tags {
+    for (start, end, inline) in tokens::markup_spans(sentence) {
         match groups.last_mut() {
             Some(g) if g.1 == start => {
                 g.1 = end;
@@ -4272,144 +4284,201 @@ fn cue_breaks(sentence: &str, lang: &str) -> Vec<(usize, usize)> {
             _ => groups.push((start, end, inline)),
         }
     }
-    let Ok(resolved) = resolve_lang(lang) else {
-        return groups.into_iter().map(|(s, e, _)| (s, e)).collect();
-    };
+    groups
+}
+
+/// The words of `sentence` with an inline tag inside them that are numbers
+/// once the tags are gone ("<i>twenty</i>-<i>five</i>",
+/// "<i>zwanzig</i>tausend"): byte ranges, kept as written. A word here runs
+/// between blanks, tags passed over.
+fn tagged_number_words(sentence: &str, groups: &[(usize, usize, bool)], lang: &str) -> Vec<(usize, usize)> {
+    let Ok(resolved) = resolve_lang(lang) else { return Vec::new() };
     let converter = converter_for(&resolved);
-    let connectors: Vec<String> = if matches!(converter, Converter::En) || en_variant(&resolved) {
-        INCLUDABLE_EN.iter().map(|w| w.to_string()).collect()
-    } else {
-        let mut c: Vec<String> = includable_for(&resolved).iter().map(|w| w.to_string()).collect();
-        if let Converter::Table(l) = converter {
-            c.extend(lexicon::derived_connectors(l).iter().cloned());
+    let mut out = Vec::new();
+    let mut g = 0;
+    let mut start: Option<usize> = None;
+    let mut inside = false;
+    let mut i = 0;
+    let bytes_end = sentence.len();
+    let close = |from: usize, to: usize, inside: bool, out: &mut Vec<(usize, usize)>| {
+        if !inside {
+            return;
         }
-        c
-    };
-    let clean = |w: &str| w.trim_matches(|c: char| !c.is_alphanumeric()).to_lowercase();
-    let number = |w: &str| {
-        let w = clean(w);
-        !w.is_empty()
-            && (converter.is_number_word(&w)
-                // A bound scale or tens word: id "puluh", "ratus".
-                || converter.is_number_part(&w)
-                || converter.to_cardinal(&w).is_ok()
-                || w.split(['-', '\u{2010}']).all(|p| !p.is_empty() && converter.is_number_word(p)))
-    };
-    let connector = |w: &str| connectors.iter().any(|c| *c == clean(w));
-    // The words between the groups: (start, end), split at blanks; and for
-    // each group, how many words come before it.
-    let mut words: Vec<(usize, usize)> = Vec::new();
-    let mut words_before: Vec<usize> = Vec::with_capacity(groups.len());
-    let mut at = 0;
-    for &(gs, ge, _) in groups.iter().chain(std::iter::once(&(sentence.len(), sentence.len(), false))) {
-        let mut k = at;
-        for (off, c) in sentence[at..gs].char_indices() {
-            if py_is_space(c) {
-                if k < at + off {
-                    words.push((k, at + off));
-                }
-                k = at + off + c.len_utf8();
-            }
-        }
-        if k < gs {
-            words.push((k, gs));
-        }
-        words_before.push(words.len());
-        at = ge;
-    }
-    let text = |k: usize| &sentence[words[k].0..words[k].1];
-    // A hyphen alone between two tagged halves ("<i>twenty</i>-<i>five</i>")
-    // joins them as a connector does.
-    let joiner = |k: usize| connector(text(k)) || matches!(text(k), "-" | "\u{2010}" | "\u{2011}");
-    // The word next to a tag group on one side, if it belongs to a number,
-    // and the farthest word of that number on this side: a number word, or a
-    // connector with one beyond it ("and</c><c> four" after "hundred"; not
-    // the "y" closing "veintiséis</i> y").
-    let side = |k: Option<usize>, back: bool| -> Option<usize> {
-        let k = k?;
-        if number(text(k)) {
-            return Some(k);
-        }
-        let beyond = if back { k.checked_sub(1) } else { Some(k + 1).filter(|&j| j < words.len()) }?;
-        (joiner(k) && number(text(beyond))).then_some(beyond)
-    };
-    // The words from `first` to `last` without their tags: one number? Not
-    // two numbers side by side, each in its own tags ("<i>twenty five</i>
-    // <i>thirty</i>", #910 audit).
-    let one_number = |first: usize, last: usize| {
-        let (from, to) = (words[first].0, words[last].1);
         let mut plain = String::new();
         let mut at = from;
-        let lo = groups.partition_point(|g| g.0 < from);
-        for &(gs, ge, _) in groups[lo..].iter().take_while(|g| g.1 <= to) {
+        let lo = groups.partition_point(|x| x.0 < from);
+        for &(gs, ge, _) in groups[lo..].iter().take_while(|x| x.1 <= to) {
             plain.push_str(&sentence[at..gs]);
             at = ge;
         }
         plain.push_str(&sentence[at..to]);
-        words2num_sentence_walk(&plain, lang, "cardinal", false).is_ok_and(|w| {
-            let w = w.trim();
-            !w.contains(char::is_whitespace) && w.chars().any(|c| c.is_ascii_digit())
-        })
-    };
-    // The runs of number words, tags passed over: each word's run, by its
-    // first and last word. id "dua<…> puluh<…> lima" is one number though
-    // "puluh lima" is not.
-    let mut run_of: Vec<Option<(usize, usize)>> = vec![None; words.len()];
-    let mut k = 0;
-    while k < words.len() {
-        if !number(text(k)) {
-            k += 1;
-            continue;
-        }
-        let start = k;
-        let mut end = k;
-        while let Some(j) = side(Some(end + 1).filter(|&j| j < words.len()), false) {
-            end = j;
-        }
-        for r in &mut run_of[start..=end] {
-            *r = Some((start, end));
-        }
-        k = end + 1;
-    }
-    // Each run read once; a run of more than two dozen words is no one
-    // number (a list, a dictation), and the reading stays linear.
-    let mut run_ok: std::collections::HashMap<(usize, usize), bool> = std::collections::HashMap::new();
-    let mut kept = vec![false; groups.len()];
-    // The word starts and ends of the numbers kept as written.
-    let mut frozen_starts = std::collections::HashSet::new();
-    let mut frozen_ends = std::collections::HashSet::new();
-    for (g, &(_, _, inline)) in groups.iter().enumerate() {
-        if !inline {
-            continue;
-        }
-        let n = words_before[g];
-        let first = side(n.checked_sub(1), true);
-        let last = side(Some(n).filter(|&j| j < words.len()), false);
-        let (Some(first), Some(last)) = (first, last) else { continue };
-        let Some(run) = run_of[first].or(run_of[last]) else { continue };
-        let pair = {
-            let joined = format!("{} {}", text(first), text(last)).to_lowercase();
-            converter.to_cardinal(&joined).is_ok() || one_number(first, last)
+        let number = |w: &str| {
+            let w = w.trim_matches(|c: char| !c.is_alphanumeric()).to_lowercase();
+            !w.is_empty() && (converter.is_number_word(&w) || converter.to_cardinal(&w).is_ok())
         };
-        let short = run.1 - run.0 < 24;
-        let whole = pair || *run_ok.entry(run).or_insert_with(|| short && one_number(run.0, run.1));
-        if whole {
-            kept[g] = true;
-            // The whole run stays as written; a long one, only these words.
-            let (from, to) = if short { (first.min(run.0), last.max(run.1)) } else { (first, last) };
-            for w in &words[from..=to] {
-                frozen_starts.insert(w.0);
-                frozen_ends.insert(w.1);
+        // Alone, not a piece of a longer number: cs "dvacet jedna</i><i>třicet
+        // šest" is 21 and 36, not "jednatřicet" (31) between two numbers.
+        let untag = |t: &str| {
+            let mut u = String::new();
+            let mut at = 0;
+            for (gs, ge, _) in tokens::markup_spans(t) {
+                u.push_str(&t[at..gs]);
+                at = ge;
+            }
+            u.push_str(&t[at..]);
+            u
+        };
+        let prev = untag(sentence[..from].trim_end_matches(py_is_space).rsplit(py_is_space).next().unwrap_or(""));
+        let next = untag(sentence[to..].trim_start_matches(py_is_space).split(py_is_space).next().unwrap_or(""));
+        if number(&plain) && !number(&prev) && !number(&next) {
+            out.push((from, to));
+        }
+    };
+    while i < bytes_end {
+        if g < groups.len() && groups[g].0 == i {
+            let (gs, ge, inline) = groups[g];
+            // A tag with letters or digits glued on both sides is inside the
+            // word; one before a mark ("</b>.", "</i>,") is not.
+            let alnum = |t: &str| t.chars().any(char::is_alphanumeric);
+            let glued_before = start.is_some_and(|s0| alnum(&sentence[s0..gs]));
+            let word_after = sentence[ge..].split(|c: char| py_is_space(c) || c == '<').next().unwrap_or("");
+            let glued_after = alnum(word_after);
+            if !inline {
+                if let Some(s0) = start.take() {
+                    close(s0, gs, inside, &mut out);
+                }
+                inside = false;
+            } else if glued_before && glued_after {
+                inside = true;
+            } else if start.is_none() && sentence[ge..].chars().next().is_some_and(|c| !py_is_space(c)) {
+                start = Some(gs);
+            }
+            g += 1;
+            i = ge;
+            continue;
+        }
+        let c = sentence[i..].chars().next().unwrap_or(' ');
+        if py_is_space(c) {
+            if let Some(s0) = start.take() {
+                close(s0, i, inside, &mut out);
+            }
+            inside = false;
+        } else if start.is_none() {
+            start = Some(i);
+        }
+        i += c.len_utf8();
+    }
+    if let Some(s0) = start.take() {
+        close(s0, bytes_end, inside, &mut out);
+    }
+    out
+}
+
+/// `text` read with its inline `tags` (byte ranges into `text`) read
+/// through: each tag is masked as a run of spaces, so the words around it
+/// keep their context ("at <b>nine fifty</b>" is "at <b>9:50</b>", #1300),
+/// and put back after. A stretch whose masks a pass read across is read
+/// again: left as written when a plain number reading also crosses a mask,
+/// a number with a tag inside it ("twenty<00:01.500><c> five", #1299);
+/// otherwise cut at its tags, each piece read on its own (an amount and
+/// its unit, "twenty five</i> dollars").
+fn read_through_inline(
+    text: &str,
+    tags: &[(usize, usize)],
+    lang: &str,
+    full: &dyn Fn(&str) -> Result<String, W2nError>,
+) -> Result<String, W2nError> {
+    if tags.is_empty() {
+        return full(text);
+    }
+    let cut = |text: &str, tags: &[(usize, usize)]| -> Result<String, W2nError> {
+        let mut out = String::with_capacity(text.len());
+        let mut at = 0;
+        for &(s, e) in tags {
+            if s > at {
+                out.push_str(&full(&text[at..s])?);
+            }
+            out.push_str(&text[s..e]);
+            at = e;
+        }
+        if at < text.len() {
+            out.push_str(&full(&text[at..])?);
+        }
+        Ok(out)
+    };
+    // The mask of tag k: its index in the spaces U+2000..U+2009, between
+    // ASCII blanks; only when the text holds none of them.
+    if text.chars().any(|c| ('\u{2000}'..='\u{2009}').contains(&c)) {
+        return cut(text, tags);
+    }
+    let mask = |k: usize| {
+        let mut digits = Vec::new();
+        let mut n = k;
+        loop {
+            digits.push(char::from_u32(0x2000 + (n % 10) as u32).unwrap_or(' '));
+            n /= 10;
+            if n == 0 {
+                break;
             }
         }
-    }
-    // A tag glued to a word of such a number stays with it.
-    for (g, &(gs, ge, _)) in groups.iter().enumerate() {
-        if frozen_ends.contains(&gs) || frozen_starts.contains(&ge) {
-            kept[g] = true;
+        format!(" {} ", digits.iter().rev().collect::<String>())
+    };
+    let masked_of = |from: usize, to: usize, ks: std::ops::Range<usize>| {
+        let mut m = String::new();
+        let mut at = from;
+        for k in ks {
+            m.push_str(&text[at..tags[k].0]);
+            m.push_str(&mask(k));
+            at = tags[k].1;
         }
+        m.push_str(&text[at..to]);
+        m
+    };
+    // Where each mask is in `read`, in order; None for one read across.
+    let found = |read: &str, ks: std::ops::Range<usize>| -> Vec<Option<(usize, usize)>> {
+        let mut at = 0;
+        ks.map(|k| {
+            let m = mask(k);
+            read[at..].find(&m).map(|p| {
+                let s = at + p;
+                at = s + m.len();
+                (s, at)
+            })
+        })
+        .collect()
+    };
+    let read = full(&masked_of(0, text.len(), 0..tags.len()))?;
+    let places = found(&read, 0..tags.len());
+    let mut out = String::with_capacity(read.len());
+    // Stretches between the masks found: (first tag, last tag + 1) of the
+    // tags in it read across, its text bounds, its reading bounds.
+    let (mut text_at, mut read_at, mut first) = (0, 0, 0);
+    for k in 0..=tags.len() {
+        let bound = if k == tags.len() { Some((read.len(), read.len())) } else { places[k] };
+        let Some((rs, re)) = bound else { continue };
+        let text_end = if k == tags.len() { text.len() } else { tags[k].0 };
+        if first == k {
+            out.push_str(&read[read_at..rs]);
+        } else {
+            // Tags first..k were read across in this stretch.
+            let piece = &text[text_at..text_end];
+            let local: Vec<(usize, usize)> = tags[first..k].iter().map(|&(s, e)| (s - text_at, e - text_at)).collect();
+            let crossed = words2num_sentence_walk(&masked_of(text_at, text_end, first..k), lang, "cardinal", false)
+                .map_or(true, |w| found(&w, first..k).iter().any(Option::is_none));
+            if crossed {
+                out.push_str(piece);
+            } else {
+                out.push_str(&cut(piece, &local)?);
+            }
+        }
+        if k < tags.len() {
+            out.push_str(&text[tags[k].0..tags[k].1]);
+            text_at = tags[k].1;
+        }
+        read_at = re;
+        first = k + 1;
     }
-    groups.into_iter().zip(kept).filter(|(_, kept)| !kept).map(|((s, e, _), _)| (s, e)).collect()
+    Ok(out)
 }
 
 /// Does "<conn> <half>" end the quantity, given the half word's glued

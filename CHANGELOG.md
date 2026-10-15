@@ -8,7 +8,7 @@ follows [Semantic Versioning](https://semver.org/) and uses
 
 ### Fixed
 
-- all: a Whisper timestamp token or a WebVTT / SRT tag glued to a number word no longer cuts the number: "nineteen eighty four.<|2.40|>" is "1984.<|2.40|>" (was "1980 four.<|2.40|>"), "<v Bob>twenty five" is "<v Bob>25"; the currency, date and phone passes read the text between tags the same way ("<v Bob>twenty five dollars" with currency=True is "<v Bob>$25"). An inline tag inside a number (a karaoke word timestamp, "<i>zwanzig</i>tausend") leaves it as written (#910, #1298).
+- all: a Whisper timestamp token or a WebVTT / SRT tag glued to a number word no longer cuts the number: "nineteen eighty four.<|2.40|>" is "1984.<|2.40|>" (was "1980 four.<|2.40|>"), "<v Bob>twenty five" is "<v Bob>25"; the currency, date and phone passes read the text between tags the same way ("<v Bob>twenty five dollars" with currency=True is "<v Bob>$25"). An inline tag (a style, a word timestamp) is read through, the words around it in context ("at <b>nine fifty</b>" is "at <b>9:50</b>"; "<i>twenty five</i> <i>thirty</i>" is "<i>25</i> <i>30</i>"); a number with one inside it (a karaoke word timestamp, "<i>zwanzig</i>tausend") is left as written (#910, #1298, #1299, #1300).
 - my: years and months with a particle on the month read as years and months ("သုံး နှစ် လေး လပါ" is "3 နှစ် 4 လပါ", was "324 လပါ"; "ငါး နှစ် နှစ် လပါ" is "5 နှစ် 2 လပါ") (#1285, #1296).
 
 ## [0.4.8] — 2026-10-15

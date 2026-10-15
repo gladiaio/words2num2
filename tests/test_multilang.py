@@ -1532,6 +1532,13 @@ def test_glued_markup_tags(lang, text, expected):
             "<v Bob>March 12, 2026",
         ),
         ("en", "<i>", {}, "<i>"),
+        # A number with a tag inside it stays as written, its unit too (#1299).
+        (
+            "en",
+            "<b>twenty</b> five dollars",
+            {"currency": True},
+            "<b>twenty</b> five dollars",
+        ),
     ],
 )
 def test_glued_markup_tags_folds(lang, text, kwargs, expected):
@@ -1562,6 +1569,14 @@ def test_glued_markup_tags_folds(lang, text, kwargs, expected):
         ("en", "<i>twenty</i>-<i>five</i>"),
         ("fr", "<i>vingt</i>-<i>cinq</i>"),
         ("id", "<i>dua puluh</i> <i>tiga</i>"),
+        # A word timestamp between number words (#1299).
+        ("en", "<|0.00|> twenty<|0.40|> five<|0.80|> people"),
+        ("en", "twenty<00:01.500><c> five"),
+        # A connector or a number word the tag sits next to (#910 audit).
+        ("vi", "một trăm</i> lẻ một"),
+        ("pt", "vinte<i>e um"),
+        ("id", "satu dua puluh<00:01.500><c> lima"),
+        ("cs", "tisíc devět set<i>osmdesát čtyři"),
         # Not a tag: a clock time with no milliseconds, prose after a name.
         ("en", "<12:30>three"),
     ],
@@ -1586,6 +1601,18 @@ def test_inline_markup_inside_a_number(lang, text):
         ("en", "<i>twenty five</i><i>thirty</i>", "<i>25</i><i>30</i>"),
         ("en", "<i>one hundred and one</i> <i>five</i>", "<i>101</i> <i>5</i>"),
         ("en", "<i>twenty five</i> <i>six</i> people", "<i>25</i> <i>6</i> people"),
+        # Inline style tags keep the words around them in context (#1300).
+        (
+            "en",
+            "the train at <b>nine fifty</b> stops",
+            "the train at <b>9:50</b> stops",
+        ),
+        ("en", "five <b>or</b> six thousand", "5000 <b>or</b> 6000"),
+        # A tag before a mark is no tag inside a word.
+        ("af", "<b>vyf-en-twintig</b>.", "<b>25</b>."),
+        ("ja", "<i>二十五</i>, <i>三十</i>", "<i>25</i>, <i>30</i>"),
+        # Glued tags between two numbers make no word of them.
+        ("cs", "<i>dvacet jedna</i><i>třicet šest</i>", "<i>21</i><i>36</i>"),
         # "y" after the number is no connector into it.
         (
             "es",

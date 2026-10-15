@@ -173,9 +173,12 @@ fn markup_len(chars: &[char], i: usize) -> Option<(usize, bool)> {
     }
     let inner = &chars[i + 1..end];
     let len = end + 1 - i;
-    // "<|2.40|>": no blank inside.
+    // "<|2.40|>": no blank inside. A timestamp token marks a word, as a
+    // WebVTT one does; "<|en|>", "<|transcribe|>" open a segment.
     if inner.len() >= 2 && inner[0] == '|' && inner[inner.len() - 1] == '|' {
-        return (!inner.iter().any(|&c| super::py_is_space(c))).then_some((len, false));
+        let body = &inner[1..inner.len() - 1];
+        let stamp = !body.is_empty() && body.iter().all(|&c| c.is_ascii_digit() || c == '.') && body.iter().any(char::is_ascii_digit);
+        return (!inner.iter().any(|&c| super::py_is_space(c))).then_some((len, stamp));
     }
     // "<00:01.500>", "<00:00:01.500>": minutes and seconds, then milliseconds.
     let text: String = inner.iter().collect();
