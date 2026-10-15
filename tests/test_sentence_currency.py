@@ -617,11 +617,12 @@ def test_spoken_price_units_then_cents(text, expected):
 @pytest.mark.parametrize(
     "text, expected",
     [
-        # Plain mode writes no decimals: a currency name keeps the two
-        # figures, a price cue or a counted noun reads hundreds (#1286).
+        # Plain mode writes no prices: a currency name or a price cue keeps
+        # the two figures (#1290), a counted noun reads hundreds (#1286).
         ("at two fifty dollars", "at 2 50 dollars"),
-        ("sold at nine fifty each", "sold at 950 each"),
-        ("it costs two fifty", "it costs 250"),
+        ("sold at nine fifty each", "sold at 9 50 each"),
+        ("it costs two fifty", "it costs 2 50"),
+        ("I paid nine fifty for parking", "I paid 9 50 for parking"),
         ("nine fifty people", "950 people"),
         ("nineteen fifty cars", "1950 cars"),
         ("two fifty units", "250 units"),
@@ -636,3 +637,59 @@ def test_spoken_price_units_then_cents(text, expected):
 )
 def test_spoken_pair_plain_mode(text, expected):
     assert words2num_sentence(text, lang="en") == expected
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        # A clock time after a time cue stays a time, whatever plural-looking
+        # word follows (#1288); a known counted noun still counts.
+        ("the train at nine fifty stops in Leeds", "the train at 9:50 stops in Leeds"),
+        ("his flight at two fifty lands early", "his flight at 2:50 lands early"),
+        ("I wake at six thirty weekdays", "I wake at 6:30 weekdays"),
+        ("see you at seven fifteen guys", "see you at 7:15 guys"),
+        ("the meeting at ten fifteen runs long", "the meeting at 10:15 runs long"),
+        ("the nine fifty leaves at ten", "the 9 50 leaves at 10"),
+        ("at nine fifty people", "at 950 people"),
+        # A time unit counts no hundreds (#1289).
+        ("he left at nine forty minutes ago", "he left at 9 40 minutes ago"),
+        ("it was eleven forty seconds", "it was 11 40 seconds"),
+    ],
+)
+def test_spoken_pair_keeps_clock_times(text, expected):
+    assert words2num_sentence(text, lang="en") == expected
+    assert words2num_sentence(text, lang="en", currency=True) == expected
+
+
+@pytest.mark.parametrize(
+    "lang, expected",
+    [
+        # A price with no currency name: the region's currency (#1291).
+        ("en", "it costs $2.50"),
+        ("en_US", "it costs $2.50"),
+        ("en_AU", "it costs $2.50"),
+        ("en_GB", "it costs £2.50"),
+        ("en-gb", "it costs £2.50"),
+        ("en_IN", "it costs ₹2.50"),
+        ("en_IE", "it costs €2.50"),
+        # A region whose currency is not known here: no price reading.
+        ("en_ZA", "it costs 2 50"),
+    ],
+)
+def test_spoken_price_default_currency_by_region(lang, expected):
+    assert (
+        words2num_sentence("it costs two fifty", lang=lang, currency=True) == expected
+    )
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        # "pounds" as a weight: no decimal the currency pass would not render
+        # (#1287).
+        ("two fifty pounds of flour", "2 50 pounds of flour"),
+        ("that's two fifty pounds mate", "that's £2.50 mate"),
+    ],
+)
+def test_spoken_price_weight_pounds(text, expected):
+    assert words2num_sentence(text, lang="en", currency=True) == expected

@@ -87,9 +87,9 @@ def test_only_plain_modes():
         ),
         ("um neun Uhr zwanzig Leute kamen", "de", "um 9 Uhr 20 Leute kamen"),
         ("las dos y cinco personas", "es", "las 2 y 5 personas"),
-        # en: a pair before a price cue or a counted noun is hundreds in plain
-        # mode, no clock time (#1286; 0.4.2 left "9 50").
-        ("sold at nine fifty each", "en", "sold at 950 each"),
+        # en: a pair before a price cue stays two figures in plain mode, no
+        # clock time (plain mode writes no prices, #1290).
+        ("sold at nine fifty each", "en", "sold at 9 50 each"),
         ("rates at five twenty five percent", "en", "rates at 5 25 percent"),
         # Times still read.
         ("at nine fifteen and then lunch", "en", "at 9:15 and then lunch"),
