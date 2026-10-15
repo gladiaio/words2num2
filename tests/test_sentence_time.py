@@ -87,7 +87,9 @@ def test_only_plain_modes():
         ),
         ("um neun Uhr zwanzig Leute kamen", "de", "um 9 Uhr 20 Leute kamen"),
         ("las dos y cinco personas", "es", "las 2 y 5 personas"),
-        ("sold at nine fifty each", "en", "sold at 9 50 each"),
+        # en: a pair before a price cue or a counted noun is hundreds in plain
+        # mode, no clock time (#1286; 0.4.2 left "9 50").
+        ("sold at nine fifty each", "en", "sold at 950 each"),
         ("rates at five twenty five percent", "en", "rates at 5 25 percent"),
         # Times still read.
         ("at nine fifteen and then lunch", "en", "at 9:15 and then lunch"),
@@ -105,7 +107,7 @@ def test_only_plain_modes():
         ("we start at nine thirty each morning", "en", "we start at 9:30 each morning"),
         ("entre huit et neuf heures et quart", "fr", "entre 8 et 9h15"),
         ("zwischen neun und zehn Uhr dreißig", "de", "zwischen 9 und 10:30 Uhr"),
-        ("it weighs about nine fifty grams", "en", "it weighs about 9 50 grams"),
+        ("it weighs about nine fifty grams", "en", "it weighs about 950 grams"),
         # A following count is its own number, not part of the minutes; a
         # refused fr span after a cue keeps the hour (#1190 audit).
         ("um neun Uhr zwanzig zwei Leute kamen", "de", "um 9:20 Uhr 2 Leute kamen"),
@@ -182,7 +184,8 @@ def test_time_reader_leaves_longer_numbers_and_counts(text, lang, expected):
         ),
         ("six heures dix francs", "fr", {}, "6 heures 10 francs"),
         # Upper or title case still counts (#1197 audit).
-        ("AT NINE FIFTY RUPEES", "en", {"currency": True}, "AT 9 ₹50"),
+        # A spoken price in currency mode: units then cents (#1286).
+        ("AT NINE FIFTY RUPEES", "en", {"currency": True}, "AT ₹9.50"),
         ("a las dos y cinco Pesos", "es", {"currency": True}, "a las 2 y $5"),
     ],
 )
