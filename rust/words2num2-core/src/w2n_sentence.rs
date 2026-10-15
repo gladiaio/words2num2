@@ -4459,7 +4459,7 @@ fn read_through_inline(
                 .fold(0usize, |n, c| n.saturating_mul(base).saturating_add(alphabet.iter().position(|&a| a == c).unwrap_or(0)));
             // In order only, each with its own blanks: a mask before the last
             // one found, or sharing its blank, is no mask.
-            if ks.contains(&k) && last.is_none_or(|(l, end)| k > l && s - 1 >= end) {
+            if ks.contains(&k) && last.is_none_or(|(l, end)| k > l && s > end) {
                 places[k - ks.start] = Some((s - 1, run_end + 1));
                 last = Some((k, run_end + 1));
             }
