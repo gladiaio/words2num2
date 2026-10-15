@@ -1569,6 +1569,9 @@ def test_glued_markup_tags_folds(lang, text, kwargs, expected):
         ("en", "<i>twenty</i>-<i>five</i>"),
         ("fr", "<i>vingt</i>-<i>cinq</i>"),
         ("id", "<i>dua puluh</i> <i>tiga</i>"),
+        # A thin space elsewhere in the text changes nothing (#910 audit).
+        ("en", "<|0.00|> twenty<|0.40|> five<|0.80|> people,\u2009ok"),
+        ("en", "twenty<00:01.500><c> five</c> people\u2009today"),
         # A word timestamp between number words (#1299).
         ("en", "<|0.00|> twenty<|0.40|> five<|0.80|> people"),
         ("en", "twenty<00:01.500><c> five"),
@@ -1608,6 +1611,11 @@ def test_inline_markup_inside_a_number(lang, text):
             "the train at <b>9:50</b> stops",
         ),
         ("en", "five <b>or</b> six thousand", "5000 <b>or</b> 6000"),
+        (
+            "en",
+            "the train at <b>nine fifty</b> stops\u2009here",
+            "the train at <b>9:50</b> stops\u2009here",
+        ),
         # A tag before a mark is no tag inside a word.
         ("af", "<b>vyf-en-twintig</b>.", "<b>25</b>."),
         ("ja", "<i>二十五</i>, <i>三十</i>", "<i>25</i>, <i>30</i>"),

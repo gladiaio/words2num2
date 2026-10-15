@@ -4406,17 +4406,23 @@ fn read_through_inline(
         }
         Ok(out)
     };
-    // The mask of tag k: its index in the spaces U+2000..U+2009, between
-    // ASCII blanks; only when the text holds none of them.
-    if text.chars().any(|c| ('\u{2000}'..='\u{2009}').contains(&c)) {
+    // The mask of tag k: its index written in spaces the text does not hold
+    // (U+2000..U+200A, U+205F, U+3000), between ASCII blanks; a thin or an
+    // en space in the text only narrows the base (#910 audit).
+    let alphabet: Vec<char> = ('\u{2000}'..='\u{200A}')
+        .chain(['\u{205F}', '\u{3000}'])
+        .filter(|&c| !text.contains(c))
+        .collect();
+    if alphabet.len() < 2 {
         return cut(text, tags);
     }
+    let base = alphabet.len();
     let mask = |k: usize| {
         let mut digits = Vec::new();
         let mut n = k;
         loop {
-            digits.push(char::from_u32(0x2000 + (n % 10) as u32).unwrap_or(' '));
-            n /= 10;
+            digits.push(alphabet[n % base]);
+            n /= base;
             if n == 0 {
                 break;
             }
@@ -4435,10 +4441,9 @@ fn read_through_inline(
         m
     };
     // Where each mask is in `read`, in order; None for one read across. One
-    // pass over `read`: a mask is a blank, its digits in U+2000..U+2009, a
-    // blank.
+    // pass over `read`: a mask is a blank, its digits, a blank.
     let found = |read: &str, ks: std::ops::Range<usize>| -> Vec<Option<(usize, usize)>> {
-        let digit = |c: char| ('\u{2000}'..='\u{2009}').contains(&c);
+        let digit = |c: char| alphabet.contains(&c);
         let mut places = vec![None; ks.len()];
         let mut last = None;
         let mut i = 0;
@@ -4449,7 +4454,9 @@ fn read_through_inline(
             if s == 0 || !read[..s].ends_with(' ') || !read[run_end..].starts_with(' ') {
                 continue;
             }
-            let k = read[s..run_end].chars().fold(0usize, |n, c| n * 10 + (c as usize - 0x2000));
+            let k = read[s..run_end]
+                .chars()
+                .fold(0usize, |n, c| n.saturating_mul(base).saturating_add(alphabet.iter().position(|&a| a == c).unwrap_or(0)));
             // In order only: a mask before the last one found is no mask.
             if ks.contains(&k) && last.is_none_or(|l| k > l) {
                 places[k - ks.start] = Some((s - 1, run_end + 1));
