@@ -1598,10 +1598,52 @@ const MY_COUNTERS: &[&str] = &[
 
 /// Is `next` (the word after a my "နှစ်") a counter, currency or unit?
 fn my_counter(next: Option<&str>) -> bool {
+    // Counters that are also everyday verb roots count only bare: with a
+    // particle the word is the verb ("စုပါတယ်", saved; "ဆောင်ပါ", carry;
+    // #1283 audit). "ကျပ်ပါ" (kyat) keeps the counter reading.
+    // Also nouns a case particle follows ("အိမ်ကို", home; "လကို", the moon).
+    // "ပြား" (pya) is a currency and keeps the counter reading, as "ကျပ်".
+    const VERB_ROOTS: &[&str] = &[
+        "စု", "ပတ်", "စီး", "ပွင့်", "ရက်", "ဆောင်", "ခါ", "ဖွဲ့", "လုံး", "ပါး", "ချောင်း", "ရွက်", "အုပ်", "အိမ်", "လ",
+    ];
     next.is_some_and(|w| {
-        let w = crate::normalize(w);
-        MY_COUNTERS.iter().any(|c| crate::normalize(c) == w)
+        let head = my_counter_head(w);
+        let bare = crate::normalize(w) == head;
+        MY_COUNTERS.iter().any(|c| crate::normalize(c) == head)
+            && (bare || !VERB_ROOTS.iter().any(|v| crate::normalize(v) == head))
     })
+}
+
+/// `w` normalized, with the particles glued after a counter stripped
+/// ("ကျပ်ပါ", "ယောက်တွေ", "ကျပ်ပါတယ်" -> the counter). Only listed
+/// particles, as "လ" also opens "လာတယ်" (#1016, #1284). A sentence ending
+/// ("တယ်", "ရယ်", "နော်") counts only after another particle: right after
+/// the word it makes a verb ("စုတယ်", saved; "ကျပ်တယ်", is tight; #1283
+/// audit).
+fn my_counter_head(w: &str) -> String {
+    // Not "မှာ"/"က": "အိမ်မှာ" is "at home" ("ငါး နှစ် အိမ်မှာ နေတယ်", lived
+    // five years at home, #1283 audit).
+    const PARTICLES: &[&str] = &["ပါ", "တွေ", "ကို", "နဲ့", "လည်း", "စီ", "လောက်", "ခန့်", "တည်း", "ပဲ"];
+    const ENDINGS: &[&str] = &["တယ်", "ရယ်", "နော်"];
+    let mut w = crate::normalize(w);
+    let strip = |w: &str, list: &[&str]| {
+        list.iter()
+            .find_map(|p| w.strip_suffix(crate::normalize(p).as_str()).filter(|h| !h.is_empty()).map(str::to_string))
+    };
+    // An ending, then at least one particle before it.
+    if let Some(h) = strip(&w, ENDINGS) {
+        match strip(&h, PARTICLES) {
+            Some(hh) => w = hh,
+            None => return w,
+        }
+    }
+    for _ in 0..4 {
+        match strip(&w, PARTICLES) {
+            Some(h) => w = h,
+            None => break,
+        }
+    }
+    w
 }
 
 /// my: is `clean` the standalone "နှစ်" (year) after a number that is not
@@ -2777,7 +2819,8 @@ fn my_years_shape(converter: &Converter, resolved: &str, parts: &[String], k: us
     // 324 kyat (#1038).
     let unit = |t: Option<&str>| {
         t.is_some_and(|t| {
-            let t = crate::normalize(rstrip_punct(t));
+            // With its particles stripped, as `my_counter` does (#1283 audit).
+            let t = my_counter_head(rstrip_punct(t));
             ["ကျပ်", "ပြား", "ကျပ်သား", "ဒေါ်လာ", "ယူရို", "ပိဿာ", "ကီလို", "မီတာ", "ပေ", "လက်မ", "မိုင်"]
                 .iter()
                 .any(|u| crate::normalize(u) == t)

@@ -1438,3 +1438,28 @@ def test_glued_comma_list(lang, text, expected):
 )
 def test_spaced_tens_word(lang, text, expected):
     assert words2num_sentence(text, lang=lang) == expected
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        # my: a counter with a glued particle after "နှစ်" (two) (#1016).
+        ("ငါးရာ နှစ် ကျပ်ပါ", "502 ကျပ်ပါ"),
+        ("ငါးရာ နှစ် ယောက်တွေ", "502 ယောက်တွေ"),
+        ("ငါးရာ နှစ် ကျပ်ပါတယ်", "502 ကျပ်ပါတယ်"),
+        ("ငါးရာ နှစ် ယောက်ပဲ", "502 ယောက်ပဲ"),
+        # A sentence ending right after the word makes a verb (#1283 audit).
+        ("ငါး နှစ် စုတယ်", "5 နှစ် စုတယ်"),
+        ("ငါး နှစ် စုပါတယ်", "5 နှစ် စုပါတယ်"),
+        ("ငါး နှစ် အိမ်မှာ နေတယ်", "5 နှစ် အိမ်မှာ နေတယ်"),
+        ("ငါး နှစ် အိမ်ကို ပြန်မလာဘူး", "5 နှစ် အိမ်ကို ပြန်မလာဘူး"),
+        ("ငါးရာ နှစ် ပြားပါ", "502 ပြားပါ"),
+        ("ငါးရာ နှစ် ကျပ်တယ်", "500 နှစ် ကျပ်တယ်"),
+        # A unit with a particle stays a dictated number, as the bare unit (#1038).
+        ("သုံး နှစ် လေး ကျပ်ပါ", "324 ကျပ်ပါ"),
+        # "လ" (month) also opens "လာတယ်" (come): no counter.
+        ("ငါးရာ နှစ် လာမယ်", "500 နှစ် လာမယ်"),
+    ],
+)
+def test_my_counter_particle(text, expected):
+    assert words2num_sentence(text, lang="my") == expected
