@@ -264,6 +264,16 @@ pub(super) fn split_parts(
                 glue.push(Glue::Free);
                 continue;
             }
+            if matches!(converter, super::Converter::En) {
+                if let Some(cut) = en_hyphen_boundaries(piece) {
+                    prev_number = false;
+                    for p in cut {
+                        parts.push(p.to_string());
+                        glue.push(Glue::Free);
+                    }
+                    continue;
+                }
+            }
             let pieces = match segment(converter, resolved, piece) {
                 Some(segs) => segs,
                 None => peel(converter, resolved, piece, prev_number),
@@ -277,6 +287,53 @@ pub(super) fn split_parts(
         }
     }
     (parts, glue)
+}
+
+/// English: a hyphen between two number words joins them only in a compound,
+/// a tens word and a unit ("twenty-two", "twenty-first") or a number and the
+/// scale it counts ("two-thousand"). Any other hyphen is a boundary, so the
+/// figures on each side read alone and the hyphen stays: "thousand-two" is
+/// 1000-2, "five-one" is 5-1, "twenty-thirty" is 20-30 (#900). Returns the
+/// word with each boundary hyphen cut out as a part of its own, or `None`
+/// when no hyphen of the word is one.
+fn en_hyphen_boundaries(piece: &str) -> Option<Vec<&str>> {
+    use crate::w2n_lang_en::{is_scale_word, tens_value, unit_value};
+    if !piece.contains('-') || piece.starts_with('-') || piece.ends_with('-') {
+        return None;
+    }
+    let words: Vec<&str> = piece.split('-').collect();
+    if words.len() < 2 || words.iter().any(|w| w.is_empty() || !w.chars().all(|c| c.is_ascii_alphabetic())) {
+        return None;
+    }
+    let lower: Vec<String> = words.iter().map(|w| w.to_ascii_lowercase()).collect();
+    let number = |w: &str| unit_value(w).is_some() || tens_value(w).is_some() || is_scale_word(w);
+    if !lower.iter().all(|w| number(w)) {
+        return None;
+    }
+    let compound = |a: &str, b: &str| {
+        let unit = |w: &str| matches!(unit_value(w), Some(1..=9));
+        let ordinal_unit = |w: &str| {
+            crate::w2n_lang_en::ordinal_cardinal(w).is_some_and(|c| matches!(unit_value(c), Some(1..=9)))
+        };
+        (tens_value(a).is_some() && (unit(b) || ordinal_unit(b))) || is_scale_word(b)
+    };
+    if (0..lower.len() - 1).all(|k| compound(&lower[k], &lower[k + 1])) {
+        return None;
+    }
+    let mut out = Vec::new();
+    let mut at = 0;
+    let mut hyphen = 0;
+    for k in 0..lower.len() - 1 {
+        hyphen += words[k].len();
+        if !compound(&lower[k], &lower[k + 1]) {
+            out.push(&piece[at..hyphen]);
+            out.push(&piece[hyphen..hyphen + 1]);
+            at = hyphen + 1;
+        }
+        hyphen += 1;
+    }
+    out.push(&piece[at..]);
+    Some(out)
 }
 
 fn is_number(converter: &super::Converter, word: &str) -> bool {

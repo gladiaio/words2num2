@@ -8886,8 +8886,10 @@ mod sign_and_script_tests {
         assert_eq!(s("call one two three\u{FF0D}", "digits"), "call 123\u{FF0D}");
         assert_eq!(s("code -one two three", "digits"), "code -one 2 3");
         assert_eq!(s("x -oh three y", "digits"), "x -oh 3 y");
-        // An inner hyphen still joins: "one two-three four" is 1234.
-        assert_eq!(s("call one two-three four", "cardinal"), "call 1234");
+        // An inner hyphen is no longer a join between digit words: it is a
+        // boundary and stays (gladia-enterprise#900).
+        assert_eq!(s("call five five five-one two one two", "cardinal"), "call 555-1212");
+        assert_eq!(s("call one two-three four", "cardinal"), "call 1 2-3 4");
         assert_eq!(s("call four five six seven", "cardinal"), "call 4567");
     }
 

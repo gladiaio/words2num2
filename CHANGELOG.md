@@ -8,6 +8,7 @@ follows [Semantic Versioning](https://semver.org/) and uses
 
 ### Fixed
 
+- en: a hyphen between two number words joins them only in a compound (a tens word and a unit, "twenty-two", "twenty-first"; a number and its scale, "two-thousand"). Any other hyphen is a boundary and stays: "two thousand-two thousand five" is "2000-2005" (was "2002 1005"), "five five five-one two one two" is "555-1212" (was "5551212"), "twenty-thirty" is "20-30" (was "2030"), "pages ten-twelve" is "pages 10-12" (gladia-enterprise#900).
 - all: a Whisper timestamp token or a WebVTT / SRT tag glued to a number word no longer cuts the number: "nineteen eighty four.<|2.40|>" is "1984.<|2.40|>" (was "1980 four.<|2.40|>"), "<v Bob>twenty five" is "<v Bob>25"; the currency, date and phone passes read the text between tags the same way ("<v Bob>twenty five dollars" with currency=True is "<v Bob>$25"). An inline tag (a style, a word timestamp) is read through, the words around it in context ("at <b>nine fifty</b>" is "at <b>9:50</b>"; "<i>twenty five</i> <i>thirty</i>" is "<i>25</i> <i>30</i>"); a number with one inside it (a karaoke word timestamp, "<i>zwanzig</i>tausend") is left as written (#910, #1298, #1299, #1300).
 
 ## [0.4.9] — 2026-10-15
