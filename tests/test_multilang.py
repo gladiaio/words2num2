@@ -1512,3 +1512,32 @@ def test_my_counter_particle(text, expected):
 )
 def test_glued_markup_tags(lang, text, expected):
     assert words2num_sentence(text, lang=lang) == expected
+
+
+@pytest.mark.parametrize(
+    "lang,text,kwargs,expected",
+    [
+        # A tag cuts the text into cues: the currency and date passes read
+        # each one as the walk does (#1298).
+        ("en", "<v Bob>twenty five dollars", {"currency": True}, "<v Bob>$25"),
+        ("en", "<v Bob>five dollars", {"currency": True}, "<v Bob>$5"),
+        ("en", "<i>twenty five dollars</i>", {"currency": True}, "<i>$25</i>"),
+        ("en", "twenty five dollars<|2.40|>", {"currency": True}, "$25<|2.40|>"),
+        ("fr", "<v Ana>vingt-cinq euros", {"currency": True}, "<v Ana>25 €"),
+        ("en", "<v Bob>I paid 25 dollars", {"currency": True}, "<v Bob>I paid $25"),
+        (
+            "en",
+            "<v Bob>march twelfth twenty twenty six",
+            {"date": True},
+            "<v Bob>March 12, 2026",
+        ),
+        ("en", "<i>", {}, "<i>"),
+    ],
+)
+def test_glued_markup_tags_folds(lang, text, kwargs, expected):
+    assert words2num_sentence(text, lang=lang, **kwargs) == expected
+
+
+def test_glued_markup_tags_check_lang():
+    with pytest.raises(NotImplementedError):
+        words2num_sentence("<i>", lang="xx")

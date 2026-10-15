@@ -186,6 +186,26 @@ fn markup_len(chars: &[char], i: usize) -> Option<usize> {
         .then_some(len)
 }
 
+/// The byte ranges of the markup tags in `text` ([`markup_len`]).
+pub(super) fn markup_spans(text: &str) -> Vec<(usize, usize)> {
+    if !text.contains('<') {
+        return Vec::new();
+    }
+    let chars: Vec<char> = text.chars().collect();
+    let offsets: Vec<usize> = text.char_indices().map(|(k, _)| k).chain(std::iter::once(text.len())).collect();
+    let mut spans = Vec::new();
+    let mut i = 0;
+    while i < chars.len() {
+        if let Some(n) = markup_len(&chars, i) {
+            spans.push((offsets[i], offsets[i + n]));
+            i += n;
+        } else {
+            i += 1;
+        }
+    }
+    spans
+}
+
 /// Is `part` a whole markup tag ([`markup_len`])?
 pub(super) fn is_markup(part: &str) -> bool {
     let chars: Vec<char> = part.chars().collect();

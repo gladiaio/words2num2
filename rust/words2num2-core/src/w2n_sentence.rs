@@ -4209,6 +4209,24 @@ pub fn words2num_sentence_full(
             )))
         }
     };
+    // A subtitle or decoder tag ("<v Bob>", "</i>", "<|2.40|>") cuts the text
+    // into cues, each read on its own by every pass, the tags kept as
+    // written: "<v Bob>twenty five dollars" is "<v Bob>$25" (#910, #1298).
+    let spans = tokens::markup_spans(sentence);
+    if !spans.is_empty() {
+        // The language and mode are checked even when only tags are left.
+        words2num_sentence_full("", lang, to, has_kwargs, currency, date, region, date_format, phone)?;
+        let mut out = String::with_capacity(sentence.len());
+        let mut at = 0;
+        for (start, end) in spans.into_iter().chain(std::iter::once((sentence.len(), sentence.len()))) {
+            if start > at {
+                out.push_str(&words2num_sentence_full(&sentence[at..start], lang, to, has_kwargs, currency, date, region, date_format, phone)?);
+            }
+            out.push_str(&sentence[start..end]);
+            at = end;
+        }
+        return Ok(out);
+    }
     // The currency pass reads a figure with its format character (#1021).
     let folds = date || phone;
     let mut out = with_bare_format(!folds, || words2num_sentence_folded(sentence, lang, to, has_kwargs, currency))?;
