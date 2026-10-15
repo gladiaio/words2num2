@@ -4434,18 +4434,29 @@ fn read_through_inline(
         m.push_str(&text[at..to]);
         m
     };
-    // Where each mask is in `read`, in order; None for one read across.
+    // Where each mask is in `read`, in order; None for one read across. One
+    // pass over `read`: a mask is a blank, its digits in U+2000..U+2009, a
+    // blank.
     let found = |read: &str, ks: std::ops::Range<usize>| -> Vec<Option<(usize, usize)>> {
-        let mut at = 0;
-        ks.map(|k| {
-            let m = mask(k);
-            read[at..].find(&m).map(|p| {
-                let s = at + p;
-                at = s + m.len();
-                (s, at)
-            })
-        })
-        .collect()
+        let digit = |c: char| ('\u{2000}'..='\u{2009}').contains(&c);
+        let mut places = vec![None; ks.len()];
+        let mut last = None;
+        let mut i = 0;
+        while let Some(p) = read[i..].find(|c: char| digit(c)) {
+            let s = i + p;
+            let run_end = read[s..].find(|c: char| !digit(c)).map_or(read.len(), |q| s + q);
+            i = run_end;
+            if s == 0 || !read[..s].ends_with(' ') || !read[run_end..].starts_with(' ') {
+                continue;
+            }
+            let k = read[s..run_end].chars().fold(0usize, |n, c| n * 10 + (c as usize - 0x2000));
+            // In order only: a mask before the last one found is no mask.
+            if ks.contains(&k) && last.is_none_or(|l| k > l) {
+                places[k - ks.start] = Some((s - 1, run_end + 1));
+                last = Some(k);
+            }
+        }
+        places
     };
     let read = full(&masked_of(0, text.len(), 0..tags.len()))?;
     let places = found(&read, 0..tags.len());
