@@ -6,6 +6,10 @@ follows [Semantic Versioning](https://semver.org/) and uses
 
 ## [Unreleased]
 
+### Fixed
+
+- my: years and months with a particle on the month read as years and months ("သုံး နှစ် လေး လပါ" is "3 နှစ် 4 လပါ", was "324 လပါ") (#1285).
+
 ## [0.4.7] — 2026-10-15
 
 ### Fixed
