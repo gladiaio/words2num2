@@ -4296,8 +4296,10 @@ fn cue_breaks(sentence: &str, lang: &str) -> Vec<(usize, usize)> {
                 || w.split(['-', '\u{2010}']).all(|p| !p.is_empty() && converter.is_number_word(p)))
     };
     let connector = |w: &str| connectors.iter().any(|c| *c == clean(w));
-    // The words between the groups: (start, end), split at blanks.
+    // The words between the groups: (start, end), split at blanks; and for
+    // each group, how many words come before it.
     let mut words: Vec<(usize, usize)> = Vec::new();
+    let mut words_before: Vec<usize> = Vec::with_capacity(groups.len());
     let mut at = 0;
     for &(gs, ge, _) in groups.iter().chain(std::iter::once(&(sentence.len(), sentence.len(), false))) {
         let mut k = at;
@@ -4312,39 +4314,99 @@ fn cue_breaks(sentence: &str, lang: &str) -> Vec<(usize, usize)> {
         if k < gs {
             words.push((k, gs));
         }
+        words_before.push(words.len());
         at = ge;
     }
-    // The word next to a tag group on one side, if it belongs to a number:
-    // a number word, or a connector with one beyond it ("and</c><c> four"
-    // after "hundred"; not the "y" closing "veintiséis</i> y").
-    let text = |w: (usize, usize)| &sentence[w.0..w.1];
-    let side = |k: Option<usize>, back: bool| -> Option<(usize, usize)> {
+    let text = |k: usize| &sentence[words[k].0..words[k].1];
+    // A hyphen alone between two tagged halves ("<i>twenty</i>-<i>five</i>")
+    // joins them as a connector does.
+    let joiner = |k: usize| connector(text(k)) || matches!(text(k), "-" | "\u{2010}" | "\u{2011}");
+    // The word next to a tag group on one side, if it belongs to a number,
+    // and the farthest word of that number on this side: a number word, or a
+    // connector with one beyond it ("and</c><c> four" after "hundred"; not
+    // the "y" closing "veintiséis</i> y").
+    let side = |k: Option<usize>, back: bool| -> Option<usize> {
         let k = k?;
-        let w = words[k];
-        if number(text(w)) {
-            return Some(w);
+        if number(text(k)) {
+            return Some(k);
         }
-        let beyond = if back { k.checked_sub(1) } else { Some(k + 1).filter(|&j| j < words.len()) };
-        (connector(text(w)) && beyond.is_some_and(|j| number(text(words[j])))).then_some(w)
+        let beyond = if back { k.checked_sub(1) } else { Some(k + 1).filter(|&j| j < words.len()) }?;
+        (joiner(k) && number(text(beyond))).then_some(beyond)
     };
-    let before = |pos: usize| side(words.iter().rposition(|w| w.1 <= pos), true);
-    let after = |pos: usize| side(words.iter().position(|w| w.0 >= pos), false);
+    // The words from `first` to `last` without their tags: one number? Not
+    // two numbers side by side, each in its own tags ("<i>twenty five</i>
+    // <i>thirty</i>", #910 audit).
+    let one_number = |first: usize, last: usize| {
+        let (from, to) = (words[first].0, words[last].1);
+        let mut plain = String::new();
+        let mut at = from;
+        let lo = groups.partition_point(|g| g.0 < from);
+        for &(gs, ge, _) in groups[lo..].iter().take_while(|g| g.1 <= to) {
+            plain.push_str(&sentence[at..gs]);
+            at = ge;
+        }
+        plain.push_str(&sentence[at..to]);
+        words2num_sentence_walk(&plain, lang, "cardinal", false).is_ok_and(|w| {
+            let w = w.trim();
+            !w.contains(char::is_whitespace) && w.chars().any(|c| c.is_ascii_digit())
+        })
+    };
+    // The runs of number words, tags passed over: each word's run, by its
+    // first and last word. id "dua<…> puluh<…> lima" is one number though
+    // "puluh lima" is not.
+    let mut run_of: Vec<Option<(usize, usize)>> = vec![None; words.len()];
+    let mut k = 0;
+    while k < words.len() {
+        if !number(text(k)) {
+            k += 1;
+            continue;
+        }
+        let start = k;
+        let mut end = k;
+        while let Some(j) = side(Some(end + 1).filter(|&j| j < words.len()), false) {
+            end = j;
+        }
+        for r in &mut run_of[start..=end] {
+            *r = Some((start, end));
+        }
+        k = end + 1;
+    }
+    // Each run read once; a run of more than two dozen words is no one
+    // number (a list, a dictation), and the reading stays linear.
+    let mut run_ok: std::collections::HashMap<(usize, usize), bool> = std::collections::HashMap::new();
     let mut kept = vec![false; groups.len()];
-    let mut frozen: Vec<(usize, usize)> = Vec::new();
-    for (k, &(gs, ge, inline)) in groups.iter().enumerate() {
+    // The word starts and ends of the numbers kept as written.
+    let mut frozen_starts = std::collections::HashSet::new();
+    let mut frozen_ends = std::collections::HashSet::new();
+    for (g, &(_, _, inline)) in groups.iter().enumerate() {
         if !inline {
             continue;
         }
-        if let (Some(b), Some(a)) = (before(gs), after(ge)) {
-            kept[k] = true;
-            frozen.push(b);
-            frozen.push(a);
+        let n = words_before[g];
+        let first = side(n.checked_sub(1), true);
+        let last = side(Some(n).filter(|&j| j < words.len()), false);
+        let (Some(first), Some(last)) = (first, last) else { continue };
+        let Some(run) = run_of[first].or(run_of[last]) else { continue };
+        let pair = {
+            let joined = format!("{} {}", text(first), text(last)).to_lowercase();
+            converter.to_cardinal(&joined).is_ok() || one_number(first, last)
+        };
+        let short = run.1 - run.0 < 24;
+        let whole = pair || *run_ok.entry(run).or_insert_with(|| short && one_number(run.0, run.1));
+        if whole {
+            kept[g] = true;
+            // The whole run stays as written; a long one, only these words.
+            let (from, to) = if short { (first.min(run.0), last.max(run.1)) } else { (first, last) };
+            for w in &words[from..=to] {
+                frozen_starts.insert(w.0);
+                frozen_ends.insert(w.1);
+            }
         }
     }
     // A tag glued to a word of such a number stays with it.
-    for (k, &(gs, ge, _)) in groups.iter().enumerate() {
-        if frozen.iter().any(|w| w.1 == gs || w.0 == ge) {
-            kept[k] = true;
+    for (g, &(gs, ge, _)) in groups.iter().enumerate() {
+        if frozen_ends.contains(&gs) || frozen_starts.contains(&ge) {
+            kept[g] = true;
         }
     }
     groups.into_iter().zip(kept).filter(|(_, kept)| !kept).map(|((s, e, _), _)| (s, e)).collect()

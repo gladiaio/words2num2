@@ -1559,6 +1559,9 @@ def test_glued_markup_tags_folds(lang, text, kwargs, expected):
         ("de", "zwanzig<00:01.500>tausend"),
         ("en", "<i>twenty</i>-five"),
         ("en", "twenty-<i>five</i>"),
+        ("en", "<i>twenty</i>-<i>five</i>"),
+        ("fr", "<i>vingt</i>-<i>cinq</i>"),
+        ("id", "<i>dua puluh</i> <i>tiga</i>"),
         # Not a tag: a clock time with no milliseconds, prose after a name.
         ("en", "<12:30>three"),
     ],
@@ -1577,6 +1580,12 @@ def test_inline_markup_inside_a_number(lang, text):
             "<00:01.000>25 <00:01.400>people",
         ),
         ("en", "<i love you> twenty five", "<i love you> 25"),
+        # Two numbers, each in its own tags, are two numbers (#910 audit).
+        ("en", "<i>twenty five</i> <i>thirty</i>", "<i>25</i> <i>30</i>"),
+        ("en", "<i>twenty five</i>\n<i>thirty six</i>", "<i>25</i>\n<i>36</i>"),
+        ("en", "<i>twenty five</i><i>thirty</i>", "<i>25</i><i>30</i>"),
+        ("en", "<i>one hundred and one</i> <i>five</i>", "<i>101</i> <i>5</i>"),
+        ("en", "<i>twenty five</i> <i>six</i> people", "<i>25</i> <i>6</i> people"),
         # "y" after the number is no connector into it.
         (
             "es",
