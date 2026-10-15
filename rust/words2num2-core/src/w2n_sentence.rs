@@ -6218,11 +6218,14 @@ fn words2num_sentence_walk(
                     !has_trailing_mark(raw) && !tokens::is_punct_part(raw) && rstrip_punct(raw) == raw.as_str()
                 })
                 // Not before a counter: "ငါးရာ နှစ် ကျပ်" (#1015); right after a
-                // year, a month with its particles counts too ("ငါး နှစ်
-                // နှစ် လပါ", 5 years 2 months, #1296).
+                // year ("<number> နှစ်"), a month with its particles counts too
+                // ("ငါး နှစ် နှစ် လပါ", 5 years 2 months, #1296), but not
+                // after a lone "နှစ်", the count ("နှစ် နှစ် လကို", #1283).
                 && !(!has_trailing_mark(piece)
                     && (my_counter(next_word(&parts, i).as_deref())
                         || (prev_word(&parts, i).is_some_and(|p| crate::normalize(&p) == crate::normalize("နှစ်"))
+                            && prev_word2(&parts, i)
+                                .is_some_and(|p| starts_run(&converter, &p, decimal_heads) || my_figure(&p))
                             && next_word(&parts, i).is_some_and(|n| my_counter_head(&n) == crate::normalize("လ")))))
             {
                 // my "ငါး နှစ်": the year after a number, no 2 (#876).
