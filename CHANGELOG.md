@@ -6,6 +6,15 @@ follows [Semantic Versioning](https://semver.org/) and uses
 
 ## [Unreleased]
 
+### Fixed
+
+- en, regressions of 0.4.7's spoken pairs (#1286), its prices and counts kept:
+  - A clock time after "at", "by", "until", … stays a time before a plural-looking word: "the train at nine fifty stops in Leeds" is "at 9:50" again, as are "I wake at six thirty weekdays" and "the meeting at ten fifteen runs long" (0.4.7: "950", "630", "1015"). After a time cue only a known counted noun ("at nine fifty people") reads hundreds. A time word after the pair ("pm", "o'clock", "sharp", "tomorrow", …) keeps the time after a price verb too ("I paid at nine fifty pm") (#1288).
+  - A time unit counts no hundreds: "he left at nine forty minutes ago" is "9 40 minutes" again (0.4.7: "940 minutes") (#1289).
+  - Plain mode writes no prices: a price cue keeps the two figures ("I paid nine fifty for parking" is "9 50" again; 0.4.7: "950", 100 times the "$9.50" of currency mode) (#1290).
+  - A price with no currency name is in the region's currency: en_GB "£2.50", en_IN "₹2.50", en_IE "€2.50"; a region whose currency is not known here gets no price reading (0.4.7: "$2.50" for all) (#1291).
+  - "two fifty pounds of flour" (a weight) gets no ".50": "2 50 pounds of flour" again (0.4.7: "2.50 pounds of flour") (#1287).
+
 ## [0.4.7] — 2026-10-15
 
 ### Fixed

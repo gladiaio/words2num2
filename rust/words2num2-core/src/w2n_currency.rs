@@ -282,11 +282,23 @@ fn default_currency(lang: &str) -> Currency {
 /// for a price said with no currency name ("sold at nine fifty each"). None
 /// when the language has no currency rendering or that currency no cents.
 pub fn render_default(lang: &str, int: &str, frac: &str) -> Option<String> {
-    let base = lang.split(&['_', '-'][..]).next().unwrap_or(lang);
+    let mut parts = lang.split(&['_', '-'][..]);
+    let base = parts.next().unwrap_or(lang);
     if hand_lexicon(base).is_empty() {
         return None;
     }
-    let cur = default_currency(base);
+    // en: the region's own currency ("it costs two fifty" is £2.50 in
+    // en_GB, not $2.50); a region whose currency is unknown here gets no
+    // price reading (#1291).
+    let region = parts.next().map(|r| r.to_ascii_uppercase());
+    let cur = match (base, region.as_deref()) {
+        ("en", None | Some("US" | "CA" | "AU" | "NZ")) => default_currency(base),
+        ("en", Some("GB" | "UK")) => GBP,
+        ("en", Some("IN")) => INR,
+        ("en", Some("IE")) => EUR,
+        ("en", Some(_)) => return None,
+        _ => default_currency(base),
+    };
     (cur.decimals == 2).then(|| render(base, cur, int, Some(frac)))
 }
 
