@@ -1127,7 +1127,8 @@ def test_tr_vowel_harmony(text, expected):
         ("en", "meet at oh six hundred", "meet at 06 hundred"),
         ("en", "zero double five hundred", "055 hundred"),
         ("en", "zero nine hundred thirty hours", "09 130 hours"),
-        ("en", "zero-five hundred", "05 hundred"),
+        # A hyphen between two number words is a boundary, not a join (gladia-enterprise#900).
+        ("en", "zero-five hundred", "0-500"),
         (
             "en",
             "we move out at zero six hundred and regroup",
