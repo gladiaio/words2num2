@@ -1450,6 +1450,8 @@ def test_spaced_tens_word(lang, text, expected):
         ("ငါးရာ နှစ် ယောက်ပဲ", "502 ယောက်ပဲ"),
         # A sentence ending right after the word makes a verb (#1283 audit).
         ("ငါး နှစ် စုတယ်", "5 နှစ် စုတယ်"),
+        ("ငါး နှစ် စုပါတယ်", "5 နှစ် စုပါတယ်"),
+        ("ငါး နှစ် အိမ်မှာ နေတယ်", "5 နှစ် အိမ်မှာ နေတယ်"),
         ("ငါးရာ နှစ် ကျပ်တယ်", "500 နှစ် ကျပ်တယ်"),
         # A unit with a particle stays a dictated number, as the bare unit (#1038).
         ("သုံး နှစ် လေး ကျပ်ပါ", "324 ကျပ်ပါ"),

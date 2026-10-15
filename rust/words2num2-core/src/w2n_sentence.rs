@@ -1598,9 +1598,15 @@ const MY_COUNTERS: &[&str] = &[
 
 /// Is `next` (the word after a my "နှစ်") a counter, currency or unit?
 fn my_counter(next: Option<&str>) -> bool {
+    // Counters that are also everyday verb roots count only bare: with a
+    // particle the word is the verb ("စုပါတယ်", saved; "ဆောင်ပါ", carry;
+    // #1283 audit). "ကျပ်ပါ" (kyat) keeps the counter reading.
+    const VERB_ROOTS: &[&str] = &["စု", "ပတ်", "စီး", "ပွင့်", "ရက်", "ဆောင်", "ခါ", "ဖွဲ့", "လုံး", "ပြား", "ပါး", "ချောင်း"];
     next.is_some_and(|w| {
         let head = my_counter_head(w);
+        let bare = crate::normalize(w) == head;
         MY_COUNTERS.iter().any(|c| crate::normalize(c) == head)
+            && (bare || !VERB_ROOTS.iter().any(|v| crate::normalize(v) == head))
     })
 }
 
@@ -1611,7 +1617,9 @@ fn my_counter(next: Option<&str>) -> bool {
 /// the word it makes a verb ("စုတယ်", saved; "ကျပ်တယ်", is tight; #1283
 /// audit).
 fn my_counter_head(w: &str) -> String {
-    const PARTICLES: &[&str] = &["ပါ", "တွေ", "ကို", "နဲ့", "လည်း", "စီ", "လောက်", "ခန့်", "တည်း", "မှာ", "က", "ပဲ"];
+    // Not "မှာ"/"က": "အိမ်မှာ" is "at home" ("ငါး နှစ် အိမ်မှာ နေတယ်", lived
+    // five years at home, #1283 audit).
+    const PARTICLES: &[&str] = &["ပါ", "တွေ", "ကို", "နဲ့", "လည်း", "စီ", "လောက်", "ခန့်", "တည်း", "ပဲ"];
     const ENDINGS: &[&str] = &["တယ်", "ရယ်", "နော်"];
     let mut w = crate::normalize(w);
     let strip = |w: &str, list: &[&str]| {
