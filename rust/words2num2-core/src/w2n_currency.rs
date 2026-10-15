@@ -278,6 +278,18 @@ fn default_currency(lang: &str) -> Currency {
     }
 }
 
+/// An amount in the language's default currency ("9", "50" -> "$9.50" in en),
+/// for a price said with no currency name ("sold at nine fifty each"). None
+/// when the language has no currency rendering or that currency no cents.
+pub fn render_default(lang: &str, int: &str, frac: &str) -> Option<String> {
+    let base = lang.split(&['_', '-'][..]).next().unwrap_or(lang);
+    if hand_lexicon(base).is_empty() {
+        return None;
+    }
+    let cur = default_currency(base);
+    (cur.decimals == 2).then(|| render(base, cur, int, Some(frac)))
+}
+
 /// A currency name that, after the minutes of a time, is more often another
 /// word or a name ("pound the table", "Penny", "Rand des Waldes", es "peso
 /// la harina"): the time is kept (#1197 audit).

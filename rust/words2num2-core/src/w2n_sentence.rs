@@ -4287,6 +4287,173 @@ fn fold_currency_half(text: &str, lang: &str, input: &str) -> String {
     out.join(" ")
 }
 
+/// Words before a spoken price that make it one ("sold at nine fifty"), and
+/// after it ("nine fifty each", "four ninety-nine a pound"): en.
+const PRICE_VERBS: &[&str] = &[
+    "sold", "sell", "sells", "selling", "priced", "costs", "cost", "costing", "charged", "charge", "charges", "charging",
+    "pay", "paid", "pays", "paying",
+];
+const PRICE_NOUNS: &[&str] = &["price", "cost", "total", "fare", "fee"];
+const PRICE_UNITS: &[&str] = &[
+    "pound", "kilo", "kilogram", "gram", "ounce", "lb", "kg", "dozen", "gallon", "liter", "litre", "bottle", "box", "bag", "pack",
+    "can", "slice", "piece", "item", "unit", "ticket", "share", "head", "person", "night", "day", "week", "month", "year", "hour",
+    "minute", "mile", "meter", "metre", "foot", "yard", "ride", "visit", "lesson", "plate", "glass", "cup", "serving", "pop", "shot",
+];
+
+/// Plural-looking words that count nothing after a number ("nine fifty is
+/// fine", "two fifty seems a lot").
+const NOT_COUNTED: &[&str] = &[
+    "is", "was", "has", "does", "says", "seems", "means", "looks", "sounds", "works", "goes", "gets", "makes", "takes", "comes",
+    "as", "us", "yes", "thus", "plus", "minus", "less", "unless", "always", "perhaps", "sometimes", "towards", "besides",
+    "whereas", "across", "his", "its", "this",
+];
+const COUNTED: &[&str] = &["people", "children", "men", "women", "feet", "geese", "mice", "teeth", "sheep", "fish", "deer", "staff", "crew"];
+
+fn trimmed(t: &str) -> &str {
+    t.trim_end_matches(|c: char| !c.is_alphanumeric())
+}
+
+/// en, a spelled-out pair "<units 1-99> <tens 10-99>" that is not one number
+/// ("nine fifty", "twenty one forty"), read by what frames it:
+///
+/// 1. a currency name right after it: left to the walk and the currency pass
+///    ("two fifty dollars" -> "$2.50" in currency mode, see
+///    [`fold_spoken_price`]; "2 50 dollars" in plain mode, which writes no
+///    decimals);
+/// 2. a price cue, currency mode: units then cents in the language's default
+///    currency ("sold at nine fifty each" -> "sold at $9.50 each"). A cue is a
+///    price verb before it ("sold", "costs", "paid", optionally then "at" /
+///    "for"; "the price is"), unless a counted noun follows ("sold two
+///    fifty-five shares" counts shares), or "each" / "apiece" ending the
+///    clause, "a piece", "a pop", "per <word>", "a <unit>" after it ("each
+///    morning" keeps the time, #1192);
+/// 3. a counted noun after it, or a price cue in plain mode: hundreds ("nine
+///    fifty people" -> "950 people", "it costs two fifty" -> "it costs 250");
+///    a counted noun is a plural-looking word ("cars", "units") or an
+///    irregular plural ("people"), not a verb or adverb in `NOT_COUNTED`;
+/// 4. anything else: the walk reads it ("at two fifty" -> 2:50 after a time
+///    cue, "nineteen fifty" -> 1950, otherwise two numbers).
+///
+/// Returns the byte spans of the number words and what each is written as.
+fn spoken_pair_spans(sentence: &str, lang: &str, currency: bool) -> Vec<(usize, usize, String)> {
+    let base = lang.split(['_', '-']).next().unwrap_or(lang).to_lowercase();
+    if base != "en" {
+        return Vec::new();
+    }
+    let mut toks: Vec<(usize, &str)> = Vec::new();
+    let mut start: Option<usize> = None;
+    for (i, c) in sentence.char_indices() {
+        if c.is_whitespace() {
+            if let Some(s) = start.take() {
+                toks.push((s, &sentence[s..i]));
+            }
+        } else if start.is_none() {
+            start = Some(i);
+        }
+    }
+    if let Some(s) = start {
+        toks.push((s, &sentence[s..]));
+    }
+    let word = trimmed;
+    let bare = |t: &str| !t.is_empty() && t.chars().all(|c| c.is_alphanumeric() || c == '-') && word(t) == t;
+    let core = |k: usize| toks.get(k).map(|(_, t)| crate::normalize(word(t))).unwrap_or_default();
+    let small = |w: &str| match crate::lookup_norm(&base, w, false, &[]) {
+        Ok(Some(v)) if (0..100).contains(&v) => Some(v as u32),
+        _ => None,
+    };
+    let value = |w: &str| -> Option<u32> {
+        if w.chars().any(|c| c.is_numeric()) {
+            return None;
+        }
+        match w.split_once('-') {
+            Some((a, b)) => {
+                let (x, y) = (small(a)?, small(b)?);
+                (x >= 20 && x % 10 == 0 && (1..10).contains(&y)).then_some(x + y)
+            }
+            None => small(w),
+        }
+    };
+    // Any number word, a scale included; not the article ("a pound").
+    let number = |k: usize| {
+        let w = core(k);
+        !w.is_empty()
+            && !matches!(w.as_str(), "a" | "an")
+            && (value(&w).is_some()
+                || matches!(w.as_str(), "hundred" | "hundreds" | "point")
+                || crate::w2n_lang_en::is_scale_word(&w)
+                || matches!(crate::lookup_norm(&base, &w, false, &[]), Ok(Some(_))))
+    };
+    // A number of one or two words below 100 at `k`: "nine", "ninety-nine", "twenty one".
+    let group = |k: usize| -> Option<(u32, usize)> {
+        let (_, t) = toks.get(k)?;
+        let w = core(k);
+        let v = value(&w)?;
+        if v >= 20 && v % 10 == 0 && !w.contains('-') && bare(t) {
+            if let Some(u) = toks.get(k + 1).and_then(|_| value(&core(k + 1))).filter(|u| (1..10).contains(u) && !core(k + 1).contains('-')) {
+                return Some((v + u, 2));
+            }
+        }
+        Some((v, 1))
+    };
+    let mut spans = Vec::new();
+    let mut i = 0;
+    while i < toks.len() {
+        let found = (|| {
+            if i > 0 && number(i - 1) {
+                return None;
+            }
+            let (units, ulen) = group(i).filter(|(u, _)| (1..100).contains(u))?;
+            if !(i..i + ulen).all(|k| bare(toks[k].1)) {
+                return None;
+            }
+            let (cents, clen) = group(i + ulen).filter(|(c, _)| (10..100).contains(c))?;
+            let last = i + ulen + clen - 1;
+            if !(i + ulen..last).all(|k| bare(toks[k].1)) || !toks[last].1.starts_with(|c: char| c.is_alphanumeric()) {
+                return None;
+            }
+            let marked = word(toks[last].1) != toks[last].1;
+            let next = last + 1;
+            if !marked && next < toks.len() && (number(next) || crate::w2n_currency::is_currency_word(&base, &core(next))) {
+                return None;
+            }
+            let plain = |k: usize| toks.get(k).is_some_and(|(_, t)| bare(t));
+            let (p1, p2) = (if i >= 1 { core(i - 1) } else { String::new() }, if i >= 2 { core(i - 2) } else { String::new() });
+            let before = (plain(i.wrapping_sub(1)) && i >= 1)
+                && (PRICE_VERBS.contains(&p1.as_str())
+                    || (matches!(p1.as_str(), "at" | "for") && i >= 2 && plain(i - 2) && PRICE_VERBS.contains(&p2.as_str()))
+                    || (matches!(p1.as_str(), "is" | "was") && i >= 2 && plain(i - 2) && PRICE_NOUNS.contains(&p2.as_str())));
+            let (n1, n2) = (core(next), core(next + 1));
+            let after = !marked
+                && ((matches!(n1.as_str(), "each" | "apiece") && (next + 1 >= toks.len() || word(toks[next].1) != toks[next].1))
+                    || (n1 == "per" && next + 1 < toks.len() && !matches!(n2.as_str(), "the" | "a" | "an"))
+                    || (n1 == "a" && plain(next) && (PRICE_UNITS.contains(&n2.as_str()) || n2 == "piece" || n2 == "pop")));
+            let counted = !marked
+                && next < toks.len()
+                && n1.chars().all(|c| c.is_alphabetic())
+                && (COUNTED.contains(&n1.as_str()) || (n1.len() >= 3 && n1.ends_with('s') && !n1.ends_with("ss") && !NOT_COUNTED.contains(&n1.as_str())));
+            let end = toks[last].0 + word(toks[last].1).len();
+            // A counted noun says what the pair counts, whatever verb comes
+            // before ("sold two fifty-five shares" is 255 shares).
+            if currency && (after || (before && !counted)) {
+                let amount = crate::w2n_currency::render_default(&base, &units.to_string(), &format!("{cents:02}"))?;
+                return Some((toks[i].0, end, amount, last + 1));
+            }
+            if counted || before || after {
+                return Some((toks[i].0, end, (units * 100 + cents).to_string(), last + 1));
+            }
+            None
+        })();
+        match found {
+            Some((a, b, amount, next)) => {
+                spans.push((a, b, amount));
+                i = next;
+            }
+            None => i += 1,
+        }
+    }
+    spans
+}
+
 /// en "at two fifty dollars" -> "at $2.50", not "at 2 $50": a spoken price,
 /// units then cents with no "and" or "point", read as one amount. The walk
 /// leaves the pair as two figures ("2 50 dollars": since 0.4.2 minutes before
@@ -4992,6 +5159,27 @@ fn words2num_sentence_folded(
     // unsupported `lang` or `to` would otherwise come back as the input text.
     let resolved_lang = resolve_lang(lang)?;
     check_converter_type(to)?;
+    // en "<units> <tens>" pairs a cue reads: a price ("sold at nine fifty
+    // each" -> "$9.50", currency mode) or hundreds ("nine fifty people" ->
+    // 950). Each span is written as read; the text around it is walked.
+    if to == "cardinal" {
+        let spans = spoken_pair_spans(sentence, &resolved_lang, currency);
+        if !spans.is_empty() {
+            let mut out = String::new();
+            let mut last = 0;
+            for (a, b, text) in spans {
+                if a > last {
+                    out.push_str(&words2num_sentence_folded(&sentence[last..a], lang, to, has_kwargs, currency)?);
+                }
+                out.push_str(&text);
+                last = b;
+            }
+            if last < sentence.len() {
+                out.push_str(&words2num_sentence_folded(&sentence[last..], lang, to, has_kwargs, currency)?);
+            }
+            return Ok(out);
+        }
+    }
     // fr / de / es clock times, read on the words before the walk ("à neuf
     // heures quinze" -> "à 9h15"); the walk leaves the figures alone.
     let timed;
@@ -7954,6 +8142,10 @@ mod spoken_price_tests {
         words2num_sentence_opts(t, "en", "cardinal", false, true).unwrap()
     }
 
+    fn p(t: &str) -> String {
+        words2num_sentence_opts(t, "en", "cardinal", false, false).unwrap()
+    }
+
     /// en "two fifty dollars" is a price, units then cents: "$2.50", not "2 $50".
     #[test]
     fn units_then_cents_before_the_unit() {
@@ -7965,8 +8157,30 @@ mod spoken_price_tests {
         assert_eq!(c("he paid two fifty dollars and three dollars"), "he paid $2.50 and $3");
     }
 
+    /// No currency name, a price cue before or after it: the default currency.
+    #[test]
+    fn price_cue_without_a_currency_name() {
+        assert_eq!(c("sold at nine fifty each"), "sold at $9.50 each");
+        assert_eq!(c("it costs two fifty"), "it costs $2.50");
+        assert_eq!(c("priced at nineteen ninety-nine"), "priced at $19.99");
+        assert_eq!(c("four ninety-nine a pound"), "$4.99 a pound");
+        assert_eq!(c("she sold two fifty-five shares"), "she sold 255 shares");
+    }
+
+    /// A counted noun after the pair: hundreds, in both modes.
+    #[test]
+    fn counted_noun_reads_hundreds() {
+        for (t, want) in [("nine fifty people", "950 people"), ("nineteen fifty cars", "1950 cars"), ("two fifty units", "250 units")] {
+            assert_eq!(c(t), want);
+            assert_eq!(p(t), want);
+        }
+        assert_eq!(p("it costs two fifty"), "it costs 250");
+        assert_eq!(p("in nineteen fifty"), "in 1950");
+        assert_eq!(p("nine fifty is fine"), "9 50 is fine");
+    }
+
     /// Not a price: a figure as written, an adjective, no minor unit, a single
-    /// cents digit, a clock time, a count, a scale.
+    /// cents digit, a clock time, a scale.
     #[test]
     fn other_readings_stay() {
         assert_eq!(c("2 fifty dollars"), "2 $50");
@@ -7974,10 +8188,11 @@ mod spoken_price_tests {
         assert_eq!(c("two fifty yen"), "2 ¥50");
         assert_eq!(c("two five dollars"), "2 $5");
         assert_eq!(c("meet at two fifty"), "meet at 2:50");
-        assert_eq!(c("sold at nine fifty each"), "sold at 9 50 each");
+        assert_eq!(c("we start at nine thirty each morning"), "we start at 9:30 each morning");
+        assert_eq!(c("sold at nine fifty thousand each"), "sold at 9 50000 each");
         assert_eq!(c("two hundred fifty dollars"), "$250");
         assert_eq!(c("the price is two dollars fifty"), "the price is $2.50");
-        assert_eq!(words2num_sentence_opts("at two fifty dollars", "en", "cardinal", false, false).unwrap(), "at 2 50 dollars");
+        assert_eq!(p("at two fifty dollars"), "at 2 50 dollars");
     }
 }
 

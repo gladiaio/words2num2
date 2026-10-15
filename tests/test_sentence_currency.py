@@ -580,24 +580,59 @@ def test_amount_and_a_half(text, lang, expected):
 @pytest.mark.parametrize(
     "text, expected",
     [
-        # A spoken price, units then cents before the unit: one amount (#1283).
+        # A spoken price, units then cents before the unit: one amount (#1286).
         ("the price is at two fifty dollars", "the price is at $2.50"),
         ("it costs nine ninety-nine dollars", "it costs $9.99"),
         ("twelve fifty euros please", "€12.50 please"),
         ("it is two fifty dollars.", "it is $2.50."),
+        # No currency name, a price cue before or after it: the default
+        # currency (en: USD).
+        ("sold at nine fifty each", "sold at $9.50 each"),
+        ("it costs two fifty", "it costs $2.50"),
+        ("priced at nineteen ninety-nine", "priced at $19.99"),
+        ("four ninety-nine a pound", "$4.99 a pound"),
+        ("nine fifty per pound", "$9.50 per pound"),
+        ("tickets are twelve fifty each, thanks", "tickets are $12.50 each, thanks"),
+        ("I paid twenty one forty", "I paid $21.40"),
+        # A counted noun says what the pair counts: hundreds, even after a
+        # price verb.
+        ("she sold two fifty-five shares", "she sold 255 shares"),
+        ("nine fifty people", "950 people"),
         # A figure as written, an adjective, no minor unit, a single digit, a
-        # clock time, a count: no price.
+        # clock time, a scale, "each morning": no price.
         ("2 fifty dollars", "2 $50"),
         ("two fifty dollar bills", "2 $50 bills"),
         ("two fifty yen", "2 ¥50"),
         ("two five dollars", "2 $5"),
         ("meet at two fifty", "meet at 2:50"),
-        ("sold at nine fifty each", "sold at 9 50 each"),
+        ("we start at nine thirty each morning", "we start at 9:30 each morning"),
+        ("sold at nine fifty thousand each", "sold at 9 50000 each"),
+        ("two hundred fifty dollars", "$250"),
     ],
 )
 def test_spoken_price_units_then_cents(text, expected):
     assert words2num_sentence(text, lang="en", currency=True) == expected
 
 
-def test_spoken_price_plain_mode_unchanged():
-    assert words2num_sentence("at two fifty dollars", lang="en") == "at 2 50 dollars"
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        # Plain mode writes no decimals: a currency name keeps the two
+        # figures, a price cue or a counted noun reads hundreds (#1286).
+        ("at two fifty dollars", "at 2 50 dollars"),
+        ("sold at nine fifty each", "sold at 950 each"),
+        ("it costs two fifty", "it costs 250"),
+        ("nine fifty people", "950 people"),
+        ("nineteen fifty cars", "1950 cars"),
+        ("two fifty units", "250 units"),
+        ("at nine fifty people", "at 950 people"),
+        ("twenty one forty people", "2140 people"),
+        # No cue: as before (a time after a time cue, a year, two numbers).
+        ("meet at two fifty", "meet at 2:50"),
+        ("in nineteen fifty", "in 1950"),
+        ("nine fifty is fine", "9 50 is fine"),
+        ("two hundred fifty", "250"),
+    ],
+)
+def test_spoken_pair_plain_mode(text, expected):
+    assert words2num_sentence(text, lang="en") == expected
