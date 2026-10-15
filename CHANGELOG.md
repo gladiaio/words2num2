@@ -6,6 +6,8 @@ follows [Semantic Versioning](https://semver.org/) and uses
 
 ## [Unreleased]
 
+## [0.4.7] — 2026-10-15
+
 ### Fixed
 
 - my: a counter with a glued particle after "နှစ်" makes it the number two, as the bare counter does ("ငါးရာ နှစ် ကျပ်ပါ" is "502 ကျပ်ပါ", was "500 နှစ် ကျပ်ပါ"); listed particles only, stacked too ("ကျပ်ပါတယ်", "ယောက်ပဲ"), so "လာတယ်" is no month; a sentence ending only after another particle, as "စုတယ်" (saved) is a verb, and counters that are also verb roots ("စု", "ဆောင်", …) only bare ("စုပါတယ်" stays); no "မှာ"/"က", as "အိမ်မှာ" is "at home"; a unit with a particle stays a dictated number like the bare unit ("သုံး နှစ် လေး ကျပ်ပါ" is "324 ကျပ်ပါ") (#1016, #1284).
