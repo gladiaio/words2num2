@@ -6,6 +6,8 @@ follows [Semantic Versioning](https://semver.org/) and uses
 
 ## [Unreleased]
 
+## [0.4.10] — 2026-10-15
+
 ### Fixed
 
 - en: a hyphen between two number words joins them only in a compound (a tens word and a unit, "twenty-two", "twenty-first"; a number and its scale, "two-thousand"). Any other hyphen is a boundary and stays: "two thousand-two thousand five" is "2000-2005" (was "2002 1005"), "five five five-one two one two" is "555-1212" (was "5551212"), "twenty-thirty" is "20-30" (was "2030"), "pages ten-twelve" is "pages 10-12" (gladia-enterprise#900).
