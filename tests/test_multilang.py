@@ -1471,3 +1471,177 @@ def test_spaced_tens_word(lang, text, expected):
 )
 def test_my_counter_particle(text, expected):
     assert words2num_sentence(text, lang="my") == expected
+
+
+@pytest.mark.parametrize(
+    "lang,text,expected",
+    [
+        # Whisper timestamp tokens and WebVTT / SRT tags glued to a number
+        # word are marks of their own: the number reads whole (#910).
+        (
+            "en",
+            "<|0.00|> it was nineteen eighty four.<|2.40|>",
+            "<|0.00|> it was 1984.<|2.40|>",
+        ),
+        (
+            "en",
+            "<|0.00|> I paid twenty five<|2.40|><|2.40|> dollars",
+            "<|0.00|> I paid 25<|2.40|><|2.40|> dollars",
+        ),
+        ("ru", "двадцать пять.<|2.40|>", "25.<|2.40|>"),
+        ("ar", "خمسة وعشرون<|2.40|>", "25<|2.40|>"),
+        ("hi", "पच्चीस सौ<|2.40|>", "2500<|2.40|>"),
+        ("tr", "yirmi beş<|2.40|>", "25<|2.40|>"),
+        ("en", "twenty five</i> people", "25</i> people"),
+        ("en", "<v Bob>twenty five people", "<v Bob>25 people"),
+        ("es", "<v Ana>dos mil veinticinco", "<v Ana>2025"),
+        ("de", "<v Anna>zwanzig tausend Euro", "<v Anna>20000 Euro"),
+        ("fr", "<v Marie>vingt cinq personnes", "<v Marie>25 personnes"),
+        ("pl", "<v Jan>dwadzieścia pięć osób", "<v Jan>25 osób"),
+        ("en", "<i>twenty five</i>", "<i>25</i>"),
+        ("en", "<00:01.500>twenty five", "<00:01.500>25"),
+        ("en", "<c.red>three</c>", "<c.red>3</c>"),
+        # A tag holding digits is no figure glued to the word.
+        ("en", "<|0.00|>three<|2.40|>", "<|0.00|>3<|2.40|>"),
+        # A tag ends a number: two cues, two numbers.
+        ("en", "twenty<br/>five", "20<br/>5"),
+        # Angle brackets that are no tag stay text.
+        ("en", "five <six> seven", "5 <six> 7"),
+        ("en", "(5)three", "(5)three"),
+    ],
+)
+def test_glued_markup_tags(lang, text, expected):
+    assert words2num_sentence(text, lang=lang) == expected
+
+
+@pytest.mark.parametrize(
+    "lang,text,kwargs,expected",
+    [
+        # A tag cuts the text into cues: the currency and date passes read
+        # each one as the walk does (#1298).
+        ("en", "<v Bob>twenty five dollars", {"currency": True}, "<v Bob>$25"),
+        ("en", "<v Bob>five dollars", {"currency": True}, "<v Bob>$5"),
+        ("en", "<i>twenty five dollars</i>", {"currency": True}, "<i>$25</i>"),
+        ("en", "twenty five dollars<|2.40|>", {"currency": True}, "$25<|2.40|>"),
+        ("fr", "<v Ana>vingt-cinq euros", {"currency": True}, "<v Ana>25 €"),
+        ("en", "<v Bob>I paid 25 dollars", {"currency": True}, "<v Bob>I paid $25"),
+        (
+            "en",
+            "<v Bob>march twelfth twenty twenty six",
+            {"date": True},
+            "<v Bob>March 12, 2026",
+        ),
+        ("en", "<i>", {}, "<i>"),
+        # A number with a tag inside it stays as written, its unit too (#1299).
+        (
+            "en",
+            "<b>twenty</b> five dollars",
+            {"currency": True},
+            "<b>twenty</b> five dollars",
+        ),
+    ],
+)
+def test_glued_markup_tags_folds(lang, text, kwargs, expected):
+    assert words2num_sentence(text, lang=lang, **kwargs) == expected
+
+
+@pytest.mark.parametrize(
+    "lang,text",
+    [
+        # An inline tag (a word timestamp, a style) inside a number cuts
+        # nothing: karaoke WebVTT puts one between every word, and the number
+        # stays as written, as before, rather than in wrong pieces.
+        ("en", "I paid twenty<00:00:01.500><c> five</c><00:00:01.900><c> dollars</c>"),
+        ("en", "in nineteen<00:00:01.500><c> eighty</c><00:00:01.900><c> four</c>"),
+        ("en", "<00:01.000>nineteen <00:01.400>eighty <00:01.800>four"),
+        ("en", "<c>twenty</c><c> five</c>"),
+        (
+            "en",
+            "one<00:00:01.000><c> thousand,</c><00:00:01.200><c> nine</c>"
+            "<00:00:01.400><c> hundred</c><00:00:01.600><c> and</c>"
+            "<00:00:01.800><c> eighty-four</c>",
+        ),
+        ("id", "dua<00:00:01.500><c> puluh</c><00:00:02.500><c> lima</c>"),
+        ("de", "<i>zwanzig</i>tausend"),
+        ("de", "zwanzig<00:01.500>tausend"),
+        ("en", "<i>twenty</i>-five"),
+        ("en", "twenty-<i>five</i>"),
+        ("en", "<i>twenty</i>-<i>five</i>"),
+        ("fr", "<i>vingt</i>-<i>cinq</i>"),
+        ("id", "<i>dua puluh</i> <i>tiga</i>"),
+        # A thin space elsewhere in the text changes nothing (#910 audit).
+        ("en", "<|0.00|> twenty<|0.40|> five<|0.80|> people,\u2009ok"),
+        ("en", "twenty<00:01.500><c> five</c> people\u2009today"),
+        # A word timestamp between number words (#1299).
+        ("en", "<|0.00|> twenty<|0.40|> five<|0.80|> people"),
+        ("en", "twenty<00:01.500><c> five"),
+        # A connector or a number word the tag sits next to (#910 audit).
+        ("vi", "một trăm</i> lẻ một"),
+        ("pt", "vinte<i>e um"),
+        ("id", "satu dua puluh<00:01.500><c> lima"),
+        ("cs", "tisíc devět set<i>osmdesát čtyři"),
+        # Not a tag: a clock time with no milliseconds, prose after a name.
+        ("en", "<12:30>three"),
+    ],
+)
+def test_inline_markup_inside_a_number(lang, text):
+    assert words2num_sentence(text, lang=lang) == text
+
+
+@pytest.mark.parametrize(
+    "lang,text,expected",
+    [
+        # One word per cue converts: no tag is inside it.
+        (
+            "en",
+            "<00:01.000>twenty-five <00:01.400>people",
+            "<00:01.000>25 <00:01.400>people",
+        ),
+        ("en", "<i love you> twenty five", "<i love you> 25"),
+        # Two numbers, each in its own tags, are two numbers (#910 audit).
+        ("en", "<i>twenty five</i> <i>thirty</i>", "<i>25</i> <i>30</i>"),
+        ("en", "<i>twenty five</i>\n<i>thirty six</i>", "<i>25</i>\n<i>36</i>"),
+        ("en", "<i>twenty five</i><i>thirty</i>", "<i>25</i><i>30</i>"),
+        ("en", "<i>one hundred and one</i> <i>five</i>", "<i>101</i> <i>5</i>"),
+        ("en", "<i>twenty five</i> <i>six</i> people", "<i>25</i> <i>6</i> people"),
+        # Inline style tags keep the words around them in context (#1300).
+        (
+            "en",
+            "the train at <b>nine fifty</b> stops",
+            "the train at <b>9:50</b> stops",
+        ),
+        ("en", "five <b>or</b> six thousand", "5000 <b>or</b> 6000"),
+        (
+            "en",
+            "the train at <b>nine fifty</b> stops\u2009here",
+            "the train at <b>9:50</b> stops\u2009here",
+        ),
+        # A tag before a mark is no tag inside a word.
+        ("af", "<b>vyf-en-twintig</b>.", "<b>25</b>."),
+        ("ja", "<i>二十五</i>, <i>三十</i>", "<i>25</i>, <i>30</i>"),
+        # Glued tags between two numbers make no word of them.
+        ("cs", "<i>dvacet jedna</i><i>třicet šest</i>", "<i>21</i><i>36</i>"),
+        # "y" after the number is no connector into it.
+        (
+            "es",
+            "x <i>doce de marzo de dos mil veintiséis</i> y",
+            "x <i>12 de marzo de 2026</i> y",
+        ),
+    ],
+)
+def test_inline_markup_edges(lang, text, expected):
+    assert words2num_sentence(text, lang=lang) == expected
+
+
+def test_many_inline_tags_keep_glued_lists():
+    # The masks of a dozen tags hold no mark of another pass: a glued list
+    # after them still splits (#1276, #910 audit).
+    tags = "".join(f"<|{i}.0|> w{i} " for i in range(30))
+    assert words2num_sentence(tags + "count three,two,one go", lang="en") == (
+        tags + "count 3,2,one go"
+    )
+
+
+def test_glued_markup_tags_check_lang():
+    with pytest.raises(NotImplementedError):
+        words2num_sentence("<i>", lang="xx")

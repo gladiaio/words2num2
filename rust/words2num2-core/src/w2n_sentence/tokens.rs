@@ -148,6 +148,91 @@ pub(super) fn is_punct_part(part: &str) -> bool {
         && part.chars().all(|c| is_leading_punct(c) || is_trailing_punct(c) || is_leading_clause_mark(c) || is_format(c))
 }
 
+/// Inline WebVTT / SRT tags: a style or a word timestamp, inside a line.
+const INLINE_TAGS: &[&str] = &["b", "i", "u", "s", "c", "ruby", "rt", "em", "strong", "sub", "sup"];
+/// Tags that open or end a cue line or a speaker turn.
+const BREAK_TAGS: &[&str] = &["v", "lang", "br", "p"];
+/// Tags with attributes ("<font color=red>", "<span class=x>").
+const ATTR_TAGS: &[&str] = &["font", "span"];
+
+/// The length in chars of the tag opening `chars[i..]`, if one does, and
+/// whether it is inline (a style or a word timestamp) rather than a break.
+/// A tag is a decoder token ("<|2.40|>", "<|en|>"), a WebVTT timestamp
+/// ("<00:01.500>"), or a known tag ("<i>", "</i>", "<v Bob>", "<c.red>",
+/// "<br/>", "<font color=red>"). Anything else ("<six>", "a < b", "<12:30>",
+/// "<i love you>") is text.
+fn markup_len(chars: &[char], i: usize) -> Option<(usize, bool)> {
+    const MAX: usize = 128;
+    if chars.get(i) != Some(&'<') {
+        return None;
+    }
+    let close = chars[i + 1..].iter().take(MAX).position(|&c| c == '>' || c == '<' || c == '\n')?;
+    let end = i + 1 + close;
+    if chars[end] != '>' {
+        return None;
+    }
+    let inner = &chars[i + 1..end];
+    let len = end + 1 - i;
+    // "<|2.40|>": no blank inside. A timestamp token marks a word, as a
+    // WebVTT one does; "<|en|>", "<|transcribe|>" open a segment.
+    if inner.len() >= 2 && inner[0] == '|' && inner[inner.len() - 1] == '|' {
+        let body = &inner[1..inner.len() - 1];
+        let stamp = !body.is_empty() && body.iter().all(|&c| c.is_ascii_digit() || c == '.') && body.iter().any(char::is_ascii_digit);
+        return (!inner.iter().any(|&c| super::py_is_space(c))).then_some((len, stamp));
+    }
+    // "<00:01.500>", "<00:00:01.500>": minutes and seconds, then milliseconds.
+    let text: String = inner.iter().collect();
+    if let Some((clock, ms)) = text.split_once('.') {
+        let fields: Vec<&str> = clock.split(':').collect();
+        if (2..=3).contains(&fields.len())
+            && fields.iter().all(|f| !f.is_empty() && f.chars().all(|c| c.is_ascii_digit()))
+            && fields[1..].iter().all(|f| f.len() == 2)
+            && ms.len() == 3
+            && ms.chars().all(|c| c.is_ascii_digit())
+        {
+            return Some((len, true));
+        }
+    }
+    let body = inner.strip_prefix(&['/']).unwrap_or(inner);
+    let name_end = body.iter().position(|c| !c.is_ascii_alphanumeric()).unwrap_or(body.len());
+    let name: String = body[..name_end].iter().collect::<String>().to_ascii_lowercase();
+    let rest = &body[name_end..];
+    // ".class" or "/" after any name; a blank and free text after "v" and
+    // "lang" ("<v Bob>"), attributes after "font" and "span".
+    let closed = rest.first().is_none_or(|&c| c == '.' || c == '/');
+    let spoken = rest.first().is_some_and(|&c| super::py_is_space(c));
+    let ok = if INLINE_TAGS.contains(&name.as_str()) {
+        closed
+    } else if BREAK_TAGS.contains(&name.as_str()) {
+        closed || (spoken && matches!(name.as_str(), "v" | "lang"))
+    } else if ATTR_TAGS.contains(&name.as_str()) {
+        closed || (spoken && rest.contains(&'='))
+    } else {
+        false
+    };
+    ok.then_some((len, INLINE_TAGS.contains(&name.as_str()) || ATTR_TAGS.contains(&name.as_str())))
+}
+
+/// The markup tags in `text` ([`markup_len`]): byte range and inline flag.
+pub(super) fn markup_spans(text: &str) -> Vec<(usize, usize, bool)> {
+    if !text.contains('<') {
+        return Vec::new();
+    }
+    let chars: Vec<char> = text.chars().collect();
+    let offsets: Vec<usize> = text.char_indices().map(|(k, _)| k).chain(std::iter::once(text.len())).collect();
+    let mut spans = Vec::new();
+    let mut i = 0;
+    while i < chars.len() {
+        if let Some((n, inline)) = markup_len(&chars, i) {
+            spans.push((offsets[i], offsets[i + n], inline));
+            i += n;
+        } else {
+            i += 1;
+        }
+    }
+    spans
+}
+
 /// An invisible format character (ZWSP, ZWNJ, ZWJ, word joiner, BOM, soft
 /// hyphen); see `super::is_format_char`.
 fn is_format(c: char) -> bool {
