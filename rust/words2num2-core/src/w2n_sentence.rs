@@ -4407,10 +4407,11 @@ fn read_through_inline(
         Ok(out)
     };
     // The mask of tag k: its index written in spaces the text does not hold
-    // (U+2000..U+200A, U+205F, U+3000), between ASCII blanks; a thin or an
-    // en space in the text only narrows the base (#910 audit).
+    // (U+2000..U+200A, U+3000), between ASCII blanks; a thin or an en space
+    // in the text only narrows the base (#910 audit). Not U+205F, the mark
+    // of `split_glued_lists` (GLUE_MARK).
     let alphabet: Vec<char> = ('\u{2000}'..='\u{200A}')
-        .chain(['\u{205F}', '\u{3000}'])
+        .chain(['\u{3000}'])
         .filter(|&c| !text.contains(c))
         .collect();
     if alphabet.len() < 2 {

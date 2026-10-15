@@ -1633,6 +1633,15 @@ def test_inline_markup_edges(lang, text, expected):
     assert words2num_sentence(text, lang=lang) == expected
 
 
+def test_many_inline_tags_keep_glued_lists():
+    # The masks of a dozen tags hold no mark of another pass: a glued list
+    # after them still splits (#1276, #910 audit).
+    tags = "".join(f"<|{i}.0|> w{i} " for i in range(30))
+    assert words2num_sentence(tags + "count three,two,one go", lang="en") == (
+        tags + "count 3,2,one go"
+    )
+
+
 def test_glued_markup_tags_check_lang():
     with pytest.raises(NotImplementedError):
         words2num_sentence("<i>", lang="xx")
