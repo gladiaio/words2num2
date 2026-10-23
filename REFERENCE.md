@@ -81,7 +81,7 @@ Decimal('3.14')
 
 ### `words2num_sentence`
 
-`words2num_sentence(sentence, lang="en", to="cardinal", currency=False, convert_numerical_symbols=False, date=False, region=None, date_format="written", phone=False)`
+`words2num_sentence(sentence, lang="en", to="cardinal", currency=False, convert_numerical_symbols=False, date=False, region=None, date_format="written", phone=False, percent=False)`
 
 Walk a sentence and replace every word-number with its numeric form.
 Non-number tokens pass through unchanged. Punctuation is preserved.
@@ -119,7 +119,20 @@ libphonenumber's numbering plans: fr `"06 12 34 56 78"`, en `"(212)
 `region`, the region of `lang`, or the regions where the language is spoken
 (main one first) decide: the first where the number is valid and dialled
 exactly so (trunk prefix included). A run of fewer than eight digits, or one
-no plan knows, stays as digits.
+no plan knows, stays as digits. `percent=True` writes a figure followed by
+the language's percent word or phrase with the sign: fr `"quinze pour
+cent"` → `"15 %"`, en `"fifteen percent"` → `"15%"` (no space in English),
+es `"por ciento"`, it `"per cento"`, de `"Prozent"`, nl `"procent"`; off,
+the words stay (`"15 pour cent"`).
+
+A range said without a connector, whose second bound carries the scale
+word, shares the scale when its bounds are next to each other or round:
+`"vingt-cinq trente mille euros"` → `"25000-30000 euros"`, `"fifteen twenty
+million"` → `"15000000-20000000"`; with `currency=True` the first bound
+takes the second's sign and grouping (`"25 000-30 000 €"`,
+`"$25,000-$30,000"`). Not after a comma (a list), from one, or when the
+bounds are neither consecutive nor round (`"at nine fifteen thousand"`
+stays `"at 9 15000"`).
 
 **Returns** — `str`.
 

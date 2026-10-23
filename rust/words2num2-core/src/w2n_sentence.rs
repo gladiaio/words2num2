@@ -2591,6 +2591,14 @@ fn en_digit_run(parts: &[String], i: usize) -> Option<(String, usize)> {
             end = Some((digits.len(), w.part));
         }
     }
+    // "... one two three four one of them": the last "one" before "of" is the
+    // pronoun, not a digit of the run (Claap). Only a bare word: "one, of
+    // course" ends the run with its digit.
+    if let (Some((_, part)), Some(_)) = (end, prev_end) {
+        if parts[part].eq_ignore_ascii_case("one") && next_word(parts, part).as_deref() == Some("of") {
+            end = prev_end;
+        }
+    }
     // After a leading "zero" (a dialling prefix), the last digit before a
     // multiplier is its count when the number goes on: "zero five hundred
     // thirty two" is 0, then 532 (#825). Zero itself is no count; "zero six
@@ -3039,6 +3047,83 @@ fn percent_phrase(resolved: &str) -> Option<(&'static str, &'static [&'static st
         "vi" => Some(("phan", &["tram"])),
         _ => None,
     }
+}
+
+/// One word that means percent after a number (normalised): en "percent",
+/// fr "pourcent", de "prozent", nl "procent".
+pub(crate) fn is_percent_word(norm: &str) -> bool {
+    matches!(norm, "percent" | "pourcent" | "prozent" | "procent")
+}
+
+/// Do `prep` + `word` (normalised) make the language's percent phrase: fr
+/// "pour cent", es "por ciento", it "per cento", en "per cent"?
+pub(crate) fn is_percent_pair(resolved: &str, prep: &str, word: &str) -> bool {
+    percent_phrase(resolved).is_some_and(|(p, words)| p == prep && words.contains(&word))
+}
+
+/// `percent=True`: a figure followed by the percent word or phrase takes the
+/// sign the language writes, "15 pour cent" -> "15 %", "15 percent" ->
+/// "15%" (en: no space, as the currency symbols). A mark after the phrase
+/// stays ("15 %."); a phrase after anything but a figure stays words.
+pub(crate) fn fold_percent(text: &str, lang: &str) -> String {
+    let resolved = lang.to_lowercase();
+    let base = resolved.split(['_', '-']).next().unwrap_or(&resolved).to_string();
+    let sign = if base == "en" { "%" } else { " %" };
+    let spans = blank_spans(text);
+    let figure = |t: &str| {
+        t.ends_with(|c: char| c.is_ascii_digit()) && t.chars().any(|c| c.is_ascii_digit()) && !t.chars().any(char::is_alphabetic)
+    };
+    let key = |t: &str| crate::normalize(rstrip_punct(t)).trim().to_string();
+    let bare = |t: &str| rstrip_punct(t).len() == t.len();
+    let mut out = String::with_capacity(text.len());
+    let mut end = 0;
+    let mut i = 0;
+    while i < spans.len() {
+        let (_, b) = spans[i];
+        if figure(&text[spans[i].0..b]) {
+            let next = spans.get(i + 1).map(|&(x, y)| &text[x..y]);
+            let next2 = spans.get(i + 2).map(|&(x, y)| &text[x..y]);
+            // The last word of the phrase, whose trailing mark stays.
+            let last = match (next, next2) {
+                (Some(n), _) if is_percent_word(&key(n)) => Some(i + 1),
+                (Some(n), Some(m)) if bare(n) && is_percent_pair(&resolved, &key(n), &key(m)) => Some(i + 2),
+                _ => None,
+            };
+            if let Some(l) = last {
+                let (x, y) = spans[l];
+                let word = &text[x..y];
+                out.push_str(&text[end..b]);
+                out.push_str(sign);
+                out.push_str(&word[rstrip_punct(word).len()..]);
+                end = y;
+                i = l + 1;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    out.push_str(&text[end..]);
+    out
+}
+
+/// The byte spans of the words of `text`: any run of blanks separates them.
+fn blank_spans(text: &str) -> Vec<(usize, usize)> {
+    let mut spans = Vec::new();
+    let mut start = None;
+    for (i, c) in text.char_indices() {
+        match (c.is_whitespace(), start) {
+            (true, Some(s0)) => {
+                spans.push((s0, i));
+                start = None;
+            }
+            (false, None) => start = Some(i),
+            _ => {}
+        }
+    }
+    if let Some(s0) = start {
+        spans.push((s0, text.len()));
+    }
+    spans
 }
 
 /// es "cien" after "por" is the percent word only in the set phrase "cien
@@ -4195,6 +4280,25 @@ pub fn words2num_sentence_full(
     date_format: &str,
     phone: bool,
 ) -> Result<String, W2nError> {
+    words2num_sentence_percent(sentence, lang, to, has_kwargs, currency, date, region, date_format, phone, false)
+}
+
+/// [`words2num_sentence_full`] with `percent`: a figure followed by the
+/// language's percent word or phrase takes the sign ("15 pour cent" -> "15
+/// %", "fifteen percent" -> "15%"; see [`fold_percent`]).
+#[allow(clippy::too_many_arguments)]
+pub fn words2num_sentence_percent(
+    sentence: &str,
+    lang: &str,
+    to: &str,
+    has_kwargs: bool,
+    currency: bool,
+    date: bool,
+    region: Option<&str>,
+    date_format: &str,
+    phone: bool,
+    percent: bool,
+) -> Result<String, W2nError> {
     let iso = match date_format {
         "written" => false,
         "iso" => true,
@@ -4213,8 +4317,8 @@ pub fn words2num_sentence_full(
     let groups = markup_groups(sentence);
     if !groups.is_empty() {
         // The language and mode are checked even when only tags are left.
-        words2num_sentence_full("", lang, to, has_kwargs, currency, date, region, date_format, phone)?;
-        let full = |t: &str| words2num_sentence_full(t, lang, to, has_kwargs, currency, date, region, date_format, phone);
+        words2num_sentence_percent("", lang, to, has_kwargs, currency, date, region, date_format, phone, percent)?;
+        let full = |t: &str| words2num_sentence_percent(t, lang, to, has_kwargs, currency, date, region, date_format, phone, percent);
         // Kept as written: the break tags and the tagged number words.
         let mut verbatim: Vec<(usize, usize)> = groups.iter().filter(|g| !g.2).map(|g| (g.0, g.1)).collect();
         verbatim.extend(tagged_number_words(sentence, &groups, lang));
@@ -4252,6 +4356,13 @@ pub fn words2num_sentence_full(
     // connector the rewrite produced.
     if out.contains(SHARE_MARK) && !sentence.contains(SHARE_MARK) {
         out = out.replace(SHARE_MARK, "");
+    }
+    // The ranges of `adjacent_ranges`: "25000-30000", "25 000-30 000 €".
+    if out.contains(RANGE_MARK) && !sentence.contains(RANGE_MARK) {
+        out = join_ranges(&out);
+    }
+    if percent {
+        out = fold_percent(&out, lang);
     }
     // The blanks `split_glued_lists` opened after a glued list's commas go
     // again: "3,2,one" -> "3,2,1" (#1276).
@@ -5314,6 +5425,176 @@ pub(crate) fn share_scale_words(text: &str, lang: &str) -> Option<String> {
     Some(out)
 }
 
+/// Between the two bounds of a range spoken without a connector, put there by
+/// [`adjacent_ranges`]; the hyphen after the walk ([`join_ranges`]).
+pub(crate) const RANGE_MARK: char = '\u{E002}';
+
+/// "vingt-cinq trente mille euros" -> "vingt-cinq mille <mark> trente mille
+/// euros" (Claap): two numbers side by side whose second carries a scale word
+/// are a range when they rise by one or between two round numbers, to at
+/// most twice the first ("quinze vingt millions", "two three thousand"); the
+/// first takes the second's scale, and the walk reads "25000-30000". Not
+/// after a number word (the tail of a digit string, "four five six
+/// thousand"), not across a mark ("vingt-cinq, trente mille" is a list), not
+/// from one, not where the walk joins them.
+pub(crate) fn adjacent_ranges(text: &str, lang: &str) -> Option<String> {
+    let base = lang.split(['_', '-']).next().unwrap_or(lang).to_lowercase();
+    if !matches!(base.as_str(), "en" | "es" | "gl" | "pt" | "fr" | "it" | "ca" | "de" | "nl") || text.contains(RANGE_MARK) {
+        return None;
+    }
+    let spans = blank_spans(text);
+    let toks: Vec<&str> = spans.iter().map(|&(a, b)| &text[a..b]).collect();
+    let word = |t: &str| !t.is_empty() && t.chars().all(|c| c.is_alphabetic() || c == '-');
+    let figure = |w: &str| -> Option<i64> { (!w.is_empty() && w.chars().all(|c| c.is_ascii_digit())).then(|| w.parse().ok()).flatten() };
+    let walk = |t: &str| -> String {
+        // Restored on every exit, a panic unwinding included.
+        struct Restore(bool);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                SHARE_OFF.with(|f| f.set(self.0));
+            }
+        }
+        let _restore = Restore(SHARE_OFF.with(|f| f.replace(true)));
+        words2num_sentence_folded(t, lang, "cardinal", false, false).unwrap_or_default()
+    };
+    // The scale word to copy after the first bound, keyed by its last token.
+    let mut after: Vec<Option<String>> = vec![None; toks.len()];
+    let mut kb = 1;
+    while kb + 1 < toks.len() {
+        let next = kb + 1;
+        let found = (|| {
+            if !word(toks[kb]) || !word(toks[kb - 1]) {
+                return None;
+            }
+            let b = figure(&walk(toks[kb])).filter(|b| (2..1000).contains(b))?;
+            // One scale word after B: "mille", "thousand", "millions".
+            let scale = rstrip_punct(toks[next]);
+            if !word(scale) {
+                return None;
+            }
+            let v = figure(&walk(&format!("{} {scale}", toks[kb])))?;
+            let m = v / b;
+            if v % b != 0 || m < 1000 || m.to_string().trim_start_matches('1').chars().any(|c| c != '0') {
+                return None;
+            }
+            // A number word after the scale continues B ("trente mille cinq").
+            if scale.len() == toks[next].len() {
+                if let Some(t) = toks.get(next + 1) {
+                    if walk(&format!("{} {scale} {t}", toks[kb])).split_whitespace().next() != Some(v.to_string().as_str()) {
+                        return None;
+                    }
+                }
+            }
+            // A: the longest run of words before B the walk reads as one
+            // figure ("vingt-cinq", "twenty five").
+            let mut from = None;
+            let mut a = 0;
+            for f in (kb.saturating_sub(4)..kb).rev() {
+                if !word(toks[f]) {
+                    break;
+                }
+                match figure(&walk(&toks[f..kb].join(" "))) {
+                    Some(x) => {
+                        from = Some(f);
+                        a = x;
+                    }
+                    None => break,
+                }
+            }
+            let from = from?;
+            // The bounds a speaker gives: next to each other ("deux trois")
+            // or round ("quinze vingt", "vingt-cinq trente"); "at nine
+            // fifteen thousand" is a time, then a count.
+            if a < 2 || a >= b || b > 2 * a || !(b == a + 1 || a % 5 == 0 && b % 5 == 0) {
+                return None;
+            }
+            // The tail of a digit string or of a longer number.
+            if from > 0 && walk(rstrip_punct(toks[from - 1])).chars().any(|c| c.is_ascii_digit()) {
+                return None;
+            }
+            // Two numbers as the walk reads them, not one.
+            (walk(&format!("{} {scale}", toks[from..=kb].join(" "))) == format!("{a} {v}")).then(|| scale.to_string())
+        })();
+        if let Some(scale) = found {
+            after[kb - 1] = Some(scale);
+            kb += 2;
+        } else {
+            kb += 1;
+        }
+    }
+    if after.iter().all(Option::is_none) {
+        return None;
+    }
+    let mut out = String::with_capacity(text.len() + 32);
+    let mut end = 0;
+    for (i, &(_, b)) in spans.iter().enumerate() {
+        out.push_str(&text[end..b]);
+        if let Some(scale) = &after[i] {
+            out.push(' ');
+            out.push_str(scale);
+            out.push(' ');
+            out.push(RANGE_MARK);
+        }
+        end = b;
+    }
+    out.push_str(&text[end..]);
+    Some(out)
+}
+
+/// The walked range marks of [`adjacent_ranges`] become a hyphen: "25000
+/// <mark> 30000" -> "25000-30000". The first bound takes the second's
+/// currency sign before it and its digit grouping: "$25,000-$30,000",
+/// "25 000-30 000 €". A mark the walk did not leave between two figures goes,
+/// the words as they were.
+pub(crate) fn join_ranges(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.find(RANGE_MARK) {
+        let left = rest[..at].trim_end();
+        let right = rest[at + RANGE_MARK.len_utf8()..].trim_start();
+        let l_start = left.char_indices().rev().find(|&(_, c)| c.is_whitespace()).map_or(0, |(i, c)| i + c.len_utf8());
+        let low = &left[l_start..];
+        // The second bound: a sign before it ("$", "US$"), then its figure.
+        let prefix: String = right.chars().take_while(|c| !c.is_ascii_digit() && !c.is_whitespace()).collect();
+        let num = &right[prefix.len()..];
+        // Its thousands separator: a mark after one to three digits, three
+        // digits after it.
+        let sep = num
+            .char_indices()
+            .find(|&(_, c)| !c.is_ascii_digit())
+            .filter(|&(i, c)| {
+                (1..=3).contains(&i)
+                    && " .,'\u{a0}\u{202f}".contains(c)
+                    && num[i + c.len_utf8()..].chars().take(3).filter(char::is_ascii_digit).count() == 3
+            })
+            .map(|(_, c)| c);
+        if low.is_empty() || !low.chars().all(|c| c.is_ascii_digit()) || !num.starts_with(|c: char| c.is_ascii_digit()) {
+            out.push_str(left);
+            out.push(' ');
+            rest = right;
+            continue;
+        }
+        out.push_str(&left[..l_start]);
+        out.push_str(&prefix);
+        match sep {
+            Some(s) if low.len() > 3 => {
+                let digits: Vec<char> = low.chars().collect();
+                for (i, c) in digits.iter().enumerate() {
+                    if i > 0 && (digits.len() - i) % 3 == 0 {
+                        out.push(s);
+                    }
+                    out.push(*c);
+                }
+            }
+            _ => out.push_str(low),
+        }
+        out.push('-');
+        rest = right;
+    }
+    out.push_str(rest);
+    out
+}
+
 /// it "vent'anni", "trent’anni", "cent'anni" -> "venti anni", "trenta
 /// anni", "cento anni": standard Italian drops the last vowel of the tens and
 /// of "cento" before a vowel, which the walk never reads (#918). None when the
@@ -5591,6 +5872,19 @@ fn words2num_sentence_folded(
     };
     // "cinco o seis mil" -> "cinco mil o seis mil": the first bound of an
     // alternative or range takes the scale words of the second (#865).
+    // "vingt-cinq trente mille" -> "vingt-cinq mille <mark> trente mille": a
+    // range said without a connector (Claap).
+    let ranged;
+    let sentence = match (matches!(to, "cardinal" | "currency") && !SHARE_OFF.with(|f| f.get()))
+        .then(|| adjacent_ranges(sentence, &resolved_lang))
+        .flatten()
+    {
+        Some(t) => {
+            ranged = t;
+            ranged.as_str()
+        }
+        None => sentence,
+    };
     let shared;
     let sentence = match (matches!(to, "cardinal" | "currency") && !SHARE_OFF.with(|f| f.get()))
         .then(|| share_scale_words(sentence, &resolved_lang))
