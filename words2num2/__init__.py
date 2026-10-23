@@ -113,6 +113,7 @@ def words2num_sentence(
     region=None,
     date_format="written",
     phone=False,
+    percent=False,
 ):
     """Convert every word-number in ``sentence`` to numeric form.
 
@@ -156,6 +157,16 @@ def words2num_sentence(
     regions where the language is spoken, as long as they agree on the
     format. A number no numbering plan knows stays as digits.
 
+    With ``percent=True`` a number followed by the language's percent word
+    or phrase takes the sign: ``"quinze pour cent"`` -> ``"15 %"`` (fr),
+    ``"fifteen percent"`` -> ``"15%"`` (en, no space), es ``"por ciento"``,
+    it ``"per cento"``, de ``"Prozent"``. Off by default: ``"15 pour cent"``.
+
+    A range said without a connector, its second bound carrying the scale
+    word, shares that scale: ``"vingt-cinq trente mille"`` ->
+    ``"25000-30000"``; with ``currency=True`` ``"25 000-30 000 €"``,
+    ``"$25,000-$30,000"``.
+
     ``lang`` and ``to`` are validated before the walk and raise
     ``NotImplementedError`` like :func:`words2num`.
     """
@@ -170,6 +181,7 @@ def words2num_sentence(
         region=region,
         date_format=date_format,
         phone=phone,
+        percent=percent,
     )
 
 

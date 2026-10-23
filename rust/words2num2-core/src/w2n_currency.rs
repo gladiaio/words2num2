@@ -1170,6 +1170,16 @@ fn minor_digits(n: &str, cur: Currency) -> Option<String> {
 }
 
 /// Is part `k` the end of the text, or followed only by terminal punctuation?
+/// Does a percentage word start at `parts[a]`: "%", en "percent" / "per
+/// cent", fr "pour cent", es "por ciento"...?
+fn percent_at(lang: &str, parts: &[Part], a: usize) -> bool {
+    let key = word_key(&parts[a].text).0;
+    if crate::w2n_sentence::is_percent_word(&key) || parts[a].text.starts_with('%') {
+        return true;
+    }
+    next_word(parts, a).is_some_and(|b| crate::w2n_sentence::is_percent_pair(lang, &key, &word_key(&parts[b].text).0))
+}
+
 fn ends_amount(parts: &[Part], k: usize, num: &Num) -> bool {
     next_word(parts, k).is_none() || matches!(num.trailing.as_str(), "." | "!" | "?")
 }
@@ -1298,8 +1308,11 @@ pub fn fold_currency(text: &str, lang: &str) -> String {
                         // and fifty", "cinco euros con cincuenta") only when it
                         // ends the amount: "two dollars and fifty people" is
                         // not $2.50 (#181).
-                        let follows_number =
-                            after.is_some_and(|a| parse_num(&parts[a].text).is_some());
+                        // "vingt-cinq mille euros quinze pour cent": a
+                        // percentage after the amount, not its cents (Claap).
+                        let follows_number = after.is_some_and(|a| {
+                            parse_num(&parts[a].text).is_some() || percent_at(base, &parts, a)
+                        });
                         let bare_ok = if had_conn {
                             ends_amount(&parts, s, &sub_num)
                         } else {
