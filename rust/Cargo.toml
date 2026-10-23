@@ -3,7 +3,7 @@ members = ["words2num2-core", "words2num2-py"]
 resolver = "2"
 
 [workspace.package]
-version = "0.2.10"
+version = "0.2.11"
 edition = "2021"
 # The oldest rustc words2num2-core builds with (Option::is_none_or, 1.82;
 # #919); words2num2-py sets its own (pyo3).

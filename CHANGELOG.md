@@ -6,6 +6,8 @@ follows [Semantic Versioning](https://semver.org/) and uses
 
 ## [Unreleased]
 
+## [0.4.11] — 2026-10-23
+
 ### Added
 
 - all: `words2num_sentence(..., percent=True)` writes a percentage with its sign: fr "quinze pour cent" is "15 %", en "fifteen percent" is "15%", es "por ciento", it "per cento", de "Prozent", nl "procent". Off by default (Claap, gladia-enterprise numerals).
