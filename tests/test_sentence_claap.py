@@ -142,3 +142,18 @@ def test_phone_leaves_the_pronoun_one_of():
         phone=True,
     )
     assert out == "call (212) 555-1234 one of them"
+
+
+@pytest.mark.parametrize(
+    "lang, text, expected",
+    [
+        # The figures of a range, read in an earlier call, folded alone.
+        ("fr", "25000-30000 euros", "25 000-30 000 €"),
+        ("en", "25000-30000 dollars", "$25,000-$30,000"),
+        ("es", "2-3 euros.", "2-3 €."),
+        # Not rising: no range.
+        ("fr", "30000-25000 euros", "30000-25000 euros"),
+    ],
+)
+def test_figure_range_before_a_currency(lang, text, expected):
+    assert words2num_sentence(text, lang=lang, currency=True) == expected

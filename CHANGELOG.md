@@ -13,6 +13,7 @@ follows [Semantic Versioning](https://semver.org/) and uses
 ### Fixed
 
 - en es fr it ca gl pt de nl: a range said without a connector shares the scale of its second bound: "vingt-cinq trente mille euros" is "25000-30000 euros" (was "25 30000 euros"), "quinze vingt millions" is "15000000-20000000" (was "15 20000000"); with `currency=True` "25 000-30 000 €", "$25,000-$30,000". Only bounds next to each other or round ("deux trois", "quinze vingt"), never after a comma or from one (Claap).
+- all, `currency=True`: a range of figures before a currency, as an earlier call wrote it, is folded whole: "25000-30000 euros" is "25 000-30 000 €", "25000-30000 dollars" is "$25,000-$30,000" (was left as it was) (Claap).
 - all, `currency=True`: a number followed by a percentage is not the cents of the amount before it: "vingt-cinq mille euros quinze pour cent" is "25 000 € 15 pour cent" (was "25 000,15 € pour cent") (Claap).
 - en: a digit string no longer takes the pronoun "one" of "one of": "… one two three four one of them" is "… 1234 one of them" (was "… 12341 of them"; with `phone=True` "(212) 555-1234 one of them") (Claap).
 

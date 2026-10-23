@@ -1170,6 +1170,30 @@ fn minor_digits(n: &str, cur: Currency) -> Option<String> {
 }
 
 /// Is part `k` the end of the text, or followed only by terminal punctuation?
+/// "25000-30000 euros": a rising range of whole figures before a main unit,
+/// both bounds written the language's way: "25 000-30 000 €",
+/// "$25,000-$30,000" (Claap). The folded text and the index of the unit's
+/// last part; None for anything else.
+fn fold_figure_range(lang: &str, parts: &[Part], i: usize) -> Option<(String, usize)> {
+    let (low, high) = parts[i].text.split_once('-')?;
+    let whole = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_ascii_digit());
+    if !whole(low) || !whole(high) || low.parse::<u128>().ok()? >= high.parse::<u128>().ok()? {
+        return None;
+    }
+    let m = next_word(parts, i)
+        .and_then(|j| match_currency(lang, parts, j))
+        .filter(|m| !m.word.sub && !is_weight(lang, m, parts, i))?;
+    let cur = m.word.cur;
+    let (_, st) = style(lang, cur);
+    let first = if st.prefix {
+        render(lang, cur, low, None)
+    } else {
+        let int = low.trim_start_matches('0');
+        group_thousands(if int.is_empty() { "0" } else { int }, st.thousands)
+    };
+    Some((format!("{first}-{}{}", render(lang, cur, high, None), m.trailing), m.end))
+}
+
 /// Does a percentage word start at `parts[a]`: "%", en "percent" / "per
 /// cent", fr "pour cent", es "por ciento"...?
 fn percent_at(lang: &str, parts: &[Part], a: usize) -> bool {
@@ -1200,6 +1224,11 @@ pub fn fold_currency(text: &str, lang: &str) -> String {
         if p.blank {
             out.push_str(&p.text);
             i += 1;
+            continue;
+        }
+        if let Some((range, end)) = fold_figure_range(base, &parts, i) {
+            out.push_str(&range);
+            i = end + 1;
             continue;
         }
         let Some(num) = parse_num(&p.text) else {
