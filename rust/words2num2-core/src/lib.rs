@@ -1193,6 +1193,14 @@ fn scale_aliases(lang: &str) -> &'static [(&'static str, i64)] {
         // num2words2 writes lo 10^9 and up in figures, so the billion is never
         // probed (#878).
         "lo" => &[("ຕື້", 1_000_000_000)],
+        // num2words2 spells zh 10^16 as 一京, but 亿亿 is the everyday mainland
+        // form for it (supercomputer speeds read 亿亿次) and 億億 the traditional
+        // one (#707). The stack rides on a scale the table already reads, so an
+        // alias is enough: 十亿亿 = 十 x 亿亿.
+        "zh" | "cn" => &[
+            ("亿亿", 10_000_000_000_000_000),
+            ("億億", 10_000_000_000_000_000),
+        ],
         _ => &[],
     }
 }
@@ -3180,6 +3188,11 @@ mod tests {
         assert_eq!(parse_scaled("cn", "一亿零一万"), Some(100_010_000));
         assert_eq!(parse_scaled("cn", "二十万零四百二十七"), Some(200_427));
         assert_eq!(parse_scaled("zh", "一万零一十"), Some(10_010));
+        // #707: 亿亿 is the everyday form for 10^16 (num2words2 spells 一京),
+        // stacked like any other scale word.
+        assert_eq!(parse_scaled("zh", "一亿亿"), Some(10_000_000_000_000_000));
+        assert_eq!(parse_scaled("zh", "十亿亿"), Some(100_000_000_000_000_000));
+        assert_eq!(parse_scaled("zh_TW", "一億億"), Some(10_000_000_000_000_000));
         assert_eq!(parse_scaled("zh_TW", "一萬零一"), Some(10_001));
         assert_eq!(parse_scaled("zh", "一万零五千"), None); // no place skipped
         // Without 零 a short tail is the spoken abbreviation (一万五 = 15000).
