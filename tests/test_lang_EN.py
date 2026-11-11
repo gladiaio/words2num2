@@ -376,3 +376,48 @@ def test_year_mode_decades_and_hundreds(text, expected):
     from words2num2 import words2num_sentence
 
     assert words2num_sentence(text, to="year") == expected
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        # A figure the walker would leave standing alone, followed by the rest of
+        # the number in words: ASR writes a number that way when the speaker runs
+        # it into the words after it.
+        ("20 thirteen", "2013"),
+        ("30 two", "32"),
+        ("20 one", "21"),
+        ("20 twenty", "2020"),
+        ("25 hundred", "2500"),
+        ("35 hundred", "3500"),
+        ("10 thousand", "10000"),
+        ("2 million", "2000000"),
+        ("1 thousand five hundred", "1500"),
+    ],
+)
+def test_figure_joined_to_the_written_number_after_it(text, expected):
+    assert words2num_sentence(text) == expected
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        # No number word after the figure: nothing to join.
+        "I have 2 apples",
+        "version 2.5.1",
+        "192.168.1.1",
+        "1.1.1.1",
+        # A leading zero is a digit string, not a number: it keeps its zeros.
+        "007 agents",
+    ],
+)
+def test_figure_join_leaves_what_is_not_a_number_alone(text):
+    assert words2num_sentence(text) == text
+
+
+def test_figure_join_keeps_a_lone_one_a_pronoun():
+    """The join runs on figures only: "one" stays a word where it is a pronoun."""
+    assert (
+        words2num_sentence("no one answered, one of them owes me a hundred bucks")
+        == "no one answered, one of them owes me 100 bucks"
+    )

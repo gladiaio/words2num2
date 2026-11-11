@@ -6,6 +6,10 @@ follows [Semantic Versioning](https://semver.org/) and uses
 
 ## [Unreleased]
 
+### Fixed
+
+- en: a figure right before the rest of the number in words is read as one quantity, which is how ASR writes a number a speaker runs into the next words: "20 thirteen" is "2013" (was "20 13"), "30 two" is "32", "20 one" is "21", "20 twenty" is "2020", "25 hundred" is "2500", "10 thousand" is "10000", "2 million" is "2000000", "1 thousand five hundred" is "1500". A figure with a leading zero stays a digit string ("007 agents"), a figure followed by no number word is untouched ("I have 2 apples", "version 2.5.1", "192.168.1.1"), and `to="year"` / `to="digits"` keep their own reading.
+
 ## [0.4.11] — 2026-10-23
 
 ### Added

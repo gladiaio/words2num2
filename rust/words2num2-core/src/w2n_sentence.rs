@@ -2539,6 +2539,58 @@ fn run_tail(s: &str) -> &str {
     &s[core.len()..]
 }
 
+/// A figure the walker does not read, immediately followed by a written number,
+/// is written out in words so that the walker reads the whole quantity:
+/// "20 thirteen" -> "twenty thirteen" -> `2013`, "25 hundred" -> "twenty five
+/// hundred" -> `2500`, "10 thousand" -> `10000`, "1 thousand five hundred" ->
+/// `1500`. ASR output writes a number that way when the speaker runs it into the
+/// next words, and the walker opens a run on number words only, so the figure
+/// was left standing on its own.
+///
+/// Only a plain cardinal walk in an English variant reaches this: the other
+/// languages read figures through their own table, and `to="year"` /
+/// `to="digits"` keep their own reading. A figure with a leading zero is a digit
+/// string ("007"), not a number, and keeps its zeros; punctuation around the
+/// figure keeps the part a non-number and is left alone.
+fn en_join_figures_into_words(parts: &mut [String]) {
+    let Some(renderer) = num2words2_core::get_lang_by_key("en") else {
+        return;
+    };
+    for i in 0..parts.len() {
+        let token = &parts[i];
+        if token.is_empty() || !token.bytes().all(|b| b.is_ascii_digit()) {
+            continue;
+        }
+        if token.len() > 1 && token.starts_with('0') {
+            continue;
+        }
+        let Some(j) = (i + 1..parts.len()).find(|&k| !py_str_isspace(&parts[k])) else {
+            continue;
+        };
+        // A written number or a scale word ("hundred", "thousand", "million"):
+        // the walker opens no run on a scale word alone, so the words it is
+        // joined to are what makes it read ("25 hundred" -> "twenty five
+        // hundred" -> 2500).
+        let next = crate::normalize(rstrip_punct(&parts[j]));
+        // `scale_words` holds the renderer's scales, 1000 and up: the hundred
+        // is a unit word there, not a scale, so it is named here.
+        let scale = matches!(next.as_str(), "hundred" | "hundreds")
+            || crate::scale_words("en")
+                .into_iter()
+                .any(|(word, _)| crate::normalize(&word) == next);
+        if en_number_words(parts, j).is_empty() && !scale {
+            continue;
+        }
+        let Ok(value) = token.parse::<i64>() else {
+            continue;
+        };
+        let Ok(words) = renderer.to_cardinal(&BigInt::from(value)) else {
+            continue;
+        };
+        parts[i] = words;
+    }
+}
+
 /// A digit string read one digit at a time — an account number, ZIP code or
 /// phone number: "four five six seven" -> "4567", "zero six one two" ->
 /// "0612". Consecutive single-digit words (zero, one..nine), no tens or scale
@@ -6017,7 +6069,13 @@ fn words2num_sentence_walk(
 
     let percent = percent_phrase(&resolved);
 
-    let (parts, glue) = tokens::split_parts(sentence, &converter, &resolved);
+    let (mut parts, glue) = tokens::split_parts(sentence, &converter, &resolved);
+    // A figure right before a written number is read as part of it (see
+    // `en_join_figures_into_words`); the part is replaced in place, so the
+    // glue and the part count stay what the rest of the walk expects.
+    if en_grammar && plain {
+        en_join_figures_into_words(&mut parts);
+    }
     // The separator to write before a number that follows a proclitic part
     // (he "ב-1999") and after one that precedes a case ending (tr "3'te").
     let sep_before = |i: usize| match i.checked_sub(1).map(|k| glue[k]) {
