@@ -23,7 +23,7 @@ LINTERS = black==26.10.0 isort==9.0.2 flake8==7.4.1 mypy==2.4.0
 
 install-dev:
 	pip install -e .
-	pip install pytest pytest-cov num2words2 build twine $(LINTERS)
+	pip install pytest pytest-cov "num2words2==1.0.20" build twine $(LINTERS)
 
 test:
 	pytest tests/

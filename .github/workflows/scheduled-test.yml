@@ -38,7 +38,7 @@ jobs:
         pip install pytest pytest-cov
         # tests/test_multilang.py round-trips the published renderer through
         # this parser; without it the whole file is skipped.
-        pip install num2words2
+        pip install "num2words2==1.0.20"  # the crate embeds num2words2-core 0.1.3; 1.0.21 renders words it cannot parse
         pip install -e .
 
     - name: Run tests

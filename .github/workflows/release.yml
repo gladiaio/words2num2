@@ -173,7 +173,7 @@ jobs:
         run: |
           set -euo pipefail
           python -m pip install --upgrade pip
-          python -m pip install pytest num2words2
+          python -m pip install pytest "num2words2==1.0.20"
           python -m pip install --only-binary :all: --no-index --find-links dist words2num2
       - name: Run the test suite against the installed wheel
         shell: bash
@@ -213,7 +213,7 @@ jobs:
         run: |
           set -euo pipefail
           python -m pip install --upgrade pip
-          python -m pip install pytest num2words2
+          python -m pip install pytest "num2words2==1.0.20"
           python -m pip install dist/*.tar.gz
           cp -r tests REFERENCE.md "$RUNNER_TEMP/"
           cd "$RUNNER_TEMP"
